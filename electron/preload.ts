@@ -66,6 +66,11 @@ contextBridge.exposeInMainWorld('attozap', {
     update: (id: string, payload: any) => ipcRenderer.invoke('autoreply:update', id, payload),
     remove: (id: string) => ipcRenderer.invoke('autoreply:remove', id),
   },
+  license: {
+    status: () => ipcRenderer.invoke('license:status'),
+    activate: (encoded: string) => ipcRenderer.invoke('license:activate', encoded),
+    deactivate: () => ipcRenderer.invoke('license:deactivate'),
+  },
   files: {
     pick: (options?: any) => ipcRenderer.invoke('files:pick', options),
   },
