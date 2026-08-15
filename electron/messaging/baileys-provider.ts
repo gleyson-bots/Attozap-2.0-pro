@@ -6,6 +6,7 @@ import makeWASocket, {
   type WAMessage,
   type WASocket,
 } from '@whiskeysockets/baileys';
+import { randomUUID } from 'node:crypto';
 import P from 'pino';
 import type {
   ContactCardInput,
@@ -85,7 +86,7 @@ export class BaileysProvider implements MessagingProvider {
         const remoteJid = message.key.remoteJid;
         if (!remoteJid || remoteJid === 'status@broadcast') continue;
         const incoming: IncomingMessage = {
-          id: message.key.id ?? crypto.randomUUID(),
+          id: message.key.id ?? randomUUID(),
           remoteJid,
           participant: message.key.participant ?? undefined,
           text: messageText(message),
@@ -125,7 +126,7 @@ export class BaileysProvider implements MessagingProvider {
     this.socket = null;
     if (!socket) return;
     if (logout) await socket.logout().catch(() => undefined);
-    else socket.end(undefined);
+    else socket.end(new Error('Manual disconnect'));
   }
 
   private requireSocket() {
@@ -244,7 +245,7 @@ export class BaileysProvider implements MessagingProvider {
   async verifyGroupInvite(invite: string): Promise<GroupInviteInfo> {
     const code = inviteCode(invite);
     const group = await this.requireSocket().groupGetInviteInfo(code);
-    return { id: group.id, subject: group.subject, description: group.desc, size: group.size ?? group.participants.length, owner: group.owner, inviteCode: code };
+    return { id: group.id, subject: group.subject, description: group.desc, size: group.participants.length, owner: group.owner, inviteCode: code };
   }
 
   async getGroupInvite(groupJid: string) {
