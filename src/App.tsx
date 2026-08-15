@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Activity, Ban, Bot, CalendarClock, ChevronRight, ContactRound, FileSearch, FileText, Gauge, Group,
+  Activity, Ban, BarChart3, Bot, CalendarClock, ChevronRight, ContactRound, FileSearch, FileText, Gauge, Group,
   KeyRound, LayoutDashboard, Menu, MessageSquareText, Moon, Search, Send, Settings,
   ShieldCheck, Sun, Users, Wifi, Wrench, X, Zap,
 } from 'lucide-react';
@@ -11,11 +11,12 @@ import { ContactGrabberPage } from './pages/ContactGrabberPage';
 import { GroupToolsPage } from './pages/GroupToolsPage';
 import { BulkGroupsPage } from './pages/BulkGroupsPage';
 import { TemplatesPage } from './pages/TemplatesPage';
+import { PollReportPage } from './pages/PollReportPage';
 import { AutoReplyPage, SchedulerPage } from './pages/AutomationPages';
 import { LicenseActivationPage } from './pages/LicensePage';
 import { campaignPercent, toLocalDateTime } from './lib';
 
-type View = 'dashboard'|'sender'|'groupSender'|'scheduler'|'templates'|'accounts'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'extractors'|'license'|'settings';
+type View = 'dashboard'|'sender'|'groupSender'|'scheduler'|'templates'|'pollReport'|'accounts'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'extractors'|'license'|'settings';
 type NavItem = { id: View; label: string; icon: any };
 
 const sections: Array<{ label: string; items: NavItem[] }> = [
@@ -25,6 +26,7 @@ const sections: Array<{ label: string; items: NavItem[] }> = [
     { id: 'groupSender', label: 'Group Sender', icon: Group },
     { id: 'scheduler', label: 'Agendamentos', icon: CalendarClock },
     { id: 'templates', label: 'Templates', icon: FileText },
+    { id: 'pollReport', label: 'Poll Report', icon: BarChart3 },
   ] },
   { label: 'WHATSAPP', items: [
     { id: 'accounts', label: 'Contas', icon: Wifi },
@@ -109,6 +111,7 @@ export default function App() {
         {view === 'groupSender' && <SenderPage mode="group" accounts={accounts} campaigns={campaigns} reloadCampaigns={reloadCampaigns}/>} 
         {view === 'scheduler' && <SchedulerPage campaigns={campaigns}/>} 
         {view === 'templates' && <TemplatesPage/>} 
+        {view === 'pollReport' && <PollReportPage accounts={accounts}/>} 
         {view === 'accounts' && <AccountsPage accounts={accounts} reload={reloadAccounts}/>} 
         {view === 'contacts' && <ContactsPage/>} 
         {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} 
@@ -152,6 +155,7 @@ function Dashboard({ accounts, campaigns, go }: { accounts: any[]; campaigns: an
       <button onClick={() => go('groups')}><Users size={18}/><span><b>Group Tools</b><small>Membros e convites</small></span></button>
       <button onClick={() => go('bulkGroups')}><Group size={18}/><span><b>Bulk Groups</b><small>Criar/adicionar em lote</small></span></button>
       <button onClick={() => go('templates')}><FileText size={18}/><span><b>Templates</b><small>Mensagens reutilizáveis</small></span></button>
+      <button onClick={() => go('pollReport')}><BarChart3 size={18}/><span><b>Poll Report</b><small>Resultados de enquetes</small></span></button>
       <button onClick={() => go('autoReply')}><Bot size={18}/><span><b>Auto Reply</b><small>Respostas automáticas</small></span></button>
       <button onClick={() => go('contacts')}><Ban size={18}/><span><b>Listas</b><small>Block & Friendly</small></span></button>
     </section>
