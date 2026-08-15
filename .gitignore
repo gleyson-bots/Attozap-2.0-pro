@@ -9,7 +9,10 @@ release/
 .env
 .env.*
 !.env.example
+.secrets/
 *.private.pem
+*.license
+*.license.txt
 sessions/
 auth_info/
 .DS_Store
