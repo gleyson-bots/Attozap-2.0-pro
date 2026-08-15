@@ -1,0 +1,46 @@
+name: Windows Portable Release
+
+on:
+  push:
+    branches: ["feat/foundation-v2", "main"]
+  workflow_dispatch:
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build application
+        run: npm run build
+      - name: Build WASender portable
+        run: npx electron-builder --win portable --x64 --publish never
+      - name: Build KeyGen portable
+        run: npx electron-builder --config keygen-builder.yml --win portable --x64 --publish never
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          $app = Get-ChildItem release -Filter 'ATTOZAP-WASender-Pro-*.exe' | Select-Object -First 1
+          $keygen = Get-ChildItem release-keygen -Filter 'ATTOZAP-KeyGen-*.exe' | Select-Object -First 1
+          if (-not $app) { throw 'WASender portable executable was not generated' }
+          if (-not $keygen) { throw 'KeyGen portable executable was not generated' }
+          Write-Host "APP=$($app.FullName) SIZE=$($app.Length)"
+          Write-Host "KEYGEN=$($keygen.FullName) SIZE=$($keygen.Length)"
+      - name: Upload WASender portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATTOZAP-WASender-Pro-portable
+          path: release/ATTOZAP-WASender-Pro-*.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload KeyGen portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATTOZAP-KeyGen-portable
+          path: release-keygen/ATTOZAP-KeyGen-*.exe
+          if-no-files-found: error
+          retention-days: 30
