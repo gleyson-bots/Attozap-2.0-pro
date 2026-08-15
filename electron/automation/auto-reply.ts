@@ -77,9 +77,19 @@ export class AutoReplyEngine {
     this.processed.add(message.id);
     if (this.processed.size > 5000) this.processed.clear();
 
-    const phone = message.remoteJid.split('@')[0].split(':')[0];
-    const contact = this.db.prepare(`SELECT is_blocked FROM contacts WHERE phone=?`).get(phone) as any;
-    if (contact?.is_blocked) return;
+    const provider = this.accounts.provider(accountId);
+    let phone: string | undefined;
+    try {
+      const identity = await provider.resolveIdentity(message.remoteJid, message.remoteJidAlt);
+      phone = identity.phone;
+    } catch {
+      // LID-only identities are valid. Do not convert their numeric user part into a fake phone number.
+    }
+
+    if (phone) {
+      const contact = this.db.prepare(`SELECT is_blocked FROM contacts WHERE phone=?`).get(phone) as any;
+      if (contact?.is_blocked) return;
+    }
 
     const rules = this.db.prepare(`
       SELECT * FROM auto_reply_rules WHERE account_id=? AND enabled=1 ORDER BY priority DESC, created_at ASC
@@ -88,8 +98,14 @@ export class AutoReplyEngine {
     if (!rule) return;
 
     try {
-      await this.accounts.provider(accountId).sendText(message.remoteJid, rule.response_text);
-      this.audit('autoreply.sent', rule.id, { accountId, remoteJid: message.remoteJid, incomingMessageId: message.id });
+      await provider.sendText(message.remoteJid, rule.response_text);
+      this.audit('autoreply.sent', rule.id, {
+        accountId,
+        remoteJid: message.remoteJid,
+        remoteJidAlt: message.remoteJidAlt,
+        addressingMode: message.addressingMode,
+        incomingMessageId: message.id,
+      });
     } catch (error) {
       this.audit('autoreply.failed', rule.id, { message: error instanceof Error ? error.message : String(error) });
     }
