@@ -8,6 +8,7 @@ import { AutoReplyEngine } from './automation/auto-reply.js';
 import { WaSenderTools } from './tools/wasender-tools.js';
 import { LicenseService } from './license-service.js';
 import { registerIpc } from './ipc.js';
+import { registerExtractorIpc } from './extractor-ipc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -51,6 +52,7 @@ app.whenReady().then(async () => {
 
   const window = await createWindow();
   registerIpc({ window, db, accounts, campaigns, autoReply, tools, license });
+  registerExtractorIpc();
 
   scheduler = setInterval(() => {
     void campaigns.runDueSchedules().catch(error => console.error('[scheduler]', error));
