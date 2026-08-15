@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { AccountsPage } from './pages/AccountsPage';
 import { SenderPage } from './pages/SenderPage';
-import { ContactsPage, NumberFilterPage } from './pages/ToolsPages';
+import { NumberFilterPage } from './pages/ToolsPages';
+import { ContactsPage } from './pages/ContactsPage';
 import { ContactGrabberPage } from './pages/ContactGrabberPage';
 import { GroupToolsPage } from './pages/GroupToolsPage';
 import { BulkGroupsPage } from './pages/BulkGroupsPage';
