@@ -12,6 +12,7 @@ declare global {
       groups: any;
       templates: any;
       polls: any;
+      extractors: any;
       autoReply: any;
       license: any;
       files: any;
