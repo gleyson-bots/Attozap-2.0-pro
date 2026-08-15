@@ -68,6 +68,12 @@ contextBridge.exposeInMainWorld('attozap', {
     verifyMany: (accountId: string, invites: string[]) => ipcRenderer.invoke('groups:verify-many', accountId, invites),
     invite: (accountId: string, groupJid: string) => ipcRenderer.invoke('groups:invite', accountId, groupJid),
   },
+  templates: {
+    list: () => ipcRenderer.invoke('templates:list'),
+    create: (payload: any) => ipcRenderer.invoke('templates:create', payload),
+    update: (id: string, payload: any) => ipcRenderer.invoke('templates:update', id, payload),
+    remove: (id: string) => ipcRenderer.invoke('templates:remove', id),
+  },
   autoReply: {
     list: (accountId?: string) => ipcRenderer.invoke('autoreply:list', accountId),
     create: (payload: any) => ipcRenderer.invoke('autoreply:create', payload),
