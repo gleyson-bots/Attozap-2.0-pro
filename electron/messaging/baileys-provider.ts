@@ -1,6 +1,7 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  getAggregateVotesInPollMessage,
   isLidUser,
   isPnUser,
   jidNormalizedUser,
@@ -78,6 +79,7 @@ export class BaileysProvider implements MessagingProvider {
   private manuallyClosing = false;
   private events: ProviderEvents = {};
   private proxyUrl?: string;
+  private readonly pollCreations = new Map<string, { remoteJid: string; question: string; message: NonNullable<WAMessage['message']> }>();
 
   constructor(private readonly authDirectory: string, proxyUrl?: string) {
     this.proxyUrl = validateProxy(proxyUrl);
@@ -126,6 +128,28 @@ export class BaileysProvider implements MessagingProvider {
           timestamp: Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)) * 1000,
         };
         this.events.onMessage?.(incoming);
+      }
+    });
+
+    socket.ev.on('messages.update', updates => {
+      for (const { key, update } of updates) {
+        if (!key.id || !update.pollUpdates?.length) continue;
+        const creation = this.pollCreations.get(key.id);
+        if (!creation) continue;
+        try {
+          const aggregate = getAggregateVotesInPollMessage({
+            message: creation.message,
+            pollUpdates: update.pollUpdates,
+          }) as Array<{ name?: string; voters?: string[] }>;
+          this.events.onPollUpdate?.({
+            pollId: key.id,
+            remoteJid: key.remoteJid ?? creation.remoteJid,
+            question: creation.question,
+            votes: aggregate.map(item => ({ name: String(item.name ?? ''), voters: (item.voters ?? []).map(String) })),
+          });
+        } catch (error) {
+          this.events.onError?.(error instanceof Error ? error : new Error(String(error)));
+        }
       }
     });
 
@@ -243,9 +267,13 @@ export class BaileysProvider implements MessagingProvider {
   }
 
   async sendPoll(remoteJid: string, input: PollInput) {
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
+    const result = await this.requireSocket().sendMessage(userJid(remoteJid), {
       poll: { name: input.name, values: input.values, selectableCount: input.selectableCount ?? 1 },
-    }));
+    });
+    if (result?.key.id && result.message) {
+      this.pollCreations.set(result.key.id, { remoteJid: result.key.remoteJid ?? userJid(remoteJid), question: input.name, message: result.message });
+    }
+    return receipt(result);
   }
 
   async checkNumbers(numbers: string[]): Promise<ContactPresence[]> {
