@@ -8,6 +8,11 @@ export type ImportedContact = {
 };
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
+function phoneFromJid(jid: string) {
+  if (!jid.endsWith('@s.whatsapp.net')) return undefined;
+  const value = jid.split('@')[0]?.split(':')[0] ?? '';
+  return /^\d{6,15}$/.test(value) ? value : undefined;
+}
 
 export class WaSenderTools {
   constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager) {}
@@ -39,6 +44,57 @@ export class WaSenderTools {
       SELECT * FROM contacts WHERE (?='' OR phone LIKE ? OR COALESCE(name,'') LIKE ?)
       ORDER BY COALESCE(name,''), phone LIMIT 5000
     `).all(search.trim(), q, q);
+  }
+
+  listObservedChats(accountId: string, includeGroups = false) {
+    const rows = this.db.prepare(`
+      SELECT account_id, jid, name, is_group, message_count, first_message_at, last_message_at
+      FROM chat_cache
+      WHERE account_id=? AND (?=1 OR is_group=0)
+      ORDER BY last_message_at DESC
+      LIMIT 10000
+    `).all(accountId, includeGroups ? 1 : 0) as Array<{
+      account_id: string;
+      jid: string;
+      name: string | null;
+      is_group: number;
+      message_count: number;
+      first_message_at: string;
+      last_message_at: string;
+    }>;
+    return rows.map(row => ({
+      accountId: row.account_id,
+      jid: row.jid,
+      phone: phoneFromJid(row.jid),
+      name: row.name ?? undefined,
+      isGroup: Boolean(row.is_group),
+      messageCount: row.message_count,
+      firstMessageAt: row.first_message_at,
+      lastMessageAt: row.last_message_at,
+      importable: Boolean(phoneFromJid(row.jid)),
+    }));
+  }
+
+  grabContactsFromChats(accountId: string) {
+    const chats = this.listObservedChats(accountId, false);
+    const upsert = this.db.prepare(`
+      INSERT INTO contacts (phone, name, variables_json) VALUES (?, ?, '{}')
+      ON CONFLICT(phone) DO UPDATE SET
+        name=COALESCE(excluded.name, contacts.name),
+        updated_at=CURRENT_TIMESTAMP
+    `);
+    let imported = 0;
+    let skipped = 0;
+    const tx = this.db.transaction(() => {
+      for (const chat of chats) {
+        if (!chat.phone) { skipped++; continue; }
+        upsert.run(chat.phone, chat.name?.trim() || null);
+        imported++;
+      }
+    });
+    tx();
+    this.audit('contacts.grab-chats', accountId, { imported, skipped, observed: chats.length });
+    return { imported, skipped, observed: chats.length };
   }
 
   setBlocked(phone: string, blocked: boolean) {
@@ -168,5 +224,12 @@ export class WaSenderTools {
 
   async groupInvite(accountId: string, groupJid: string) {
     return this.accounts.provider(accountId).getGroupInvite(groupJid);
+  }
+
+  private audit(action: string, entityId: string, metadata?: unknown) {
+    this.db.prepare(`
+      INSERT INTO audit_log (actor, action, entity_type, entity_id, metadata_json)
+      VALUES ('local-user', ?, 'tool', ?, ?)
+    `).run(action, entityId, metadata ? JSON.stringify(metadata) : null);
   }
 }
