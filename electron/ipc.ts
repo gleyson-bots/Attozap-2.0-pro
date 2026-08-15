@@ -5,6 +5,7 @@ import type { AccountManager } from './messaging/account-manager.js';
 import type { CampaignEngine, CreateCampaignInput } from './campaigns/engine.js';
 import type { AutoReplyEngine, AutoReplyRuleInput } from './automation/auto-reply.js';
 import type { WaSenderTools, ImportedContact } from './tools/wasender-tools.js';
+import type { LicenseService } from './license-service.js';
 
 function send(window: BrowserWindow, channel: string, payload: unknown) {
   if (!window.isDestroyed()) window.webContents.send(channel, payload);
@@ -17,8 +18,9 @@ export function registerIpc(input: {
   campaigns: CampaignEngine;
   autoReply: AutoReplyEngine;
   tools: WaSenderTools;
+  license: LicenseService;
 }) {
-  const { window, db, accounts, campaigns, autoReply, tools } = input;
+  const { window, db, accounts, campaigns, autoReply, tools, license } = input;
 
   ipcMain.handle('accounts:list', () => accounts.list());
   ipcMain.handle('accounts:create', (_event, name: string) => accounts.create(name));
@@ -78,6 +80,10 @@ export function registerIpc(input: {
   ipcMain.handle('autoreply:create', (_event, payload: AutoReplyRuleInput) => autoReply.create(payload));
   ipcMain.handle('autoreply:update', (_event, id: string, payload: Partial<AutoReplyRuleInput>) => autoReply.update(id, payload));
   ipcMain.handle('autoreply:remove', (_event, id: string) => autoReply.remove(id));
+
+  ipcMain.handle('license:status', () => license.status());
+  ipcMain.handle('license:activate', (_event, encoded: string) => license.activate(encoded));
+  ipcMain.handle('license:deactivate', () => license.deactivate());
 
   ipcMain.handle('files:pick', async (_event, options?: { multiple?: boolean; filters?: Array<{ name: string; extensions: string[] }> }) => {
     const result = await dialog.showOpenDialog(window, {
