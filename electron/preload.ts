@@ -46,6 +46,10 @@ contextBridge.exposeInMainWorld('attozap', {
     blocked: () => ipcRenderer.invoke('contacts:blocked'),
     friendlyList: () => ipcRenderer.invoke('contacts:friendly-list'),
   },
+  chats: {
+    list: (accountId: string, includeGroups = false) => ipcRenderer.invoke('chats:list', accountId, includeGroups),
+    grabContacts: (accountId: string) => ipcRenderer.invoke('chats:grab-contacts', accountId),
+  },
   tools: {
     filterNumbers: (accountId: string, numbers: string[]) => ipcRenderer.invoke('tools:filter-numbers', accountId, numbers),
     generateNumbers: (payload: any) => ipcRenderer.invoke('tools:generate-numbers', payload),
