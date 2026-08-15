@@ -24,11 +24,21 @@ async function createWindow() {
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
     webPreferences: {
-      preload: join(__dirname, 'preload.js'),
+      preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
     },
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
+    console.error('[renderer:did-fail-load]', { code, description, url });
+  });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[renderer:gone]', details);
+  });
+  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
+    console.error('[renderer:preload-error]', { preloadPath, error });
   });
 
   if (!app.isPackaged) await mainWindow.loadURL('http://localhost:5173');
