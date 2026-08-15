@@ -12,6 +12,7 @@ import { GroupToolsPage } from './pages/GroupToolsPage';
 import { BulkGroupsPage } from './pages/BulkGroupsPage';
 import { TemplatesPage } from './pages/TemplatesPage';
 import { PollReportPage } from './pages/PollReportPage';
+import { ExtractorsPage } from './pages/ExtractorsPage';
 import { AutoReplyPage, SchedulerPage } from './pages/AutomationPages';
 import { LicenseActivationPage } from './pages/LicensePage';
 import { campaignPercent, toLocalDateTime } from './lib';
@@ -168,23 +169,6 @@ function Metric({ icon: Icon, label, value, sub }: { icon: any; label: string; v
 
 function Empty({ text }: { text: string }) {
   return <div className="empty mini"><MessageSquareText size={23}/><p>{text}</p></div>;
-}
-
-function ExtractorsPage() {
-  return <div className="page-stack">
-    <div className="page-head"><div><span className="kicker">EXTRACTORS</span><h2>Extratores auxiliares</h2><p>Ferramentas externas do WASender ficam isoladas do motor de mensagens para não derrubar campanhas.</p></div></div>
-    <div className="extractor-grid">
-      <ToolCard title="Google Maps Extractor" text="Empresas, telefone, site, categoria, coordenadas e links sociais."/>
-      <ToolCard title="Website Email / Mobile" text="Vasculha páginas públicas indicadas pelo usuário e coleta contatos encontrados."/>
-      <ToolCard title="Social Media Extractor" text="Organiza URLs e dados públicos de perfis informados."/>
-      <ToolCard title="Google Contacts CSV" text="Converte sua lista de números para CSV compatível com importação de contatos."/>
-    </div>
-    <div className="notice info">Esses extratores ficam separados do Baileys. O motor de WhatsApp continua funcionando mesmo quando uma fonte externa muda.</div>
-  </div>;
-}
-
-function ToolCard({ title, text }: { title: string; text: string }) {
-  return <article className="card tool-card"><div className="tool-icon"><Wrench size={19}/></div><h3>{title}</h3><p>{text}</p><span className="status-chip planned">Reconstrução em andamento</span></article>;
 }
 
 function SettingsPage({ accounts }: { accounts: any[] }) {
