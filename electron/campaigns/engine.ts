@@ -50,6 +50,7 @@ export type CreateCampaignInput = {
 type RuntimeState = { paused: boolean; stopped: boolean };
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
+function isJid(value: string) { return value.includes('@'); }
 function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function randomDelay(minInput: number | undefined, maxInput: number | undefined, fallbackMin: number, fallbackMax: number) {
@@ -67,9 +68,11 @@ function partDelay(options: CampaignOptions) {
 }
 
 export function renderTemplate(template: string, recipient: CampaignRecipient) {
+  const inferredPhone = isJid(recipient.target) ? '' : digits(recipient.target);
   const values: Record<string, string> = {
     name: recipient.name ?? '',
-    phone: digits(recipient.target),
+    phone: recipient.variables?.phone ?? inferredPhone,
+    jid: recipient.target,
     ...(recipient.variables ?? {}),
   };
   return template
@@ -151,14 +154,19 @@ export class CampaignEngine extends EventEmitter {
 
     try {
       let allowedNumbers: Set<string> | undefined;
+      const resolvedTargets = new Map<string, string>();
       if (targetType === 'contact' && options.filterBeforeSend) {
-        const checked = await providers[0].provider.checkNumbers(rows.map(row => row.target));
+        const plainNumbers = rows.map(row => String(row.target)).filter(target => !isJid(target)).map(digits).filter(Boolean);
+        const checked = plainNumbers.length ? await providers[0].provider.checkNumbers(plainNumbers) : [];
         allowedNumbers = new Set(checked.filter(item => item.exists).map(item => digits(item.input)));
         const upsert = this.db.prepare(`
           INSERT INTO contacts (phone, wa_exists, last_checked_at) VALUES (?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(phone) DO UPDATE SET wa_exists=excluded.wa_exists, last_checked_at=CURRENT_TIMESTAMP
         `);
-        for (const item of checked) upsert.run(digits(item.input), item.exists ? 1 : 0);
+        for (const item of checked) {
+          upsert.run(digits(item.input), item.exists ? 1 : 0);
+          if (item.exists && item.jid) resolvedTargets.set(digits(item.input), item.jid);
+        }
       }
 
       let processedRecipients = 0;
@@ -167,20 +175,22 @@ export class CampaignEngine extends EventEmitter {
         while (state.paused && !state.stopped) await sleep(250);
         if (state.stopped) break;
 
+        const originalTarget = String(row.target).trim();
+        const sendTarget = isJid(originalTarget) ? originalTarget : resolvedTargets.get(digits(originalTarget)) ?? originalTarget;
         const recipient: CampaignRecipient = {
-          target: row.target,
+          target: sendTarget,
           name: row.name ?? undefined,
           variables: JSON.parse(row.variables_json || '{}'),
         };
 
-        const listState = targetType === 'contact' ? this.contactListState(row.target) : { blocked: false, friendly: false };
+        const listState = targetType === 'contact' ? this.contactListState(originalTarget) : { blocked: false, friendly: false };
         if ((options.skipBlocked !== false && listState.blocked) || (options.friendlyOnly && !listState.friendly)) {
           this.markRecipient(row.id, 'skipped', options.friendlyOnly ? 'Fora da friendly list' : 'Blocklist');
           this.increment(id, 'skipped');
           this.emitProgress(id);
           continue;
         }
-        if (allowedNumbers && !allowedNumbers.has(digits(row.target))) {
+        if (allowedNumbers && !isJid(originalTarget) && !allowedNumbers.has(digits(originalTarget))) {
           this.markRecipient(row.id, 'skipped', 'Número não localizado no WhatsApp');
           this.increment(id, 'skipped');
           this.emitProgress(id);
@@ -201,12 +211,12 @@ export class CampaignEngine extends EventEmitter {
 
           for (let index = 0; index < selectedMessages.length; index++) {
             const text = renderTemplate(selectedMessages[index], recipient).trim();
-            if (text) messageId = (await selected.provider.sendText(row.target, text)).id;
+            if (text) messageId = (await selected.provider.sendText(sendTarget, text)).id;
             if (index < selectedMessages.length - 1) await sleep(partDelay(options));
           }
 
           for (let index = 0; index < parts.length; index++) {
-            const result = await this.sendPart(selected.provider, row.target, parts[index], recipient);
+            const result = await this.sendPart(selected.provider, sendTarget, parts[index], recipient);
             messageId = result.id;
             if (index < parts.length - 1) await sleep(partDelay(options));
           }
@@ -304,8 +314,18 @@ export class CampaignEngine extends EventEmitter {
     }
   }
 
-  private contactListState(phone: string) {
-    const row = this.db.prepare(`SELECT is_blocked, is_friendly FROM contacts WHERE phone=?`).get(digits(phone)) as any;
+  private contactListState(target: string) {
+    let phone = isJid(target) ? undefined : digits(target);
+    if (!phone && isJid(target)) {
+      const identity = this.db.prepare(`
+        SELECT phone FROM wa_identities
+        WHERE canonical_jid=? OR lid=? OR pn_jid=?
+        ORDER BY last_seen_at DESC LIMIT 1
+      `).get(target, target, target) as { phone?: string | null } | undefined;
+      phone = identity?.phone ?? undefined;
+    }
+    if (!phone) return { blocked: false, friendly: false };
+    const row = this.db.prepare(`SELECT is_blocked, is_friendly FROM contacts WHERE phone=?`).get(phone) as any;
     return { blocked: Boolean(row?.is_blocked), friendly: Boolean(row?.is_friendly) };
   }
 
