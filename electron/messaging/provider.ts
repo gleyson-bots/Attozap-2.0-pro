@@ -17,6 +17,7 @@ export type IncomingMessage = {
   id: string;
   remoteJid: string;
   participant?: string;
+  pushName?: string;
   text: string;
   fromMe: boolean;
   timestamp: number;
