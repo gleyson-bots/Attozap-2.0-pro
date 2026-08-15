@@ -99,6 +99,7 @@ export interface MessagingProvider {
   readonly id: string;
   connect(events?: ProviderEvents): Promise<void>;
   disconnect(logout?: boolean): Promise<void>;
+  setProxy?(proxyUrl?: string): void;
   sendText(remoteJid: string, text: string): Promise<MessageResult>;
   sendImage(remoteJid: string, input: SendMediaInput): Promise<MessageResult>;
   sendVideo(remoteJid: string, input: SendMediaInput): Promise<MessageResult>;
