@@ -11,6 +11,7 @@ declare global {
       tools: any;
       groups: any;
       templates: any;
+      polls: any;
       autoReply: any;
       license: any;
       files: any;
