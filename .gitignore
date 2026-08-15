@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dist-electron/
+release/
+*.log
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example
+*.private.pem
+sessions/
+auth_info/
+.DS_Store
+Thumbs.db
