@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from '../messaging/account-manager.js';
-import type { ContactCardInput, LocationInput, PollInput, SendMediaInput } from '../messaging/provider.js';
+import type { ContactCardInput, LocationInput, MessagingProvider, PollInput, SendMediaInput } from '../messaging/provider.js';
 
 export type CampaignRecipient = {
   target: string;
@@ -23,16 +23,25 @@ export type CampaignPart =
 export type CampaignOptions = {
   minDelayMs?: number;
   maxDelayMs?: number;
+  minPartDelayMs?: number;
+  maxPartDelayMs?: number;
   filterBeforeSend?: boolean;
   skipBlocked?: boolean;
   friendlyOnly?: boolean;
+  messages?: string[];
+  messageMode?: 'all' | 'rotate';
+  accountIds?: string[];
+  switchAccountAfterRecipients?: number;
 };
 
 export type CreateCampaignInput = {
   accountId: string;
+  accountIds?: string[];
   name: string;
   targetType?: 'contact' | 'group';
   messageTemplate?: string;
+  messageTemplates?: string[];
+  messageMode?: 'all' | 'rotate';
   recipients: CampaignRecipient[];
   parts?: CampaignPart[];
   options?: CampaignOptions;
@@ -43,10 +52,18 @@ type RuntimeState = { paused: boolean; stopped: boolean };
 function digits(value: string) { return value.replace(/\D/g, ''); }
 function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-function delay(options: CampaignOptions) {
-  const min = Math.max(500, options.minDelayMs ?? 1500);
-  const max = Math.max(min, options.maxDelayMs ?? 3000);
+function randomDelay(minInput: number | undefined, maxInput: number | undefined, fallbackMin: number, fallbackMax: number) {
+  const min = Math.max(0, minInput ?? fallbackMin);
+  const max = Math.max(min, maxInput ?? fallbackMax);
   return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+function recipientDelay(options: CampaignOptions) {
+  return randomDelay(options.minDelayMs, options.maxDelayMs, 1500, 3000);
+}
+
+function partDelay(options: CampaignOptions) {
+  return randomDelay(options.minPartDelayMs, options.maxPartDelayMs, 350, 800);
 }
 
 export function renderTemplate(template: string, recipient: CampaignRecipient) {
@@ -58,6 +75,10 @@ export function renderTemplate(template: string, recipient: CampaignRecipient) {
   return template
     .replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, key: string) => values[key] ?? '')
     .replace(/\{([\w.-]+)\}/g, (_, key: string) => values[key] ?? '');
+}
+
+function uniqueStrings(values: Array<string | undefined>) {
+  return [...new Set(values.map(value => value?.trim()).filter((value): value is string => Boolean(value)))];
 }
 
 export class CampaignEngine extends EventEmitter {
@@ -72,12 +93,20 @@ export class CampaignEngine extends EventEmitter {
     const id = randomUUID();
     const targetType = input.targetType ?? 'contact';
     const parts = input.parts ?? [];
-    const options = input.options ?? {};
+    const accountIds = uniqueStrings([...(input.accountIds ?? []), input.accountId]);
+    if (!accountIds.length) throw new Error('Selecione pelo menos uma conta');
+    const messages = uniqueStrings([...(input.messageTemplates ?? []), input.messageTemplate]);
+    const options: CampaignOptions = {
+      ...(input.options ?? {}),
+      messages,
+      messageMode: input.messageMode ?? input.options?.messageMode ?? 'all',
+      accountIds,
+    };
     const tx = this.db.transaction(() => {
       this.db.prepare(`
         INSERT INTO campaigns (id, account_id, name, target_type, message_template, attachments_json, options_json, total)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, input.accountId, input.name.trim() || 'Campanha sem nome', targetType, input.messageTemplate ?? '', JSON.stringify(parts), JSON.stringify(options), input.recipients.length);
+      `).run(id, accountIds[0], input.name.trim() || 'Campanha sem nome', targetType, messages[0] ?? '', JSON.stringify(parts), JSON.stringify(options), input.recipients.length);
       const insertRecipient = this.db.prepare(`
         INSERT INTO campaign_recipients (campaign_id, target, name, variables_json) VALUES (?, ?, ?, ?)
       `);
@@ -86,7 +115,7 @@ export class CampaignEngine extends EventEmitter {
       }
     });
     tx();
-    this.audit('campaign.create', id, { total: input.recipients.length, targetType });
+    this.audit('campaign.create', id, { total: input.recipients.length, targetType, accountIds, messageMode: options.messageMode, messages: messages.length });
     return this.get(id);
   }
 
@@ -107,8 +136,11 @@ export class CampaignEngine extends EventEmitter {
     if (!campaign) throw new Error('Campanha não encontrada');
     if (this.runtime.has(id)) throw new Error('Esta campanha já está em execução');
 
-    const provider = this.accounts.provider(campaign.account_id);
     const options = JSON.parse(campaign.options_json || '{}') as CampaignOptions;
+    const accountIds = uniqueStrings([...(options.accountIds ?? []), campaign.account_id]);
+    const providers = accountIds.map(accountId => ({ accountId, provider: this.accounts.provider(accountId) }));
+    if (!providers.length) throw new Error('Nenhuma conta conectada disponível para a campanha');
+    const messages = uniqueStrings([...(options.messages ?? []), campaign.message_template]);
     const parts = JSON.parse(campaign.attachments_json || '[]') as CampaignPart[];
     const targetType = campaign.target_type as 'contact' | 'group';
     const rows = this.db.prepare(`SELECT * FROM campaign_recipients WHERE campaign_id = ? AND status IN ('pending','failed') ORDER BY id ASC`).all(id) as any[];
@@ -120,7 +152,7 @@ export class CampaignEngine extends EventEmitter {
     try {
       let allowedNumbers: Set<string> | undefined;
       if (targetType === 'contact' && options.filterBeforeSend) {
-        const checked = await provider.checkNumbers(rows.map(row => row.target));
+        const checked = await providers[0].provider.checkNumbers(rows.map(row => row.target));
         allowedNumbers = new Set(checked.filter(item => item.exists).map(item => digits(item.input)));
         const upsert = this.db.prepare(`
           INSERT INTO contacts (phone, wa_exists, last_checked_at) VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -129,6 +161,7 @@ export class CampaignEngine extends EventEmitter {
         for (const item of checked) upsert.run(digits(item.input), item.exists ? 1 : 0);
       }
 
+      let processedRecipients = 0;
       for (const row of rows) {
         if (state.stopped) break;
         while (state.paused && !state.stopped) await sleep(250);
@@ -154,23 +187,41 @@ export class CampaignEngine extends EventEmitter {
           continue;
         }
 
+        const switchEvery = Math.max(0, Math.floor(options.switchAccountAfterRecipients ?? 0));
+        const providerIndex = providers.length === 1 || switchEvery === 0
+          ? 0
+          : Math.floor(processedRecipients / switchEvery) % providers.length;
+        const selected = providers[providerIndex];
+
         try {
           let messageId: string | undefined;
-          const text = renderTemplate(campaign.message_template || '', recipient).trim();
-          if (text) messageId = (await provider.sendText(row.target, text)).id;
-          for (const part of parts) {
-            const result = await this.sendPart(provider, row.target, part, recipient);
-            messageId = result.id;
+          const selectedMessages = options.messageMode === 'rotate' && messages.length
+            ? [messages[Math.floor(Math.random() * messages.length)]]
+            : messages;
+
+          for (let index = 0; index < selectedMessages.length; index++) {
+            const text = renderTemplate(selectedMessages[index], recipient).trim();
+            if (text) messageId = (await selected.provider.sendText(row.target, text)).id;
+            if (index < selectedMessages.length - 1) await sleep(partDelay(options));
           }
+
+          for (let index = 0; index < parts.length; index++) {
+            const result = await this.sendPart(selected.provider, row.target, parts[index], recipient);
+            messageId = result.id;
+            if (index < parts.length - 1) await sleep(partDelay(options));
+          }
+
           this.db.prepare(`UPDATE campaign_recipients SET status='sent', error=NULL, message_id=?, sent_at=CURRENT_TIMESTAMP WHERE id=?`).run(messageId ?? null, row.id);
           this.increment(id, 'sent');
+          processedRecipients++;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          this.markRecipient(row.id, 'failed', message);
+          this.markRecipient(row.id, 'failed', `[${selected.accountId}] ${message}`);
           this.increment(id, 'failed');
+          processedRecipients++;
         }
         this.emitProgress(id);
-        if (!state.stopped) await sleep(delay(options));
+        if (!state.stopped) await sleep(recipientDelay(options));
       }
 
       const finalStatus = state.stopped ? 'stopped' : 'completed';
@@ -239,7 +290,7 @@ export class CampaignEngine extends EventEmitter {
     }
   }
 
-  private async sendPart(provider: ReturnType<AccountManager['provider']>, target: string, part: CampaignPart, recipient: CampaignRecipient) {
+  private async sendPart(provider: MessagingProvider, target: string, part: CampaignPart, recipient: CampaignRecipient) {
     const render = (value?: string) => value ? renderTemplate(value, recipient) : value;
     switch (part.type) {
       case 'image': return provider.sendImage(target, { ...part.input, caption: render(part.input.caption) });
