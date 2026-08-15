@@ -63,8 +63,10 @@ export class AccountManager extends EventEmitter {
   }
 
   setProxy(id: string, proxy?: string) {
-    this.db.prepare(`UPDATE instances SET proxy_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(proxy?.trim() || null, id);
-    this.audit('account.proxy.update', id, { configured: Boolean(proxy?.trim()) });
+    const cleanProxy = proxy?.trim() || undefined;
+    this.providers.get(id)?.setProxy?.(cleanProxy);
+    this.db.prepare(`UPDATE instances SET proxy_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(cleanProxy ?? null, id);
+    this.audit('account.proxy.update', id, { configured: Boolean(cleanProxy) });
     return this.get(id);
   }
 
@@ -73,7 +75,8 @@ export class AccountManager extends EventEmitter {
     if (!account) throw new Error('Conta não encontrada');
 
     const existing = this.providers.get(id);
-    const provider: MessagingProvider = existing ?? new BaileysProvider(join(this.authRoot, id));
+    const provider: MessagingProvider = existing ?? new BaileysProvider(join(this.authRoot, id), account.proxy);
+    provider.setProxy?.(account.proxy);
     if (!existing) this.providers.set(id, provider);
 
     await provider.connect({
