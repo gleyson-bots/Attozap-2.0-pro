@@ -7,6 +7,7 @@ declare global {
       accounts: any;
       campaigns: any;
       contacts: any;
+      chats: any;
       tools: any;
       groups: any;
       autoReply: any;
