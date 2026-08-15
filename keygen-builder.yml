@@ -1,0 +1,18 @@
+appId: com.gleysondevs.attozap.keygen
+productName: ATTOZAP KeyGen
+asar: true
+extraMetadata:
+  main: keygen/main.cjs
+directories:
+  output: release-keygen
+files:
+  - keygen/**/*
+  - package.json
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+  artifactName: ATTOZAP-KeyGen-${version}-${arch}.${ext}
+portable:
+  artifactName: ATTOZAP-KeyGen-${version}-${arch}.${ext}
