@@ -11,6 +11,8 @@ function send(window: BrowserWindow, channel: string, payload: unknown) {
   if (!window.isDestroyed()) window.webContents.send(channel, payload);
 }
 
+function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
 export function registerIpc(input: {
   window: BrowserWindow;
   db: AttozapDatabase;
@@ -79,6 +81,28 @@ export function registerIpc(input: {
   ipcMain.handle('groups:verify', (_event, accountId: string, invite: string) => tools.groupVerify(accountId, invite));
   ipcMain.handle('groups:verify-many', (_event, accountId: string, invites: string[]) => tools.groupVerifyMany(accountId, invites));
   ipcMain.handle('groups:invite', (_event, accountId: string, groupJid: string) => tools.groupInvite(accountId, groupJid));
+
+  ipcMain.handle('groups:create-many', async (_event, accountId: string, jobs: Array<{ subject: string; participants: string[] }>, delayMs = 1000) => {
+    const safeJobs = jobs.slice(0, 25).map(job => ({ subject: job.subject.trim(), participants: [...new Set(job.participants.map(value => value.trim()).filter(Boolean))].slice(0, 500) })).filter(job => job.subject);
+    const results: Array<{ subject: string; ok: boolean; group?: unknown; error?: string }> = [];
+    for (const job of safeJobs) {
+      try { results.push({ subject: job.subject, ok: true, group: await tools.groupCreate(accountId, job.subject, job.participants) }); }
+      catch (error) { results.push({ subject: job.subject, ok: false, error: error instanceof Error ? error.message : String(error) }); }
+      if (delayMs > 0) await sleep(Math.max(250, Math.min(30_000, delayMs)));
+    }
+    return results;
+  });
+
+  ipcMain.handle('groups:add-many', async (_event, accountId: string, jobs: Array<{ groupJid: string; participants: string[] }>, delayMs = 1000) => {
+    const safeJobs = jobs.slice(0, 50).map(job => ({ groupJid: job.groupJid.trim(), participants: [...new Set(job.participants.map(value => value.trim()).filter(Boolean))].slice(0, 500) })).filter(job => job.groupJid && job.participants.length);
+    const results: Array<{ groupJid: string; ok: boolean; result?: unknown; error?: string }> = [];
+    for (const job of safeJobs) {
+      try { results.push({ groupJid: job.groupJid, ok: true, result: await tools.groupAdd(accountId, job.groupJid, job.participants) }); }
+      catch (error) { results.push({ groupJid: job.groupJid, ok: false, error: error instanceof Error ? error.message : String(error) }); }
+      if (delayMs > 0) await sleep(Math.max(250, Math.min(30_000, delayMs)));
+    }
+    return results;
+  });
 
   ipcMain.handle('autoreply:list', (_event, accountId?: string) => autoReply.list(accountId));
   ipcMain.handle('autoreply:create', (_event, payload: AutoReplyRuleInput) => autoReply.create(payload));
