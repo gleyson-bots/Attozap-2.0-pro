@@ -10,6 +10,7 @@ declare global {
       tools: any;
       groups: any;
       autoReply: any;
+      license: any;
       files: any;
       settings: any;
       audit: any;
