@@ -10,6 +10,7 @@ declare global {
       chats: any;
       tools: any;
       groups: any;
+      templates: any;
       autoReply: any;
       license: any;
       files: any;
