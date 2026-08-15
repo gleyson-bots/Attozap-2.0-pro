@@ -53,6 +53,17 @@ export function openDatabase(path: string) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS chat_cache (
+      account_id TEXT NOT NULL,
+      jid TEXT NOT NULL,
+      name TEXT,
+      is_group INTEGER NOT NULL DEFAULT 0,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      first_message_at TEXT NOT NULL,
+      last_message_at TEXT NOT NULL,
+      PRIMARY KEY(account_id, jid),
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS campaigns (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL,
@@ -139,6 +150,7 @@ export function openDatabase(path: string) {
     CREATE INDEX IF NOT EXISTS idx_instances_status ON instances(status);
     CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
     CREATE INDEX IF NOT EXISTS idx_contacts_lists ON contacts(is_blocked, is_friendly);
+    CREATE INDEX IF NOT EXISTS idx_chat_cache_recent ON chat_cache(account_id, is_group, last_message_at DESC);
     CREATE INDEX IF NOT EXISTS idx_campaign_status ON campaigns(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_recipients_campaign_status ON campaign_recipients(campaign_id, status);
     CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(status, run_at);
