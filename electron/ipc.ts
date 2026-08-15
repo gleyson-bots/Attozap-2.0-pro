@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import QRCode from 'qrcode';
+import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from './database.js';
 import type { AccountManager } from './messaging/account-manager.js';
 import type { CampaignEngine, CreateCampaignInput } from './campaigns/engine.js';
@@ -23,6 +24,18 @@ export function registerIpc(input: {
   license: LicenseService;
 }) {
   const { window, db, accounts, campaigns, autoReply, tools, license } = input;
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS message_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      category TEXT,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_message_templates_name ON message_templates(name, category);
+  `);
 
   ipcMain.handle('accounts:list', () => accounts.list());
   ipcMain.handle('accounts:create', (_event, name: string) => accounts.create(name));
@@ -103,6 +116,24 @@ export function registerIpc(input: {
     }
     return results;
   });
+
+  ipcMain.handle('templates:list', () => db.prepare(`SELECT * FROM message_templates ORDER BY category, name`).all());
+  ipcMain.handle('templates:create', (_event, payload: { name: string; category?: string; body: string }) => {
+    const name = payload.name.trim();
+    const body = payload.body.trim();
+    if (!name || !body) throw new Error('Nome e conteúdo são obrigatórios');
+    const id = randomUUID();
+    db.prepare(`INSERT INTO message_templates (id, name, category, body) VALUES (?, ?, ?, ?)`).run(id, name, payload.category?.trim() || null, body);
+    return db.prepare(`SELECT * FROM message_templates WHERE id=?`).get(id);
+  });
+  ipcMain.handle('templates:update', (_event, id: string, payload: { name: string; category?: string; body: string }) => {
+    const name = payload.name.trim();
+    const body = payload.body.trim();
+    if (!name || !body) throw new Error('Nome e conteúdo são obrigatórios');
+    db.prepare(`UPDATE message_templates SET name=?, category=?, body=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(name, payload.category?.trim() || null, body, id);
+    return db.prepare(`SELECT * FROM message_templates WHERE id=?`).get(id);
+  });
+  ipcMain.handle('templates:remove', (_event, id: string) => { db.prepare(`DELETE FROM message_templates WHERE id=?`).run(id); return true; });
 
   ipcMain.handle('autoreply:list', (_event, accountId?: string) => autoReply.list(accountId));
   ipcMain.handle('autoreply:create', (_event, payload: AutoReplyRuleInput) => autoReply.create(payload));
