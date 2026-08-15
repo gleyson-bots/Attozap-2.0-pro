@@ -29,23 +29,17 @@ jobs:
           $exe = Join-Path $PWD 'release\win-unpacked\ATTOZAP WASender Pro.exe'
           if (-not (Test-Path $exe)) { throw "Unpacked Electron executable not found: $exe" }
           $proc = Start-Process -FilePath $exe -ArgumentList '--remote-debugging-port=9223' -PassThru
-          try {
-            node tools/electron-smoke.mjs http://127.0.0.1:9223 release/smoke.png
-          } finally {
-            taskkill /F /T /PID $proc.Id 2>$null | Out-Null
-          }
-      - name: Build KeyGen portable
-        run: npx electron-builder --config keygen-builder.yml --win portable --x64 --publish never
-      - name: Verify outputs
+          node tools/electron-smoke.mjs http://127.0.0.1:9223 release/smoke.png
+          $smokeExit = $LASTEXITCODE
+          taskkill /F /T /PID $proc.Id 2>$null | Out-Null
+          if ($smokeExit -ne 0) { exit $smokeExit }
+      - name: Verify WASender output
         shell: pwsh
         run: |
           $app = Get-ChildItem release -Filter 'ATTOZAP-WASender-Pro-*.exe' | Select-Object -First 1
-          $keygen = Get-ChildItem release-keygen -Filter 'ATTOZAP-KeyGen-*.exe' | Select-Object -First 1
           if (-not $app) { throw 'WASender portable executable was not generated' }
-          if (-not $keygen) { throw 'KeyGen portable executable was not generated' }
           if (-not (Test-Path 'release/smoke.png')) { throw 'Packaged renderer smoke screenshot was not generated' }
           Write-Host "APP=$($app.FullName) SIZE=$($app.Length)"
-          Write-Host "KEYGEN=$($keygen.FullName) SIZE=$($keygen.Length)"
       - name: Upload WASender portable
         uses: actions/upload-artifact@v4
         with:
@@ -53,17 +47,25 @@ jobs:
           path: release/ATTOZAP-WASender-Pro-*.exe
           if-no-files-found: error
           retention-days: 30
-      - name: Upload KeyGen portable
-        uses: actions/upload-artifact@v4
-        with:
-          name: ATTOZAP-KeyGen-portable
-          path: release-keygen/ATTOZAP-KeyGen-*.exe
-          if-no-files-found: error
-          retention-days: 30
       - name: Upload packaged UI smoke screenshot
         uses: actions/upload-artifact@v4
         with:
           name: ATTOZAP-packaged-ui-smoke
           path: release/smoke.png
+          if-no-files-found: error
+          retention-days: 30
+      - name: Build KeyGen portable
+        run: npx electron-builder --config keygen-builder.yml --win portable --x64 --publish never
+      - name: Verify KeyGen output
+        shell: pwsh
+        run: |
+          $keygen = Get-ChildItem release-keygen -Filter 'ATTOZAP-KeyGen-*.exe' | Select-Object -First 1
+          if (-not $keygen) { throw 'KeyGen portable executable was not generated' }
+          Write-Host "KEYGEN=$($keygen.FullName) SIZE=$($keygen.Length)"
+      - name: Upload KeyGen portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATTOZAP-KeyGen-portable
+          path: release-keygen/ATTOZAP-KeyGen-*.exe
           if-no-files-found: error
           retention-days: 30
