@@ -1,0 +1,35 @@
+name: Windows Desktop Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Add license public key
+        if: ${{ secrets.ATTOZAP_LICENSE_PUBLIC_KEY != '' }}
+        shell: pwsh
+        env:
+          LICENSE_PUBLIC_KEY: ${{ secrets.ATTOZAP_LICENSE_PUBLIC_KEY }}
+        run: |
+          New-Item -ItemType Directory -Force -Path resources | Out-Null
+          [System.IO.File]::WriteAllText("resources/license-public.pem", $env:LICENSE_PUBLIC_KEY)
+      - name: Build Windows packages
+        run: npm run pack:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: attozap-wasender-windows
+          path: |
+            release/*.exe
+            release/*.yml
+          if-no-files-found: error
