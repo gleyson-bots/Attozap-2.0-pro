@@ -54,10 +54,12 @@ contextBridge.exposeInMainWorld('attozap', {
     sync: (accountId: string) => ipcRenderer.invoke('groups:sync', accountId),
     list: (accountId: string) => ipcRenderer.invoke('groups:list', accountId),
     members: (accountId: string, groupJid: string) => ipcRenderer.invoke('groups:members', accountId, groupJid),
+    activeMembers: (accountId: string, groupJid: string, days = 30) => ipcRenderer.invoke('groups:active-members', accountId, groupJid, days),
     create: (accountId: string, subject: string, participants: string[]) => ipcRenderer.invoke('groups:create', accountId, subject, participants),
     add: (accountId: string, groupJid: string, participants: string[]) => ipcRenderer.invoke('groups:add', accountId, groupJid, participants),
     join: (accountId: string, invite: string) => ipcRenderer.invoke('groups:join', accountId, invite),
     verify: (accountId: string, invite: string) => ipcRenderer.invoke('groups:verify', accountId, invite),
+    verifyMany: (accountId: string, invites: string[]) => ipcRenderer.invoke('groups:verify-many', accountId, invites),
     invite: (accountId: string, groupJid: string) => ipcRenderer.invoke('groups:invite', accountId, groupJid),
   },
   autoReply: {
