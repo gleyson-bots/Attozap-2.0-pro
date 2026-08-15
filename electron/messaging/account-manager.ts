@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import { BaileysProvider } from './baileys-provider.js';
-import type { ConnectionState, IncomingMessage, MessagingProvider } from './provider.js';
+import { phoneFromPnJid } from './identity.js';
+import type { ConnectionState, ContactPresence, IncomingMessage, MessagingProvider } from './provider.js';
 
 export type AccountRecord = {
   id: string;
@@ -79,7 +80,7 @@ export class AccountManager extends EventEmitter {
       onState: state => this.updateState(id, state, provider),
       onQr: qr => this.emit('qr', { accountId: id, qr }),
       onError: error => this.emit('error', { accountId: id, message: error.message }),
-      onMessage: message => this.onMessage(id, message),
+      onMessage: message => void this.onMessage(id, message, provider),
     });
     return this.get(id);
   }
@@ -106,40 +107,108 @@ export class AccountManager extends EventEmitter {
 
   private updateState(id: string, status: ConnectionState, provider?: MessagingProvider) {
     const self = provider?.getSelfJid();
-    const phone = self?.split('@')[0]?.split(':')[0];
+    const phone = phoneFromPnJid(self);
     this.db.prepare(`
       UPDATE instances SET status = ?, phone = COALESCE(?, phone), updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `).run(status, phone ?? null, id);
-    this.emit('state', { accountId: id, status, phone });
+    this.emit('state', { accountId: id, status, phone, jid: self });
   }
 
-  private onMessage(accountId: string, message: IncomingMessage) {
+  private async onMessage(accountId: string, message: IncomingMessage, provider: MessagingProvider) {
     const at = new Date(message.timestamp).toISOString();
     const isGroup = message.remoteJid.endsWith('@g.us');
     const cacheable = !message.remoteJid.endsWith('@broadcast') && !message.remoteJid.includes('@newsletter');
 
+    let chatIdentity: ContactPresence | undefined;
+    let participantIdentity: ContactPresence | undefined;
+
+    try {
+      if (!isGroup) chatIdentity = await provider.resolveIdentity(message.remoteJid, message.remoteJidAlt);
+      if (isGroup && message.participant) participantIdentity = await provider.resolveIdentity(message.participant, message.participantAlt);
+    } catch {
+      // Mapping can be unavailable for historical or newly introduced LIDs.
+      // The raw JID remains the canonical fallback.
+    }
+
+    if (chatIdentity) this.persistIdentity(accountId, chatIdentity, message.pushName, 'message.remote');
+    if (participantIdentity) this.persistIdentity(accountId, participantIdentity, message.pushName, 'message.participant');
+
     if (cacheable) {
+      const canonicalJid = isGroup ? message.remoteJid : chatIdentity?.jid ?? message.remoteJid;
       this.db.prepare(`
-        INSERT INTO chat_cache (account_id, jid, name, is_group, message_count, first_message_at, last_message_at)
-        VALUES (?, ?, ?, ?, 1, ?, ?)
+        INSERT INTO chat_cache (account_id, jid, lid, pn_jid, phone, name, is_group, message_count, first_message_at, last_message_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
         ON CONFLICT(account_id,jid) DO UPDATE SET
+          lid=COALESCE(excluded.lid, chat_cache.lid),
+          pn_jid=COALESCE(excluded.pn_jid, chat_cache.pn_jid),
+          phone=COALESCE(excluded.phone, chat_cache.phone),
           name=COALESCE(excluded.name, chat_cache.name),
           is_group=excluded.is_group,
           message_count=chat_cache.message_count+1,
           last_message_at=excluded.last_message_at
-      `).run(accountId, message.remoteJid, message.pushName?.trim() || null, isGroup ? 1 : 0, at, at);
+      `).run(
+        accountId,
+        canonicalJid,
+        chatIdentity?.lid ?? null,
+        chatIdentity?.pnJid ?? null,
+        chatIdentity?.phone ?? null,
+        message.pushName?.trim() || null,
+        isGroup ? 1 : 0,
+        at,
+        at,
+      );
     }
 
     if (!message.fromMe && isGroup && message.participant) {
+      const canonical = participantIdentity?.jid ?? message.participant;
       this.db.prepare(`
-        INSERT INTO group_activity (account_id, group_id, participant_jid, message_count, first_message_at, last_message_at)
-        VALUES (?, ?, ?, 1, ?, ?)
+        INSERT INTO group_activity (
+          account_id, group_id, participant_jid, participant_lid, participant_pn_jid, participant_phone,
+          message_count, first_message_at, last_message_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
         ON CONFLICT(account_id,group_id,participant_jid) DO UPDATE SET
+          participant_lid=COALESCE(excluded.participant_lid, group_activity.participant_lid),
+          participant_pn_jid=COALESCE(excluded.participant_pn_jid, group_activity.participant_pn_jid),
+          participant_phone=COALESCE(excluded.participant_phone, group_activity.participant_phone),
           message_count=group_activity.message_count+1,
           last_message_at=excluded.last_message_at
-      `).run(accountId, message.remoteJid, message.participant, at, at);
+      `).run(
+        accountId,
+        message.remoteJid,
+        canonical,
+        participantIdentity?.lid ?? null,
+        participantIdentity?.pnJid ?? null,
+        participantIdentity?.phone ?? null,
+        at,
+        at,
+      );
     }
-    this.emit('message', { accountId, message });
+
+    this.emit('message', { accountId, message, identity: chatIdentity, participantIdentity });
+  }
+
+  private persistIdentity(accountId: string, identity: ContactPresence, pushName: string | undefined, source: string) {
+    const canonicalJid = identity.jid;
+    if (!canonicalJid) return;
+
+    const existing = this.db.prepare(`
+      SELECT canonical_jid FROM wa_identities
+      WHERE account_id=? AND (canonical_jid=? OR (? IS NOT NULL AND lid=?) OR (? IS NOT NULL AND pn_jid=?))
+      LIMIT 1
+    `).get(accountId, canonicalJid, identity.lid ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.pnJid ?? null) as { canonical_jid?: string } | undefined;
+
+    const key = existing?.canonical_jid ?? canonicalJid;
+    this.db.prepare(`
+      INSERT INTO wa_identities (account_id, canonical_jid, lid, pn_jid, phone, push_name, source, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
+        lid=COALESCE(excluded.lid, wa_identities.lid),
+        pn_jid=COALESCE(excluded.pn_jid, wa_identities.pn_jid),
+        phone=COALESCE(excluded.phone, wa_identities.phone),
+        push_name=COALESCE(excluded.push_name, wa_identities.push_name),
+        source=excluded.source,
+        last_seen_at=CURRENT_TIMESTAMP
+    `).run(accountId, key, identity.lid ?? null, identity.pnJid ?? null, identity.phone ?? null, pushName?.trim() || null, source);
   }
 
   private audit(action: string, entityId: string, metadata?: unknown) {
