@@ -4,16 +4,29 @@ export function parseNumbers(text: string) {
   return [...new Set(text.split(/[\s,;|]+/).map(value => value.replace(/\D/g, '')).filter(Boolean))];
 }
 
+export function normalizeTarget(value: string) {
+  const clean = value.trim();
+  if (!clean) return '';
+  if (clean.includes('@')) return clean;
+  return clean.replace(/\D/g, '');
+}
+
+export function parseIdentityTargets(text: string) {
+  return [...new Set(text.split(/[\r\n,;|]+/).map(normalizeTarget).filter(Boolean))];
+}
+
 export function parseRecipients(text: string): Recipient[] {
   const result: Recipient[] = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
     const columns = line.includes('\t') ? line.split('\t') : line.split(/[;,]/);
-    const target = (columns.shift() ?? '').replace(/\D/g, '');
+    const target = normalizeTarget(columns.shift() ?? '');
     if (!target) continue;
     const name = columns.shift()?.trim() || undefined;
     const variables: Record<string, string> = {};
+    if (!target.includes('@')) variables.phone = target;
+    else if (target.endsWith('@s.whatsapp.net')) variables.phone = target.split('@')[0]?.split(':')[0] ?? '';
     for (const column of columns) {
       const separator = column.indexOf('=');
       if (separator > 0) variables[column.slice(0, separator).trim()] = column.slice(separator + 1).trim();
