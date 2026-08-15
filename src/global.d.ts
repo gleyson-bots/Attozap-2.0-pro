@@ -13,6 +13,7 @@ declare global {
       templates: any;
       polls: any;
       extractors: any;
+      importers: any;
       autoReply: any;
       license: any;
       files: any;
