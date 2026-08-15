@@ -8,11 +8,6 @@ export type ImportedContact = {
 };
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
-function phoneFromJid(jid: string) {
-  if (!jid.endsWith('@s.whatsapp.net')) return undefined;
-  const value = jid.split('@')[0]?.split(':')[0] ?? '';
-  return /^\d{6,15}$/.test(value) ? value : undefined;
-}
 
 export class WaSenderTools {
   constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager) {}
@@ -48,7 +43,7 @@ export class WaSenderTools {
 
   listObservedChats(accountId: string, includeGroups = false) {
     const rows = this.db.prepare(`
-      SELECT account_id, jid, name, is_group, message_count, first_message_at, last_message_at
+      SELECT account_id, jid, lid, pn_jid, phone, name, is_group, message_count, first_message_at, last_message_at
       FROM chat_cache
       WHERE account_id=? AND (?=1 OR is_group=0)
       ORDER BY last_message_at DESC
@@ -56,6 +51,9 @@ export class WaSenderTools {
     `).all(accountId, includeGroups ? 1 : 0) as Array<{
       account_id: string;
       jid: string;
+      lid: string | null;
+      pn_jid: string | null;
+      phone: string | null;
       name: string | null;
       is_group: number;
       message_count: number;
@@ -65,13 +63,15 @@ export class WaSenderTools {
     return rows.map(row => ({
       accountId: row.account_id,
       jid: row.jid,
-      phone: phoneFromJid(row.jid),
+      lid: row.lid ?? undefined,
+      pnJid: row.pn_jid ?? undefined,
+      phone: row.phone ?? undefined,
       name: row.name ?? undefined,
       isGroup: Boolean(row.is_group),
       messageCount: row.message_count,
       firstMessageAt: row.first_message_at,
       lastMessageAt: row.last_message_at,
-      importable: Boolean(phoneFromJid(row.jid)),
+      importable: Boolean(row.phone),
     }));
   }
 
@@ -122,12 +122,25 @@ export class WaSenderTools {
     const provider = this.accounts.provider(accountId);
     const clean = [...new Set(numbers.map(digits).filter(Boolean))];
     const result = await provider.checkNumbers(clean);
-    const upsert = this.db.prepare(`
+    const upsertContact = this.db.prepare(`
       INSERT INTO contacts (phone, wa_exists, last_checked_at) VALUES (?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(phone) DO UPDATE SET wa_exists=excluded.wa_exists, last_checked_at=CURRENT_TIMESTAMP
     `);
+    const upsertIdentity = this.db.prepare(`
+      INSERT INTO wa_identities (account_id, canonical_jid, lid, pn_jid, phone, source, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, 'number-filter', CURRENT_TIMESTAMP)
+      ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
+        lid=COALESCE(excluded.lid, wa_identities.lid),
+        pn_jid=COALESCE(excluded.pn_jid, wa_identities.pn_jid),
+        phone=COALESCE(excluded.phone, wa_identities.phone),
+        source='number-filter',
+        last_seen_at=CURRENT_TIMESTAMP
+    `);
     const tx = this.db.transaction(() => {
-      for (const item of result) upsert.run(digits(item.input), item.exists ? 1 : 0);
+      for (const item of result) {
+        upsertContact.run(digits(item.input), item.exists ? 1 : 0);
+        if (item.exists && item.jid) upsertIdentity.run(accountId, item.jid, item.lid ?? null, item.pnJid ?? null, item.phone ?? digits(item.input));
+      }
     });
     tx();
     return result;
@@ -166,26 +179,47 @@ export class WaSenderTools {
   }
 
   async groupMembers(accountId: string, groupJid: string) {
-    return (await this.accounts.provider(accountId).getGroupMetadata(groupJid)).participants;
+    const participants = (await this.accounts.provider(accountId).getGroupMetadata(groupJid)).participants;
+    const upsertIdentity = this.db.prepare(`
+      INSERT INTO wa_identities (account_id, canonical_jid, lid, pn_jid, phone, source, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, 'group-metadata', CURRENT_TIMESTAMP)
+      ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
+        lid=COALESCE(excluded.lid, wa_identities.lid),
+        pn_jid=COALESCE(excluded.pn_jid, wa_identities.pn_jid),
+        phone=COALESCE(excluded.phone, wa_identities.phone),
+        source='group-metadata',
+        last_seen_at=CURRENT_TIMESTAMP
+    `);
+    const tx = this.db.transaction(() => {
+      for (const participant of participants) upsertIdentity.run(accountId, participant.jid, participant.lid ?? null, participant.pnJid ?? null, participant.phone ?? null);
+    });
+    tx();
+    return participants;
   }
 
   activeGroupMembers(accountId: string, groupJid: string, days = 30) {
     const safeDays = Math.max(1, Math.min(3650, Math.floor(days)));
     const cutoff = new Date(Date.now() - safeDays * 86_400_000).toISOString();
     const rows = this.db.prepare(`
-      SELECT participant_jid, message_count, first_message_at, last_message_at
+      SELECT participant_jid, participant_lid, participant_pn_jid, participant_phone,
+             message_count, first_message_at, last_message_at
       FROM group_activity
       WHERE account_id=? AND group_id=? AND last_message_at>=?
       ORDER BY last_message_at DESC, message_count DESC
     `).all(accountId, groupJid, cutoff) as Array<{
       participant_jid: string;
+      participant_lid: string | null;
+      participant_pn_jid: string | null;
+      participant_phone: string | null;
       message_count: number;
       first_message_at: string;
       last_message_at: string;
     }>;
     return rows.map(row => ({
       jid: row.participant_jid,
-      phone: row.participant_jid.split('@')[0]?.split(':')[0] ?? row.participant_jid,
+      lid: row.participant_lid ?? undefined,
+      pnJid: row.participant_pn_jid ?? undefined,
+      phone: row.participant_phone ?? undefined,
       messageCount: row.message_count,
       firstMessageAt: row.first_message_at,
       lastMessageAt: row.last_message_at,
