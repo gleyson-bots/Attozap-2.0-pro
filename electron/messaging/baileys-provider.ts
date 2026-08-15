@@ -89,6 +89,7 @@ export class BaileysProvider implements MessagingProvider {
           id: message.key.id ?? randomUUID(),
           remoteJid,
           participant: message.key.participant ?? undefined,
+          pushName: message.pushName ?? undefined,
           text: messageText(message),
           fromMe: Boolean(message.key.fromMe),
           timestamp: Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)) * 1000,
