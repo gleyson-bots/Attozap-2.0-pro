@@ -6,6 +6,7 @@ import { AccountManager } from './messaging/account-manager.js';
 import { CampaignEngine } from './campaigns/engine.js';
 import { AutoReplyEngine } from './automation/auto-reply.js';
 import { WaSenderTools } from './tools/wasender-tools.js';
+import { LicenseService } from './license-service.js';
 import { registerIpc } from './ipc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -42,12 +43,14 @@ app.whenReady().then(async () => {
   const campaigns = new CampaignEngine(db, accounts);
   const autoReply = new AutoReplyEngine(db, accounts);
   const tools = new WaSenderTools(db, accounts);
+  const licenseResources = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources');
+  const license = new LicenseService(db, licenseResources);
 
   ipcMain.handle('app:get-version', () => app.getVersion());
   ipcMain.handle('app:get-platform', () => process.platform);
 
   const window = await createWindow();
-  registerIpc({ window, db, accounts, campaigns, autoReply, tools });
+  registerIpc({ window, db, accounts, campaigns, autoReply, tools, license });
 
   scheduler = setInterval(() => {
     void campaigns.runDueSchedules().catch(error => console.error('[scheduler]', error));
