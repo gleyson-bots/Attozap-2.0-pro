@@ -113,6 +113,29 @@ export class WaSenderTools {
     return (await this.accounts.provider(accountId).getGroupMetadata(groupJid)).participants;
   }
 
+  activeGroupMembers(accountId: string, groupJid: string, days = 30) {
+    const safeDays = Math.max(1, Math.min(3650, Math.floor(days)));
+    const cutoff = new Date(Date.now() - safeDays * 86_400_000).toISOString();
+    const rows = this.db.prepare(`
+      SELECT participant_jid, message_count, first_message_at, last_message_at
+      FROM group_activity
+      WHERE account_id=? AND group_id=? AND last_message_at>=?
+      ORDER BY last_message_at DESC, message_count DESC
+    `).all(accountId, groupJid, cutoff) as Array<{
+      participant_jid: string;
+      message_count: number;
+      first_message_at: string;
+      last_message_at: string;
+    }>;
+    return rows.map(row => ({
+      jid: row.participant_jid,
+      phone: row.participant_jid.split('@')[0]?.split(':')[0] ?? row.participant_jid,
+      messageCount: row.message_count,
+      firstMessageAt: row.first_message_at,
+      lastMessageAt: row.last_message_at,
+    }));
+  }
+
   async groupCreate(accountId: string, subject: string, participants: string[]) {
     return this.accounts.provider(accountId).createGroup(subject, participants);
   }
@@ -127,6 +150,20 @@ export class WaSenderTools {
 
   async groupVerify(accountId: string, invite: string) {
     return this.accounts.provider(accountId).verifyGroupInvite(invite);
+  }
+
+  async groupVerifyMany(accountId: string, invites: string[]) {
+    const provider = this.accounts.provider(accountId);
+    const unique = [...new Set(invites.map(value => value.trim()).filter(Boolean))];
+    const results: Array<{ invite: string; valid: boolean; group?: unknown; error?: string }> = [];
+    for (const invite of unique) {
+      try {
+        results.push({ invite, valid: true, group: await provider.verifyGroupInvite(invite) });
+      } catch (error) {
+        results.push({ invite, valid: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return results;
   }
 
   async groupInvite(accountId: string, groupJid: string) {
