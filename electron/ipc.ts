@@ -25,6 +25,14 @@ export function registerIpc(input: {
 }) {
   const { window, db, accounts, campaigns, autoReply, tools, license } = input;
 
+  function requireLicense() {
+    const status = license.status();
+    if (!status.valid || !status.payload) {
+      throw new Error(`Licença necessária: ${status.reason ?? 'INVALID_LICENSE'}. Abra a tela Licença, copie o fingerprint e ative uma licença válida.`);
+    }
+    return status.payload;
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS message_templates (
       id TEXT PRIMARY KEY,
@@ -51,10 +59,19 @@ export function registerIpc(input: {
   `);
 
   ipcMain.handle('accounts:list', () => accounts.list());
-  ipcMain.handle('accounts:create', (_event, name: string) => accounts.create(name));
+  ipcMain.handle('accounts:create', (_event, name: string) => {
+    const payload = requireLicense();
+    if (accounts.list().length >= payload.maxInstances) {
+      throw new Error(`Esta licença permite no máximo ${payload.maxInstances} conta(s) WhatsApp.`);
+    }
+    return accounts.create(name);
+  });
   ipcMain.handle('accounts:rename', (_event, id: string, name: string) => accounts.rename(id, name));
   ipcMain.handle('accounts:set-proxy', (_event, id: string, proxy?: string) => accounts.setProxy(id, proxy));
-  ipcMain.handle('accounts:connect', async (_event, id: string) => accounts.connect(id));
+  ipcMain.handle('accounts:connect', async (_event, id: string) => {
+    requireLicense();
+    return accounts.connect(id);
+  });
   ipcMain.handle('accounts:disconnect', async (_event, id: string, logout = false) => accounts.disconnect(id, logout));
   ipcMain.handle('accounts:remove', async (_event, id: string) => accounts.remove(id));
 
@@ -82,18 +99,22 @@ export function registerIpc(input: {
     send(window, 'polls:update', payload);
   });
 
-  ipcMain.handle('campaigns:create', (_event, payload: CreateCampaignInput) => campaigns.create(payload));
+  ipcMain.handle('campaigns:create', (_event, payload: CreateCampaignInput) => {
+    requireLicense();
+    return campaigns.create(payload);
+  });
   ipcMain.handle('campaigns:list', () => campaigns.list());
   ipcMain.handle('campaigns:get', (_event, id: string) => campaigns.get(id));
   ipcMain.handle('campaigns:recipients', (_event, id: string) => campaigns.recipients(id));
   ipcMain.handle('campaigns:start', (_event, id: string) => {
+    requireLicense();
     void campaigns.start(id).catch(error => send(window, 'campaigns:error', { campaignId: id, message: error instanceof Error ? error.message : String(error) }));
     return { accepted: true };
   });
   ipcMain.handle('campaigns:pause', (_event, id: string) => campaigns.pause(id));
-  ipcMain.handle('campaigns:resume', (_event, id: string) => campaigns.resume(id));
+  ipcMain.handle('campaigns:resume', (_event, id: string) => { requireLicense(); return campaigns.resume(id); });
   ipcMain.handle('campaigns:stop', (_event, id: string) => campaigns.stop(id));
-  ipcMain.handle('campaigns:schedule', (_event, id: string, runAt: string) => campaigns.schedule(id, runAt));
+  ipcMain.handle('campaigns:schedule', (_event, id: string, runAt: string) => { requireLicense(); return campaigns.schedule(id, runAt); });
   ipcMain.handle('campaigns:schedules', () => campaigns.listSchedules());
   campaigns.on('progress', payload => send(window, 'campaigns:progress', payload));
   campaigns.on('error', payload => send(window, 'campaigns:error', payload));
@@ -107,20 +128,21 @@ export function registerIpc(input: {
   ipcMain.handle('chats:list', (_event, accountId: string, includeGroups = false) => tools.listObservedChats(accountId, includeGroups));
   ipcMain.handle('chats:grab-contacts', (_event, accountId: string) => tools.grabContactsFromChats(accountId));
 
-  ipcMain.handle('tools:filter-numbers', (_event, accountId: string, numbers: string[]) => tools.filterNumbers(accountId, numbers));
+  ipcMain.handle('tools:filter-numbers', (_event, accountId: string, numbers: string[]) => { requireLicense(); return tools.filterNumbers(accountId, numbers); });
   ipcMain.handle('tools:generate-numbers', (_event, payload) => tools.generateNumbers(payload));
-  ipcMain.handle('groups:sync', (_event, accountId: string) => tools.syncGroups(accountId));
+  ipcMain.handle('groups:sync', (_event, accountId: string) => { requireLicense(); return tools.syncGroups(accountId); });
   ipcMain.handle('groups:list', (_event, accountId: string) => tools.listCachedGroups(accountId));
-  ipcMain.handle('groups:members', (_event, accountId: string, groupJid: string) => tools.groupMembers(accountId, groupJid));
+  ipcMain.handle('groups:members', (_event, accountId: string, groupJid: string) => { requireLicense(); return tools.groupMembers(accountId, groupJid); });
   ipcMain.handle('groups:active-members', (_event, accountId: string, groupJid: string, days?: number) => tools.activeGroupMembers(accountId, groupJid, days));
-  ipcMain.handle('groups:create', (_event, accountId: string, subject: string, participants: string[]) => tools.groupCreate(accountId, subject, participants));
-  ipcMain.handle('groups:add', (_event, accountId: string, groupJid: string, participants: string[]) => tools.groupAdd(accountId, groupJid, participants));
-  ipcMain.handle('groups:join', (_event, accountId: string, invite: string) => tools.groupJoin(accountId, invite));
-  ipcMain.handle('groups:verify', (_event, accountId: string, invite: string) => tools.groupVerify(accountId, invite));
-  ipcMain.handle('groups:verify-many', (_event, accountId: string, invites: string[]) => tools.groupVerifyMany(accountId, invites));
-  ipcMain.handle('groups:invite', (_event, accountId: string, groupJid: string) => tools.groupInvite(accountId, groupJid));
+  ipcMain.handle('groups:create', (_event, accountId: string, subject: string, participants: string[]) => { requireLicense(); return tools.groupCreate(accountId, subject, participants); });
+  ipcMain.handle('groups:add', (_event, accountId: string, groupJid: string, participants: string[]) => { requireLicense(); return tools.groupAdd(accountId, groupJid, participants); });
+  ipcMain.handle('groups:join', (_event, accountId: string, invite: string) => { requireLicense(); return tools.groupJoin(accountId, invite); });
+  ipcMain.handle('groups:verify', (_event, accountId: string, invite: string) => { requireLicense(); return tools.groupVerify(accountId, invite); });
+  ipcMain.handle('groups:verify-many', (_event, accountId: string, invites: string[]) => { requireLicense(); return tools.groupVerifyMany(accountId, invites); });
+  ipcMain.handle('groups:invite', (_event, accountId: string, groupJid: string) => { requireLicense(); return tools.groupInvite(accountId, groupJid); });
 
   ipcMain.handle('groups:create-many', async (_event, accountId: string, jobs: Array<{ subject: string; participants: string[] }>, delayMs = 1000) => {
+    requireLicense();
     const safeJobs = jobs.slice(0, 25).map(job => ({ subject: job.subject.trim(), participants: [...new Set(job.participants.map(value => value.trim()).filter(Boolean))].slice(0, 500) })).filter(job => job.subject);
     const results: Array<{ subject: string; ok: boolean; group?: unknown; error?: string }> = [];
     for (const job of safeJobs) {
@@ -132,6 +154,7 @@ export function registerIpc(input: {
   });
 
   ipcMain.handle('groups:add-many', async (_event, accountId: string, jobs: Array<{ groupJid: string; participants: string[] }>, delayMs = 1000) => {
+    requireLicense();
     const safeJobs = jobs.slice(0, 50).map(job => ({ groupJid: job.groupJid.trim(), participants: [...new Set(job.participants.map(value => value.trim()).filter(Boolean))].slice(0, 500) })).filter(job => job.groupJid && job.participants.length);
     const results: Array<{ groupJid: string; ok: boolean; result?: unknown; error?: string }> = [];
     for (const job of safeJobs) {
@@ -171,8 +194,8 @@ export function registerIpc(input: {
   });
 
   ipcMain.handle('autoreply:list', (_event, accountId?: string) => autoReply.list(accountId));
-  ipcMain.handle('autoreply:create', (_event, payload: AutoReplyRuleInput) => autoReply.create(payload));
-  ipcMain.handle('autoreply:update', (_event, id: string, payload: Partial<AutoReplyRuleInput>) => autoReply.update(id, payload));
+  ipcMain.handle('autoreply:create', (_event, payload: AutoReplyRuleInput) => { requireLicense(); return autoReply.create(payload); });
+  ipcMain.handle('autoreply:update', (_event, id: string, payload: Partial<AutoReplyRuleInput>) => { requireLicense(); return autoReply.update(id, payload); });
   ipcMain.handle('autoreply:remove', (_event, id: string) => autoReply.remove(id));
 
   ipcMain.handle('license:status', () => license.status());
