@@ -35,6 +35,19 @@ export function registerIpc(input: {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_message_templates_name ON message_templates(name, category);
+
+    CREATE TABLE IF NOT EXISTS poll_reports (
+      account_id TEXT NOT NULL,
+      poll_id TEXT NOT NULL,
+      remote_jid TEXT NOT NULL,
+      question TEXT,
+      result_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(account_id, poll_id),
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_poll_reports_updated ON poll_reports(updated_at DESC);
   `);
 
   ipcMain.handle('accounts:list', () => accounts.list());
@@ -56,6 +69,18 @@ export function registerIpc(input: {
   });
   accounts.on('error', payload => send(window, 'accounts:error', payload));
   accounts.on('message', payload => send(window, 'messages:incoming', payload));
+  accounts.on('poll-update', payload => {
+    db.prepare(`
+      INSERT INTO poll_reports (account_id, poll_id, remote_jid, question, result_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(account_id,poll_id) DO UPDATE SET
+        remote_jid=excluded.remote_jid,
+        question=COALESCE(excluded.question, poll_reports.question),
+        result_json=excluded.result_json,
+        updated_at=CURRENT_TIMESTAMP
+    `).run(payload.accountId, payload.pollId, payload.remoteJid, payload.question ?? null, JSON.stringify(payload.votes ?? []));
+    send(window, 'polls:update', payload);
+  });
 
   ipcMain.handle('campaigns:create', (_event, payload: CreateCampaignInput) => campaigns.create(payload));
   ipcMain.handle('campaigns:list', () => campaigns.list());
@@ -134,6 +159,16 @@ export function registerIpc(input: {
     return db.prepare(`SELECT * FROM message_templates WHERE id=?`).get(id);
   });
   ipcMain.handle('templates:remove', (_event, id: string) => { db.prepare(`DELETE FROM message_templates WHERE id=?`).run(id); return true; });
+
+  ipcMain.handle('polls:list', (_event, accountId?: string) => {
+    const rows = (accountId
+      ? db.prepare(`SELECT * FROM poll_reports WHERE account_id=? ORDER BY updated_at DESC`).all(accountId)
+      : db.prepare(`SELECT * FROM poll_reports ORDER BY updated_at DESC`).all()) as Array<Record<string, unknown>>;
+    return rows.map(row => ({
+      ...row,
+      votes: JSON.parse(String(row.result_json ?? '[]')),
+    }));
+  });
 
   ipcMain.handle('autoreply:list', (_event, accountId?: string) => autoReply.list(accountId));
   ipcMain.handle('autoreply:create', (_event, payload: AutoReplyRuleInput) => autoReply.create(payload));
