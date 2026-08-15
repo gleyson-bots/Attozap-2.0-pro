@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ATTOZAP KeyGen</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="brand"><span class="logo">AZ</span><div><strong>ATTOZAP</strong><small>LICENSE AUTHORITY</small></div></div>
+      <div><span class="eyebrow">KEYGEN PORTABLE</span><h1>Emita licenças assinadas com Ed25519</h1><p>A chave privada permanece fora do WASender. Selecione sua chave, informe os limites e gere a licença do cliente.</p></div>
+    </header>
+
+    <section class="grid">
+      <article class="card key-card">
+        <div class="section-title"><span>01</span><div><h2>Autoridade</h2><p>Use a chave privada correspondente à chave pública embutida no app.</p></div></div>
+        <label>Chave privada PEM</label>
+        <div class="path-row"><input id="privateKeyPath" readonly placeholder="Nenhuma chave selecionada"/><button id="selectKey" class="ghost">Selecionar</button></div>
+        <div class="row-actions"><button id="generateKeys" class="ghost">Gerar novo par</button></div>
+        <div class="warning"><strong>Importante:</strong> gerar um novo par exige recompilar o WASender com a nova chave pública. Para a build entregue, use a chave privada entregue junto do KeyGen.</div>
+      </article>
+
+      <article class="card">
+        <div class="section-title"><span>02</span><div><h2>Cliente</h2><p>Dados comerciais e vínculo opcional ao fingerprint.</p></div></div>
+        <div class="form-grid">
+          <div><label>ID do cliente</label><input id="customerId" placeholder="cliente-001"/></div>
+          <div><label>Nome do cliente</label><input id="customerName" placeholder="Empresa / cliente"/></div>
+          <div><label>Plano</label><select id="plan"><option value="solo">Solo</option><option value="solo_plus">Solo Plus</option><option value="solo_pro" selected>Solo Pro</option><option value="team">Equipe</option><option value="team_plus">Equipe Plus</option><option value="team_pro">Equipe Pro</option><option value="enterprise">Enterprise</option></select></div>
+          <div><label>Expira em</label><input id="expiresAt" type="date"/></div>
+          <div><label>Máx. usuários</label><input id="maxSeats" type="number" min="1" value="1"/></div>
+          <div><label>Máx. contas WhatsApp</label><input id="maxInstances" type="number" min="1" value="3"/></div>
+          <div class="wide"><label>Fingerprint opcional</label><input id="fingerprint" placeholder="Cole o fingerprint exibido no WASender"/></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="card features-card">
+      <div class="section-title"><span>03</span><div><h2>Recursos liberados</h2><p>Selecione as funções que esta licença poderá usar.</p></div></div>
+      <div id="features" class="feature-grid"></div>
+    </section>
+
+    <section class="card issue-card">
+      <div class="section-title"><span>04</span><div><h2>Emitir licença</h2><p>A licença é assinada localmente; nenhum dado é enviado para servidor.</p></div></div>
+      <button id="issue" class="primary">Gerar licença</button>
+      <div id="status" class="status"></div>
+      <div id="result" class="result hidden">
+        <div class="result-head"><div><strong id="licenseId">—</strong><small id="summary">—</small></div><div><button id="copy" class="ghost">Copiar</button><button id="save" class="primary small">Salvar</button></div></div>
+        <textarea id="encoded" readonly></textarea>
+      </div>
+    </section>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>
