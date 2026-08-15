@@ -114,6 +114,16 @@ export class AccountManager extends EventEmitter {
   }
 
   private onMessage(accountId: string, message: IncomingMessage) {
+    if (!message.fromMe && message.remoteJid.endsWith('@g.us') && message.participant) {
+      const at = new Date(message.timestamp).toISOString();
+      this.db.prepare(`
+        INSERT INTO group_activity (account_id, group_id, participant_jid, message_count, first_message_at, last_message_at)
+        VALUES (?, ?, ?, 1, ?, ?)
+        ON CONFLICT(account_id,group_id,participant_jid) DO UPDATE SET
+          message_count=group_activity.message_count+1,
+          last_message_at=excluded.last_message_at
+      `).run(accountId, message.remoteJid, message.participant, at, at);
+    }
     this.emit('message', { accountId, message });
   }
 
