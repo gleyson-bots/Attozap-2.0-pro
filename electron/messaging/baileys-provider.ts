@@ -1,6 +1,8 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  isLidUser,
+  isPnUser,
   jidNormalizedUser,
   useMultiFileAuthState,
   type WAMessage,
@@ -8,10 +10,12 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import { randomUUID } from 'node:crypto';
 import P from 'pino';
+import { identityFromPair, mergeIdentity, normalizeJid, phoneFromPnJid } from './identity.js';
 import type {
   ContactCardInput,
   ContactPresence,
   GroupInviteInfo,
+  GroupParticipantIdentity,
   GroupSummary,
   IncomingMessage,
   LocationInput,
@@ -27,7 +31,7 @@ function digits(value: string) {
 }
 
 function userJid(value: string) {
-  if (value.includes('@')) return value;
+  if (value.includes('@')) return normalizeJid(value) ?? value;
   return `${digits(value)}@s.whatsapp.net`;
 }
 
@@ -45,6 +49,9 @@ function messageText(message: WAMessage): string {
     ?? content.imageMessage?.caption
     ?? content.videoMessage?.caption
     ?? content.documentMessage?.caption
+    ?? content.interactiveMessage?.body?.text
+    ?? content.interactiveMessage?.header?.imageMessage?.caption
+    ?? content.interactiveMessage?.header?.videoMessage?.caption
     ?? '';
 }
 
@@ -88,7 +95,10 @@ export class BaileysProvider implements MessagingProvider {
         const incoming: IncomingMessage = {
           id: message.key.id ?? randomUUID(),
           remoteJid,
+          remoteJidAlt: message.key.remoteJidAlt ?? undefined,
           participant: message.key.participant ?? undefined,
+          participantAlt: message.key.participantAlt ?? undefined,
+          addressingMode: message.key.addressingMode ?? undefined,
           pushName: message.pushName ?? undefined,
           text: messageText(message),
           fromMe: Boolean(message.key.fromMe),
@@ -133,6 +143,30 @@ export class BaileysProvider implements MessagingProvider {
   private requireSocket() {
     if (!this.socket || !this.connected) throw new Error('A conta do WhatsApp não está conectada');
     return this.socket;
+  }
+
+  async resolveIdentity(jid: string, alternateJid?: string): Promise<ContactPresence> {
+    const socket = this.requireSocket();
+    const normalized = normalizeJid(jid) ?? jid;
+    const alternate = normalizeJid(alternateJid);
+    let identity = identityFromPair(normalized, alternate);
+
+    if (isLidUser(normalized) && !identity?.pnJid) {
+      const pnJid = await socket.signalRepository.lidMapping.getPNForLID(normalized).catch(() => undefined);
+      identity = mergeIdentity(identity, identityFromPair(normalized, pnJid));
+    } else if (isPnUser(normalized) && !identity?.lid) {
+      const lid = await socket.signalRepository.lidMapping.getLIDForPN(normalized).catch(() => undefined);
+      identity = mergeIdentity(identity, identityFromPair(lid, normalized), identityFromPair(normalized, lid));
+    }
+
+    return {
+      input: jid,
+      jid: identity?.jid ?? normalized,
+      lid: identity?.lid,
+      pnJid: identity?.pnJid,
+      phone: identity?.phone ?? phoneFromPnJid(identity?.pnJid),
+      exists: true,
+    };
   }
 
   async sendText(remoteJid: string, text: string) {
@@ -198,10 +232,18 @@ export class BaileysProvider implements MessagingProvider {
     const unique = [...new Set(numbers.map(digits).filter(Boolean))];
     const result = await socket.onWhatsApp(...unique);
     const byNumber = new Map((result ?? []).map(item => [digits(item.jid), item]));
-    return unique.map(input => {
+    const output: ContactPresence[] = [];
+
+    for (const input of unique) {
       const match = byNumber.get(input);
-      return { input, jid: match?.jid, exists: Boolean(match?.exists) };
-    });
+      if (!match?.exists) {
+        output.push({ input, exists: false });
+        continue;
+      }
+      const resolved = await this.resolveIdentity(match.jid);
+      output.push({ ...resolved, input, exists: true, phone: resolved.phone ?? input });
+    }
+    return output;
   }
 
   async listGroups(): Promise<GroupSummary[]> {
@@ -217,13 +259,24 @@ export class BaileysProvider implements MessagingProvider {
 
   async getGroupMetadata(groupJid: string) {
     const group = await this.requireSocket().groupMetadata(groupJid);
+    const participants: GroupParticipantIdentity[] = [];
+    for (const participant of group.participants) {
+      const resolved = await this.resolveIdentity(participant.id, participant.phoneNumber ?? participant.lid);
+      participants.push({
+        jid: resolved.jid ?? participant.id,
+        lid: resolved.lid ?? participant.lid,
+        pnJid: resolved.pnJid ?? participant.phoneNumber,
+        phone: resolved.phone ?? phoneFromPnJid(participant.phoneNumber),
+        admin: participant.admin,
+      });
+    }
     return {
       id: group.id,
       subject: group.subject,
       description: group.desc,
       size: group.participants.length,
       owner: group.owner,
-      participants: group.participants.map(p => p.id),
+      participants,
     };
   }
 
