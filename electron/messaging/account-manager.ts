@@ -70,13 +70,13 @@ export class AccountManager extends EventEmitter {
   async connect(id: string) {
     const account = this.get(id);
     if (!account) throw new Error('Conta não encontrada');
-    let provider = this.providers.get(id);
-    if (!provider) {
-      provider = new BaileysProvider(join(this.authRoot, id));
-      this.providers.set(id, provider);
-    }
+
+    const existing = this.providers.get(id);
+    const provider: MessagingProvider = existing ?? new BaileysProvider(join(this.authRoot, id));
+    if (!existing) this.providers.set(id, provider);
+
     await provider.connect({
-      onState: state => this.updateState(id, state, provider!),
+      onState: state => this.updateState(id, state, provider),
       onQr: qr => this.emit('qr', { accountId: id, qr }),
       onError: error => this.emit('error', { accountId: id, message: error.message }),
       onMessage: message => this.onMessage(id, message),
@@ -98,7 +98,7 @@ export class AccountManager extends EventEmitter {
     this.audit('account.remove', id);
   }
 
-  provider(id: string) {
+  provider(id: string): MessagingProvider {
     const provider = this.providers.get(id);
     if (!provider || !provider.isConnected()) throw new Error('A conta selecionada não está conectada');
     return provider;
