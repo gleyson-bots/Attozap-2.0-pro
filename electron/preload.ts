@@ -78,6 +78,9 @@ contextBridge.exposeInMainWorld('attozap', {
     list: (accountId?: string) => ipcRenderer.invoke('polls:list', accountId),
     onUpdate: (callback: Listener) => on('polls:update', callback),
   },
+  extractors: {
+    webContacts: (urls: string[]) => ipcRenderer.invoke('extractors:web-contacts', urls),
+  },
   autoReply: {
     list: (accountId?: string) => ipcRenderer.invoke('autoreply:list', accountId),
     create: (payload: any) => ipcRenderer.invoke('autoreply:create', payload),
