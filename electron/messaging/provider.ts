@@ -16,7 +16,10 @@ export type ProviderEvents = {
 export type IncomingMessage = {
   id: string;
   remoteJid: string;
+  remoteJidAlt?: string;
   participant?: string;
+  participantAlt?: string;
+  addressingMode?: string;
   pushName?: string;
   text: string;
   fromMe: boolean;
@@ -26,6 +29,9 @@ export type IncomingMessage = {
 export type ContactPresence = {
   input: string;
   jid?: string;
+  lid?: string;
+  pnJid?: string;
+  phone?: string;
   exists: boolean;
 };
 
@@ -56,6 +62,14 @@ export type PollInput = {
   selectableCount?: number;
 };
 
+export type GroupParticipantIdentity = {
+  jid: string;
+  lid?: string;
+  pnJid?: string;
+  phone?: string;
+  admin?: string | null;
+};
+
 export type GroupSummary = {
   id: string;
   subject: string;
@@ -82,8 +96,9 @@ export interface MessagingProvider {
   sendContact(remoteJid: string, input: ContactCardInput): Promise<MessageResult>;
   sendPoll(remoteJid: string, input: PollInput): Promise<MessageResult>;
   checkNumbers(numbers: string[]): Promise<ContactPresence[]>;
+  resolveIdentity(jid: string, alternateJid?: string): Promise<ContactPresence>;
   listGroups(): Promise<GroupSummary[]>;
-  getGroupMetadata(groupJid: string): Promise<GroupSummary & { participants: string[] }>;
+  getGroupMetadata(groupJid: string): Promise<GroupSummary & { participants: GroupParticipantIdentity[] }>;
   createGroup(subject: string, participants: string[]): Promise<GroupSummary>;
   addGroupParticipants(groupJid: string, participants: string[]): Promise<Array<{ jid: string; status: string }>>;
   joinGroup(invite: string): Promise<string>;
