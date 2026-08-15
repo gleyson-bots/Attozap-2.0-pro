@@ -1,18 +1,15 @@
 appId: com.gleysondevs.attozap.keygen
 productName: ATTOZAP KeyGen
+electronVersion: 43.2.0
 asar: true
-extraMetadata:
-  main: keygen/main.cjs
 directories:
+  app: keygen
   output: release-keygen
 files:
-  - keygen/**/*
-  - package.json
+  - "**/*"
 win:
   target:
     - target: portable
       arch:
         - x64
-  artifactName: ATTOZAP-KeyGen-${version}-${arch}.${ext}
-portable:
   artifactName: ATTOZAP-KeyGen-${version}-${arch}.${ext}
