@@ -116,6 +116,16 @@ export function openDatabase(path: string) {
       PRIMARY KEY(account_id, group_id),
       FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS group_activity (
+      account_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      participant_jid TEXT NOT NULL,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      first_message_at TEXT NOT NULL,
+      last_message_at TEXT NOT NULL,
+      PRIMARY KEY(account_id, group_id, participant_jid),
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       actor TEXT NOT NULL,
@@ -133,6 +143,7 @@ export function openDatabase(path: string) {
     CREATE INDEX IF NOT EXISTS idx_recipients_campaign_status ON campaign_recipients(campaign_id, status);
     CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(status, run_at);
     CREATE INDEX IF NOT EXISTS idx_auto_reply_account ON auto_reply_rules(account_id, enabled, priority DESC);
+    CREATE INDEX IF NOT EXISTS idx_group_activity_recent ON group_activity(account_id, group_id, last_message_at DESC);
   `);
 
   ensureColumn(db, 'instances', 'proxy_url', 'TEXT');
