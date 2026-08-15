@@ -6,8 +6,9 @@ import {
 } from 'lucide-react';
 import { AccountsPage } from './pages/AccountsPage';
 import { SenderPage } from './pages/SenderPage';
-import { ContactsPage, GroupsPage, NumberFilterPage } from './pages/ToolsPages';
+import { ContactsPage, NumberFilterPage } from './pages/ToolsPages';
 import { ContactGrabberPage } from './pages/ContactGrabberPage';
+import { GroupToolsPage } from './pages/GroupToolsPage';
 import { BulkGroupsPage } from './pages/BulkGroupsPage';
 import { AutoReplyPage, SchedulerPage } from './pages/AutomationPages';
 import { LicenseActivationPage } from './pages/LicensePage';
@@ -109,7 +110,7 @@ export default function App() {
         {view === 'contacts' && <ContactsPage/>} 
         {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} 
         {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>} 
-        {view === 'groups' && <GroupsPage accounts={accounts}/>} 
+        {view === 'groups' && <GroupToolsPage accounts={accounts}/>} 
         {view === 'bulkGroups' && <BulkGroupsPage accounts={accounts}/>} 
         {view === 'autoReply' && <AutoReplyPage accounts={accounts}/>} 
         {view === 'extractors' && <ExtractorsPage/>}
