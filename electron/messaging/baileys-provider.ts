@@ -231,9 +231,12 @@ export class BaileysProvider implements MessagingProvider {
     return { id: group.id, subject: group.subject, description: group.desc, size: group.participants.length, owner: group.owner };
   }
 
-  async addGroupParticipants(groupJid: string, participants: string[]) {
-    const result = await this.requireSocket().groupParticipantsUpdate(groupJid, participants.map(userJid), 'add');
-    return result.map(item => ({ jid: item.jid, status: item.status }));
+  async addGroupParticipants(groupJid: string, participants: string[]): Promise<Array<{ jid: string; status: string }>> {
+    const normalized = participants.map(userJid);
+    const result = await this.requireSocket().groupParticipantsUpdate(groupJid, normalized, 'add');
+    return result
+      .map((item, index) => ({ jid: item.jid ?? normalized[index] ?? '', status: item.status }))
+      .filter(item => Boolean(item.jid));
   }
 
   async joinGroup(invite: string) {
