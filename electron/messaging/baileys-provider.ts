@@ -1,20 +1,69 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  jidNormalizedUser,
   useMultiFileAuthState,
+  type WAMessage,
   type WASocket,
 } from '@whiskeysockets/baileys';
 import P from 'pino';
-import type { MessagingProvider, MessageResult, ProviderEvents } from './provider.js';
+import type {
+  ContactCardInput,
+  ContactPresence,
+  GroupInviteInfo,
+  GroupSummary,
+  IncomingMessage,
+  LocationInput,
+  MessagingProvider,
+  MessageResult,
+  PollInput,
+  ProviderEvents,
+  SendMediaInput,
+} from './provider.js';
+
+function digits(value: string) {
+  return value.replace(/\D/g, '');
+}
+
+function userJid(value: string) {
+  if (value.includes('@')) return value;
+  return `${digits(value)}@s.whatsapp.net`;
+}
+
+function inviteCode(value: string) {
+  const clean = value.trim();
+  const match = clean.match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i);
+  return match?.[1] ?? clean;
+}
+
+function messageText(message: WAMessage): string {
+  const content = message.message;
+  if (!content) return '';
+  return content.conversation
+    ?? content.extendedTextMessage?.text
+    ?? content.imageMessage?.caption
+    ?? content.videoMessage?.caption
+    ?? content.documentMessage?.caption
+    ?? '';
+}
+
+function receipt(result: WAMessage | undefined): MessageResult {
+  if (!result?.key?.id || !result.key.remoteJid) throw new Error('Provider returned an invalid message receipt');
+  return { id: result.key.id, remoteJid: result.key.remoteJid, timestamp: Date.now() };
+}
 
 export class BaileysProvider implements MessagingProvider {
   readonly id = 'baileys';
   private socket: WASocket | null = null;
   private connected = false;
+  private manuallyClosing = false;
+  private events: ProviderEvents = {};
 
   constructor(private readonly authDirectory: string) {}
 
   async connect(events: ProviderEvents = {}) {
+    this.events = events;
+    this.manuallyClosing = false;
     events.onState?.('connecting');
     const { state, saveCreds } = await useMultiFileAuthState(this.authDirectory);
     const { version } = await fetchLatestBaileysVersion();
@@ -31,23 +80,37 @@ export class BaileysProvider implements MessagingProvider {
 
     this.socket = socket;
     socket.ev.on('creds.update', saveCreds);
+    socket.ev.on('messages.upsert', ({ messages }) => {
+      for (const message of messages) {
+        const remoteJid = message.key.remoteJid;
+        if (!remoteJid || remoteJid === 'status@broadcast') continue;
+        const incoming: IncomingMessage = {
+          id: message.key.id ?? crypto.randomUUID(),
+          remoteJid,
+          participant: message.key.participant ?? undefined,
+          text: messageText(message),
+          fromMe: Boolean(message.key.fromMe),
+          timestamp: Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)) * 1000,
+        };
+        this.events.onMessage?.(incoming);
+      }
+    });
+
     socket.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
       if (qr) {
         events.onState?.('qr');
         events.onQr?.(qr);
       }
-
       if (connection === 'open') {
         this.connected = true;
         events.onState?.('connected');
       }
-
       if (connection === 'close') {
         this.connected = false;
-        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-        const loggedOut = statusCode === DisconnectReason.loggedOut;
         events.onState?.('disconnected');
-        if (!loggedOut) {
+        if (this.manuallyClosing) return;
+        const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
+        if (statusCode !== DisconnectReason.loggedOut) {
           events.onState?.('reconnecting');
           try { await this.connect(events); } catch (error) { events.onError?.(error as Error); }
         }
@@ -55,26 +118,141 @@ export class BaileysProvider implements MessagingProvider {
     });
   }
 
-  async disconnect() {
+  async disconnect(logout = false) {
     this.connected = false;
-    if (this.socket) {
-      await this.socket.logout().catch(() => undefined);
-      this.socket = null;
-    }
+    this.manuallyClosing = true;
+    const socket = this.socket;
+    this.socket = null;
+    if (!socket) return;
+    if (logout) await socket.logout().catch(() => undefined);
+    else socket.end(undefined);
   }
 
-  async sendText(remoteJid: string, text: string): Promise<MessageResult> {
-    if (!this.socket || !this.connected) throw new Error('Messaging provider is not connected');
-    const result = await this.socket.sendMessage(remoteJid, { text });
-    if (!result?.key?.id || !result.key.remoteJid) throw new Error('Provider returned an invalid message receipt');
+  private requireSocket() {
+    if (!this.socket || !this.connected) throw new Error('A conta do WhatsApp não está conectada');
+    return this.socket;
+  }
+
+  async sendText(remoteJid: string, text: string) {
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { text }));
+  }
+
+  async sendImage(remoteJid: string, input: SendMediaInput) {
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { image: { url: input.path }, caption: input.caption }));
+  }
+
+  async sendVideo(remoteJid: string, input: SendMediaInput) {
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { video: { url: input.path }, caption: input.caption, mimetype: input.mimetype }));
+  }
+
+  async sendDocument(remoteJid: string, input: SendMediaInput) {
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
+      document: { url: input.path },
+      caption: input.caption,
+      fileName: input.fileName,
+      mimetype: input.mimetype ?? 'application/octet-stream',
+    }));
+  }
+
+  async sendAudio(remoteJid: string, input: SendMediaInput) {
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
+      audio: { url: input.path },
+      mimetype: input.mimetype ?? 'audio/mpeg',
+      ptt: input.ptt ?? false,
+    }));
+  }
+
+  async sendSticker(remoteJid: string, input: SendMediaInput) {
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { sticker: { url: input.path } }));
+  }
+
+  async sendLocation(remoteJid: string, input: LocationInput) {
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
+      location: { degreesLatitude: input.latitude, degreesLongitude: input.longitude, name: input.name, address: input.address },
+    }));
+  }
+
+  async sendContact(remoteJid: string, input: ContactCardInput) {
+    const phone = digits(input.phone);
+    const vcard = [
+      'BEGIN:VCARD', 'VERSION:3.0', `FN:${input.displayName}`,
+      input.organization ? `ORG:${input.organization}` : undefined,
+      `TEL;type=CELL;type=VOICE;waid=${phone}:+${phone}`,
+      'END:VCARD',
+    ].filter(Boolean).join('\n');
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
+      contacts: { displayName: input.displayName, contacts: [{ displayName: input.displayName, vcard }] },
+    }));
+  }
+
+  async sendPoll(remoteJid: string, input: PollInput) {
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
+      poll: { name: input.name, values: input.values, selectableCount: input.selectableCount ?? 1 },
+    }));
+  }
+
+  async checkNumbers(numbers: string[]): Promise<ContactPresence[]> {
+    const socket = this.requireSocket();
+    const unique = [...new Set(numbers.map(digits).filter(Boolean))];
+    const result = await socket.onWhatsApp(...unique);
+    const byNumber = new Map((result ?? []).map(item => [digits(item.jid), item]));
+    return unique.map(input => {
+      const match = byNumber.get(input);
+      return { input, jid: match?.jid, exists: Boolean(match?.exists) };
+    });
+  }
+
+  async listGroups(): Promise<GroupSummary[]> {
+    const groups = await this.requireSocket().groupFetchAllParticipating();
+    return Object.values(groups).map(group => ({
+      id: group.id,
+      subject: group.subject,
+      description: group.desc,
+      size: group.participants.length,
+      owner: group.owner,
+    })).sort((a, b) => a.subject.localeCompare(b.subject));
+  }
+
+  async getGroupMetadata(groupJid: string) {
+    const group = await this.requireSocket().groupMetadata(groupJid);
     return {
-      id: result.key.id,
-      remoteJid: result.key.remoteJid,
-      timestamp: Date.now(),
+      id: group.id,
+      subject: group.subject,
+      description: group.desc,
+      size: group.participants.length,
+      owner: group.owner,
+      participants: group.participants.map(p => p.id),
     };
   }
 
-  isConnected() {
-    return this.connected;
+  async createGroup(subject: string, participants: string[]) {
+    const group = await this.requireSocket().groupCreate(subject, participants.map(userJid));
+    return { id: group.id, subject: group.subject, description: group.desc, size: group.participants.length, owner: group.owner };
   }
+
+  async addGroupParticipants(groupJid: string, participants: string[]) {
+    const result = await this.requireSocket().groupParticipantsUpdate(groupJid, participants.map(userJid), 'add');
+    return result.map(item => ({ jid: item.jid, status: item.status }));
+  }
+
+  async joinGroup(invite: string) {
+    const jid = await this.requireSocket().groupAcceptInvite(inviteCode(invite));
+    if (!jid) throw new Error('O WhatsApp não retornou o grupo após aceitar o convite');
+    return jid;
+  }
+
+  async verifyGroupInvite(invite: string): Promise<GroupInviteInfo> {
+    const code = inviteCode(invite);
+    const group = await this.requireSocket().groupGetInviteInfo(code);
+    return { id: group.id, subject: group.subject, description: group.desc, size: group.size ?? group.participants.length, owner: group.owner, inviteCode: code };
+  }
+
+  async getGroupInvite(groupJid: string) {
+    const code = await this.requireSocket().groupInviteCode(groupJid);
+    if (!code) throw new Error('Não foi possível obter o convite do grupo');
+    return `https://chat.whatsapp.com/${code}`;
+  }
+
+  isConnected() { return this.connected; }
+  getSelfJid() { return this.socket?.user?.id ? jidNormalizedUser(this.socket.user.id) : undefined; }
 }
