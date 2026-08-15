@@ -41,6 +41,19 @@ export function openDatabase(path: string) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS wa_identities (
+      account_id TEXT NOT NULL,
+      canonical_jid TEXT NOT NULL,
+      lid TEXT,
+      pn_jid TEXT,
+      phone TEXT,
+      push_name TEXT,
+      source TEXT,
+      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(account_id, canonical_jid),
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS contacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       phone TEXT NOT NULL UNIQUE,
@@ -56,6 +69,9 @@ export function openDatabase(path: string) {
     CREATE TABLE IF NOT EXISTS chat_cache (
       account_id TEXT NOT NULL,
       jid TEXT NOT NULL,
+      lid TEXT,
+      pn_jid TEXT,
+      phone TEXT,
       name TEXT,
       is_group INTEGER NOT NULL DEFAULT 0,
       message_count INTEGER NOT NULL DEFAULT 0,
@@ -131,6 +147,9 @@ export function openDatabase(path: string) {
       account_id TEXT NOT NULL,
       group_id TEXT NOT NULL,
       participant_jid TEXT NOT NULL,
+      participant_lid TEXT,
+      participant_pn_jid TEXT,
+      participant_phone TEXT,
       message_count INTEGER NOT NULL DEFAULT 0,
       first_message_at TEXT NOT NULL,
       last_message_at TEXT NOT NULL,
@@ -146,6 +165,9 @@ export function openDatabase(path: string) {
       metadata_json TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_identity_lid ON wa_identities(account_id, lid) WHERE lid IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_identity_pn ON wa_identities(account_id, pn_jid) WHERE pn_jid IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_wa_identity_phone ON wa_identities(account_id, phone);
     CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_instances_status ON instances(status);
     CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
@@ -159,6 +181,12 @@ export function openDatabase(path: string) {
   `);
 
   ensureColumn(db, 'instances', 'proxy_url', 'TEXT');
+  ensureColumn(db, 'chat_cache', 'lid', 'TEXT');
+  ensureColumn(db, 'chat_cache', 'pn_jid', 'TEXT');
+  ensureColumn(db, 'chat_cache', 'phone', 'TEXT');
+  ensureColumn(db, 'group_activity', 'participant_lid', 'TEXT');
+  ensureColumn(db, 'group_activity', 'participant_pn_jid', 'TEXT');
+  ensureColumn(db, 'group_activity', 'participant_phone', 'TEXT');
   return db;
 }
 
