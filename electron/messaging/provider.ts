@@ -6,11 +6,24 @@ export type MessageResult = {
   timestamp: number;
 };
 
+export type PollVoteAggregate = {
+  name: string;
+  voters: string[];
+};
+
+export type PollUpdateEvent = {
+  pollId: string;
+  remoteJid: string;
+  question?: string;
+  votes: PollVoteAggregate[];
+};
+
 export type ProviderEvents = {
   onState?: (state: ConnectionState) => void;
   onQr?: (qr: string) => void;
   onError?: (error: Error) => void;
   onMessage?: (message: IncomingMessage) => void;
+  onPollUpdate?: (event: PollUpdateEvent) => void;
 };
 
 export type IncomingMessage = {
