@@ -8,11 +8,12 @@ import { AccountsPage } from './pages/AccountsPage';
 import { SenderPage } from './pages/SenderPage';
 import { ContactsPage, GroupsPage, NumberFilterPage } from './pages/ToolsPages';
 import { ContactGrabberPage } from './pages/ContactGrabberPage';
+import { BulkGroupsPage } from './pages/BulkGroupsPage';
 import { AutoReplyPage, SchedulerPage } from './pages/AutomationPages';
 import { LicenseActivationPage } from './pages/LicensePage';
 import { campaignPercent, toLocalDateTime } from './lib';
 
-type View = 'dashboard'|'sender'|'groupSender'|'scheduler'|'accounts'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'autoReply'|'extractors'|'license'|'settings';
+type View = 'dashboard'|'sender'|'groupSender'|'scheduler'|'accounts'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'extractors'|'license'|'settings';
 type NavItem = { id: View; label: string; icon: any };
 
 const sections: Array<{ label: string; items: NavItem[] }> = [
@@ -27,6 +28,7 @@ const sections: Array<{ label: string; items: NavItem[] }> = [
     { id: 'contacts', label: 'Contatos & listas', icon: ContactRound },
     { id: 'contactGrabber', label: 'Contact Grabber', icon: MessageSquareText },
     { id: 'groups', label: 'Ferramentas de grupos', icon: Users },
+    { id: 'bulkGroups', label: 'Bulk Group Tools', icon: Group },
   ] },
   { label: 'AUTOMAÇÃO', items: [{ id: 'autoReply', label: 'Auto Reply', icon: Bot }] },
   { label: 'FERRAMENTAS', items: [
@@ -108,6 +110,7 @@ export default function App() {
         {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} 
         {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>} 
         {view === 'groups' && <GroupsPage accounts={accounts}/>} 
+        {view === 'bulkGroups' && <BulkGroupsPage accounts={accounts}/>} 
         {view === 'autoReply' && <AutoReplyPage accounts={accounts}/>} 
         {view === 'extractors' && <ExtractorsPage/>}
         {view === 'license' && <LicenseActivationPage/>}
@@ -143,6 +146,7 @@ function Dashboard({ accounts, campaigns, go }: { accounts: any[]; campaigns: an
       <button onClick={() => go('numberFilter')}><FileSearch size={18}/><span><b>Number Filter</b><small>Validar números</small></span></button>
       <button onClick={() => go('contactGrabber')}><MessageSquareText size={18}/><span><b>Contact Grabber</b><small>JID/LID observados</small></span></button>
       <button onClick={() => go('groups')}><Users size={18}/><span><b>Group Tools</b><small>Membros e convites</small></span></button>
+      <button onClick={() => go('bulkGroups')}><Group size={18}/><span><b>Bulk Groups</b><small>Criar/adicionar em lote</small></span></button>
       <button onClick={() => go('autoReply')}><Bot size={18}/><span><b>Auto Reply</b><small>Respostas automáticas</small></span></button>
       <button onClick={() => go('contacts')}><Ban size={18}/><span><b>Listas</b><small>Block & Friendly</small></span></button>
     </section>
