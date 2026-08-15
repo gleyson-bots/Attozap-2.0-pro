@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FileAudio, FileText, Image, MapPin, Pause, Play, Plus, Send, ShieldCheck, Square, Sticker, Users, Video } from 'lucide-react';
+import { FileAudio, FileText, Image, MapPin, Pause, Play, Plus, Send, ShieldCheck, Square, Sticker, Trash2, Users, Video } from 'lucide-react';
 import { campaignPercent, parseRecipients } from '../lib';
 
 type Mode = 'contact' | 'group';
+type MessageMode = 'all' | 'rotate';
 
 function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
 
 export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mode: Mode; accounts: any[]; campaigns: any[]; reloadCampaigns: () => Promise<void> }) {
   const connected = accounts.filter(account => account.status === 'connected');
-  const [accountId, setAccountId] = useState(connected[0]?.id ?? '');
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [name, setName] = useState(mode === 'group' ? 'Envio para grupos' : 'Nova campanha');
-  const [message, setMessage] = useState('Olá {name}!');
+  const [messages, setMessages] = useState<string[]>(['Olá {name}!']);
+  const [messageMode, setMessageMode] = useState<MessageMode>('all');
   const [rawRecipients, setRawRecipients] = useState('');
   const [groups, setGroups] = useState<any[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
@@ -18,14 +20,21 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
   const [fileType, setFileType] = useState<'image'|'video'|'document'|'audio'|'sticker'>('image');
   const [minDelay, setMinDelay] = useState(1500);
   const [maxDelay, setMaxDelay] = useState(3000);
+  const [switchAfter, setSwitchAfter] = useState(10);
   const [filterBefore, setFilterBefore] = useState(false);
   const [friendlyOnly, setFriendlyOnly] = useState(false);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
 
+  const accountId = selectedAccountIds[0] ?? '';
+
   useEffect(() => {
-    if (!accountId && connected[0]?.id) setAccountId(connected[0].id);
-  }, [accounts, accountId, connected]);
+    const available = new Set(connected.map(account => account.id));
+    setSelectedAccountIds(current => {
+      const valid = current.filter(id => available.has(id));
+      return valid.length ? valid : connected[0]?.id ? [connected[0].id] : [];
+    });
+  }, [accounts]);
 
   useEffect(() => {
     const off = window.attozap.campaigns.onProgress(() => void reloadCampaigns());
@@ -46,8 +55,22 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
 
   const recipients = useMemo(() => mode === 'contact'
     ? parseRecipients(rawRecipients)
-    : selectedGroups.map(groupId => ({ target: groupId, name: groups.find(g => (g.group_id ?? g.id) === groupId)?.subject ?? 'Grupo' })),
+    : selectedGroups.map(groupId => ({ target: groupId, name: groups.find(group => (group.group_id ?? group.id) === groupId)?.subject ?? 'Grupo' })),
   [mode, rawRecipients, selectedGroups, groups]);
+
+  const nonEmptyMessages = messages.map(value => value.trim()).filter(Boolean);
+
+  function toggleAccount(id: string, checked: boolean) {
+    setSelectedAccountIds(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id));
+  }
+
+  function updateMessage(index: number, value: string) {
+    setMessages(current => current.map((item, i) => i === index ? value : item));
+  }
+
+  function addVariable(index: number, variable: string) {
+    updateMessage(index, `${messages[index]} ${variable}`);
+  }
 
   async function addFile() {
     const paths = await window.attozap.files.pick({ multiple: true });
@@ -59,14 +82,28 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
   }
 
   async function createAndStart() {
-    if (!accountId) { setError('Conecte e selecione uma conta do WhatsApp.'); return; }
+    if (!accountId) { setError('Conecte e selecione pelo menos uma conta do WhatsApp.'); return; }
     if (!recipients.length) { setError(mode === 'contact' ? 'Cole pelo menos um número.' : 'Selecione pelo menos um grupo.'); return; }
-    if (!message.trim() && !parts.length) { setError('Adicione uma mensagem ou anexo.'); return; }
+    if (!nonEmptyMessages.length && !parts.length) { setError('Adicione uma mensagem ou anexo.'); return; }
     setCreating(true); setError('');
     try {
       const campaign = await window.attozap.campaigns.create({
-        accountId, name, targetType: mode, messageTemplate: message, recipients, parts,
-        options: { minDelayMs: minDelay, maxDelayMs: maxDelay, filterBeforeSend: mode === 'contact' && filterBefore, skipBlocked: true, friendlyOnly: mode === 'contact' && friendlyOnly },
+        accountId,
+        accountIds: selectedAccountIds,
+        name,
+        targetType: mode,
+        messageTemplates: nonEmptyMessages,
+        messageMode,
+        recipients,
+        parts,
+        options: {
+          minDelayMs: minDelay,
+          maxDelayMs: maxDelay,
+          switchAccountAfterRecipients: selectedAccountIds.length > 1 ? switchAfter : 0,
+          filterBeforeSend: mode === 'contact' && filterBefore,
+          skipBlocked: true,
+          friendlyOnly: mode === 'contact' && friendlyOnly,
+        },
       });
       await reloadCampaigns();
       await window.attozap.campaigns.start(campaign.id);
@@ -77,34 +114,49 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
   const relevantCampaigns = campaigns.filter(item => item.target_type === mode).slice(0, 20);
 
   return <div className="page-stack">
-    <div className="page-head"><div><span className="kicker">{mode === 'contact' ? 'CONTACT SENDER' : 'GROUP SENDER'}</span><h2>{mode === 'contact' ? 'Envio para contatos' : 'Envio para grupos'}</h2><p>Campanhas sequenciais com fila, pausa, stop, anexos e personalização.</p></div><span className="safety-pill"><ShieldCheck size={15}/> Blocklist sempre respeitada</span></div>
+    <div className="page-head"><div><span className="kicker">{mode === 'contact' ? 'CONTACT SENDER' : 'GROUP SENDER'}</span><h2>{mode === 'contact' ? 'Envio para contatos' : 'Envio para grupos'}</h2><p>Campanhas com múltiplas mensagens, contas, fila, anexos e personalização.</p></div><span className="safety-pill"><ShieldCheck size={15}/> Blocklist sempre respeitada</span></div>
     {error && <div className="notice error">{error}</div>}
 
     <div className="sender-layout">
       <section className="card composer-card">
-        <div className="section-title"><div><span>01</span><div><h3>Mensagem</h3><p>Conteúdo e anexos da campanha</p></div></div></div>
-        <div className="form-grid two"><div className="field"><label>Conta</label><select value={accountId} onChange={e => setAccountId(e.target.value)}><option value="">Selecione...</option>{connected.map(account => <option key={account.id} value={account.id}>{account.name} {account.phone ? `(+${account.phone})` : ''}</option>)}</select></div><div className="field"><label>Nome da campanha</label><input value={name} onChange={e => setName(e.target.value)}/></div></div>
-        <div className="field"><label>Mensagem</label><textarea className="message-box" value={message} onChange={e => setMessage(e.target.value)} placeholder="Digite a mensagem..."/><div className="variable-row"><span>Variáveis:</span><button onClick={() => setMessage(v => v + ' {name}')}>{'{name}'}</button><button onClick={() => setMessage(v => v + ' {phone}')}>{'{phone}'}</button><small>Também aceita {'{{campo}}'} das colunas importadas.</small></div></div>
+        <div className="section-title"><div><span>01</span><div><h3>Mensagens</h3><p>Envie todas ou rotacione uma mensagem por destinatário</p></div></div></div>
+
+        <div className="form-grid two">
+          <div className="field"><label>Nome da campanha</label><input value={name} onChange={e => setName(e.target.value)}/></div>
+          <div className="field"><label>Modo com múltiplas mensagens</label><select value={messageMode} onChange={e => setMessageMode(e.target.value as MessageMode)}><option value="all">Enviar todas para cada destinatário</option><option value="rotate">Rotacionar aleatoriamente</option></select></div>
+        </div>
+
+        <div className="message-variants">
+          {messages.map((message, index) => <div className="message-variant" key={index}>
+            <div className="message-variant-head"><b>Mensagem {index + 1}</b>{messages.length > 1 && <button className="icon-button danger" onClick={() => setMessages(current => current.filter((_, i) => i !== index))}><Trash2 size={14}/></button>}</div>
+            <textarea className="message-box" value={message} onChange={e => updateMessage(index, e.target.value)} placeholder="Digite a mensagem..."/>
+            <div className="variable-row"><span>Variáveis:</span><button onClick={() => addVariable(index, '{name}')}>{'{name}'}</button><button onClick={() => addVariable(index, '{phone}')}>{'{phone}'}</button><small>Também aceita {'{{campo}}'} das colunas importadas.</small></div>
+          </div>)}
+          <button className="button ghost" onClick={() => setMessages(current => [...current, ''])}><Plus size={15}/> Adicionar outra mensagem</button>
+        </div>
 
         <div className="attachment-builder">
           <div className="field compact"><label>Tipo de anexo</label><select value={fileType} onChange={e => setFileType(e.target.value as any)}><option value="image">Imagem</option><option value="video">Vídeo</option><option value="document">Documento</option><option value="audio">Áudio / PTT</option><option value="sticker">Sticker</option></select></div>
           <button className="button ghost" onClick={() => void addFile()}><Plus size={16}/> Adicionar arquivo</button>
         </div>
         {!!parts.length && <div className="parts-list">{parts.map((part, index) => <div key={`${part.input?.path}-${index}`}><span className="part-icon">{part.type === 'image' ? <Image size={15}/> : part.type === 'video' ? <Video size={15}/> : part.type === 'audio' ? <FileAudio size={15}/> : part.type === 'sticker' ? <Sticker size={15}/> : <FileText size={15}/>}</span><span>{fileName(part.input.path)}</span><small>{part.type}</small><button onClick={() => setParts(current => current.filter((_, i) => i !== index))}>×</button></div>)}</div>}
-
         <details className="advanced"><summary>Adicionar localização, contato ou enquete</summary><AdvancedParts onAdd={part => setParts(current => [...current, part])}/></details>
       </section>
 
       <section className="card targets-card">
-        <div className="section-title"><div><span>02</span><div><h3>Destinatários</h3><p>{recipients.length} selecionado(s)</p></div></div></div>
+        <div className="section-title"><div><span>02</span><div><h3>Contas & destinatários</h3><p>{recipients.length} selecionado(s)</p></div></div></div>
+
+        <div className="field"><label>Contas conectadas</label><div className="group-picker account-picker">{connected.map(account => <label key={account.id}><input type="checkbox" checked={selectedAccountIds.includes(account.id)} onChange={e => toggleAccount(account.id, e.target.checked)}/><span><b>{account.name}</b><small>{account.phone ? `+${account.phone}` : 'Conectada'}</small></span></label>)}{!connected.length && <div className="empty mini"><Users size={22}/><p>Conecte uma conta primeiro.</p></div>}</div></div>
+        {selectedAccountIds.length > 1 && <div className="field"><label>Trocar de conta a cada X destinatários</label><input type="number" min="1" value={switchAfter} onChange={e => setSwitchAfter(Math.max(1, Number(e.target.value)))}/><small>As contas selecionadas são usadas em sequência.</small></div>}
+
         {mode === 'contact' ? <>
           <div className="field"><label>Números / contatos</label><textarea className="recipients-box" value={rawRecipients} onChange={e => setRawRecipients(e.target.value)} placeholder={'5511999999999;Maria;cidade=São Paulo\n5511888888888;João;cidade=Campinas'}/><small>Formato: número;nome;campo=valor. Uma linha por contato.</small></div>
           <label className="check-row"><input type="checkbox" checked={filterBefore} onChange={e => setFilterBefore(e.target.checked)}/><span><b>Filtrar números antes de enviar</b><small>Consulta todos os números antes da campanha.</small></span></label>
           <label className="check-row"><input type="checkbox" checked={friendlyOnly} onChange={e => setFriendlyOnly(e.target.checked)}/><span><b>Somente Friendly List</b><small>Ignora contatos que não estejam marcados como amigáveis.</small></span></label>
-        </> : <div className="group-picker">{groups.length === 0 ? <div className="empty mini"><Users size={24}/><p>Sincronize os grupos na ferramenta de grupos.</p></div> : groups.map(group => { const id = group.group_id ?? group.id; return <label key={id}><input type="checkbox" checked={selectedGroups.includes(id)} onChange={e => setSelectedGroups(current => e.target.checked ? [...current,id] : current.filter(value => value !== id))}/><span><b>{group.subject}</b><small>{group.member_count ?? group.size ?? 0} membros</small></span></label> })}</div>}
+        </> : <div className="group-picker">{groups.length === 0 ? <div className="empty mini"><Users size={24}/><p>Sincronize os grupos na ferramenta de grupos.</p></div> : groups.map(group => { const id = group.group_id ?? group.id; return <label key={id}><input type="checkbox" checked={selectedGroups.includes(id)} onChange={e => setSelectedGroups(current => e.target.checked ? [...current, id] : current.filter(value => value !== id))}/><span><b>{group.subject}</b><small>{group.member_count ?? group.size ?? 0} membros</small></span></label>; })}</div>}
 
         <div className="delay-box"><div className="field"><label>Delay mínimo (ms)</label><input type="number" min="500" value={minDelay} onChange={e => setMinDelay(Number(e.target.value))}/></div><div className="field"><label>Delay máximo (ms)</label><input type="number" min="500" value={maxDelay} onChange={e => setMaxDelay(Number(e.target.value))}/></div></div>
-        <button className="button primary big full" disabled={creating || !connected.length} onClick={() => void createAndStart()}><Send size={18}/>{creating ? 'Preparando...' : `Iniciar envio para ${recipients.length}`}</button>
+        <button className="button primary big full" disabled={creating || !selectedAccountIds.length} onClick={() => void createAndStart()}><Send size={18}/>{creating ? 'Preparando...' : `Iniciar envio para ${recipients.length}`}</button>
         {!connected.length && <small className="warning-text">Conecte uma conta antes de iniciar uma campanha.</small>}
       </section>
     </div>
