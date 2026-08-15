@@ -14,8 +14,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let scheduler: NodeJS.Timeout | null = null;
 
-async function createWindow() {
-  mainWindow = new BrowserWindow({
+function createWindow() {
+  const window = new BrowserWindow({
     width: 1480,
     height: 940,
     minWidth: 1080,
@@ -31,19 +31,22 @@ async function createWindow() {
     },
   });
 
-  mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
+  window.webContents.on('did-fail-load', (_event, code, description, url) => {
     console.error('[renderer:did-fail-load]', { code, description, url });
   });
-  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+  window.webContents.on('render-process-gone', (_event, details) => {
     console.error('[renderer:gone]', details);
   });
-  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
+  window.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error('[renderer:preload-error]', { preloadPath, error });
   });
 
-  if (!app.isPackaged) await mainWindow.loadURL('http://localhost:5173');
-  else await mainWindow.loadFile(join(__dirname, '../dist/index.html'));
-  return mainWindow;
+  return window;
+}
+
+async function loadRenderer(window: BrowserWindow) {
+  if (!app.isPackaged) await window.loadURL('http://localhost:5173');
+  else await window.loadFile(join(__dirname, '../dist/index.html'));
 }
 
 app.whenReady().then(async () => {
@@ -60,16 +63,20 @@ app.whenReady().then(async () => {
   ipcMain.handle('app:get-version', () => app.getVersion());
   ipcMain.handle('app:get-platform', () => process.platform);
 
-  const window = await createWindow();
-  registerIpc({ window, db, accounts, campaigns, autoReply, tools, license });
+  mainWindow = createWindow();
+  registerIpc({ window: mainWindow, db, accounts, campaigns, autoReply, tools, license });
   registerExtractorIpc();
+  await loadRenderer(mainWindow);
 
   scheduler = setInterval(() => {
     void campaigns.runDueSchedules().catch(error => console.error('[scheduler]', error));
   }, 30_000);
 
   app.on('activate', async () => {
-    if (BrowserWindow.getAllWindows().length === 0) mainWindow = await createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      mainWindow = createWindow();
+      await loadRenderer(mainWindow);
+    }
   });
 });
 
