@@ -70,10 +70,12 @@ export function registerIpc(input: {
   ipcMain.handle('groups:sync', (_event, accountId: string) => tools.syncGroups(accountId));
   ipcMain.handle('groups:list', (_event, accountId: string) => tools.listCachedGroups(accountId));
   ipcMain.handle('groups:members', (_event, accountId: string, groupJid: string) => tools.groupMembers(accountId, groupJid));
+  ipcMain.handle('groups:active-members', (_event, accountId: string, groupJid: string, days?: number) => tools.activeGroupMembers(accountId, groupJid, days));
   ipcMain.handle('groups:create', (_event, accountId: string, subject: string, participants: string[]) => tools.groupCreate(accountId, subject, participants));
   ipcMain.handle('groups:add', (_event, accountId: string, groupJid: string, participants: string[]) => tools.groupAdd(accountId, groupJid, participants));
   ipcMain.handle('groups:join', (_event, accountId: string, invite: string) => tools.groupJoin(accountId, invite));
   ipcMain.handle('groups:verify', (_event, accountId: string, invite: string) => tools.groupVerify(accountId, invite));
+  ipcMain.handle('groups:verify-many', (_event, accountId: string, invites: string[]) => tools.groupVerifyMany(accountId, invites));
   ipcMain.handle('groups:invite', (_event, accountId: string, groupJid: string) => tools.groupInvite(accountId, groupJid));
 
   ipcMain.handle('autoreply:list', (_event, accountId?: string) => autoReply.list(accountId));
