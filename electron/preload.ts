@@ -74,6 +74,10 @@ contextBridge.exposeInMainWorld('attozap', {
     update: (id: string, payload: any) => ipcRenderer.invoke('templates:update', id, payload),
     remove: (id: string) => ipcRenderer.invoke('templates:remove', id),
   },
+  polls: {
+    list: (accountId?: string) => ipcRenderer.invoke('polls:list', accountId),
+    onUpdate: (callback: Listener) => on('polls:update', callback),
+  },
   autoReply: {
     list: (accountId?: string) => ipcRenderer.invoke('autoreply:list', accountId),
     create: (payload: any) => ipcRenderer.invoke('autoreply:create', payload),
