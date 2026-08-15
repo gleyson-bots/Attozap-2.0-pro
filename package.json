@@ -9,7 +9,9 @@
     "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
     "desktop": "electron .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pack:win": "npm run build && electron-builder --win nsis portable --x64",
+    "license:help": "node tools/license-cli.mjs --help"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc13",
@@ -30,8 +32,43 @@
     "@vitejs/plugin-react": "^5.0.2",
     "concurrently": "^9.2.1",
     "electron": "43.2.0",
+    "electron-builder": "26.15.3",
     "typescript": "^5.9.2",
     "vite": "8.1.5",
     "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "com.gleysondevs.attozap.wasender",
+    "productName": "ATTOZAP WASender Pro",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": ".",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "artifactName": "ATTOZAP-WASender-Pro-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ATTOZAP WASender Pro"
+    }
   }
 }
