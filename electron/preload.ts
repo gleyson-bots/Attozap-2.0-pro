@@ -81,6 +81,9 @@ contextBridge.exposeInMainWorld('attozap', {
   extractors: {
     webContacts: (urls: string[]) => ipcRenderer.invoke('extractors:web-contacts', urls),
   },
+  importers: {
+    pickContacts: () => ipcRenderer.invoke('importers:pick-contacts'),
+  },
   autoReply: {
     list: (accountId?: string) => ipcRenderer.invoke('autoreply:list', accountId),
     create: (payload: any) => ipcRenderer.invoke('autoreply:create', payload),
