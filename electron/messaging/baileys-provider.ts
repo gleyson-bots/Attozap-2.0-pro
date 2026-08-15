@@ -8,6 +8,7 @@ import makeWASocket, {
   type WAMessage,
   type WASocket,
 } from '@whiskeysockets/baileys';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { randomUUID } from 'node:crypto';
 import P from 'pino';
 import { identityFromPair, mergeIdentity, normalizeJid, phoneFromPnJid } from './identity.js';
@@ -60,14 +61,31 @@ function receipt(result: WAMessage | undefined): MessageResult {
   return { id: result.key.id, remoteJid: result.key.remoteJid, timestamp: Date.now() };
 }
 
+function validateProxy(proxy?: string) {
+  const value = proxy?.trim();
+  if (!value) return undefined;
+  let parsed: URL;
+  try { parsed = new URL(value); }
+  catch { throw new Error('Proxy inválido. Use http://usuario:senha@host:porta ou https://host:porta'); }
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Este build aceita proxy HTTP/HTTPS');
+  return value;
+}
+
 export class BaileysProvider implements MessagingProvider {
   readonly id = 'baileys';
   private socket: WASocket | null = null;
   private connected = false;
   private manuallyClosing = false;
   private events: ProviderEvents = {};
+  private proxyUrl?: string;
 
-  constructor(private readonly authDirectory: string) {}
+  constructor(private readonly authDirectory: string, proxyUrl?: string) {
+    this.proxyUrl = validateProxy(proxyUrl);
+  }
+
+  setProxy(proxyUrl?: string) {
+    this.proxyUrl = validateProxy(proxyUrl);
+  }
 
   async connect(events: ProviderEvents = {}) {
     this.events = events;
@@ -75,6 +93,7 @@ export class BaileysProvider implements MessagingProvider {
     events.onState?.('connecting');
     const { state, saveCreds } = await useMultiFileAuthState(this.authDirectory);
     const { version } = await fetchLatestBaileysVersion();
+    const proxyAgent = this.proxyUrl ? new HttpsProxyAgent(this.proxyUrl) : undefined;
 
     const socket = makeWASocket({
       version,
@@ -84,6 +103,8 @@ export class BaileysProvider implements MessagingProvider {
       markOnlineOnConnect: false,
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
+      agent: proxyAgent,
+      fetchAgent: proxyAgent,
     });
 
     this.socket = socket;
