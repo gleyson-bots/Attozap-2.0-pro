@@ -114,8 +114,23 @@ export class AccountManager extends EventEmitter {
   }
 
   private onMessage(accountId: string, message: IncomingMessage) {
-    if (!message.fromMe && message.remoteJid.endsWith('@g.us') && message.participant) {
-      const at = new Date(message.timestamp).toISOString();
+    const at = new Date(message.timestamp).toISOString();
+    const isGroup = message.remoteJid.endsWith('@g.us');
+    const cacheable = !message.remoteJid.endsWith('@broadcast') && !message.remoteJid.includes('@newsletter');
+
+    if (cacheable) {
+      this.db.prepare(`
+        INSERT INTO chat_cache (account_id, jid, name, is_group, message_count, first_message_at, last_message_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(account_id,jid) DO UPDATE SET
+          name=COALESCE(excluded.name, chat_cache.name),
+          is_group=excluded.is_group,
+          message_count=chat_cache.message_count+1,
+          last_message_at=excluded.last_message_at
+      `).run(accountId, message.remoteJid, message.pushName?.trim() || null, isGroup ? 1 : 0, at, at);
+    }
+
+    if (!message.fromMe && isGroup && message.participant) {
       this.db.prepare(`
         INSERT INTO group_activity (account_id, group_id, participant_jid, message_count, first_message_at, last_message_at)
         VALUES (?, ?, ?, 1, ?, ?)
