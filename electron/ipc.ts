@@ -64,6 +64,8 @@ export function registerIpc(input: {
   ipcMain.handle('contacts:friendly', (_event, phone: string, friendly: boolean) => tools.setFriendly(phone, friendly));
   ipcMain.handle('contacts:blocked', () => tools.listBlocked());
   ipcMain.handle('contacts:friendly-list', () => tools.listFriendly());
+  ipcMain.handle('chats:list', (_event, accountId: string, includeGroups = false) => tools.listObservedChats(accountId, includeGroups));
+  ipcMain.handle('chats:grab-contacts', (_event, accountId: string) => tools.grabContactsFromChats(accountId));
 
   ipcMain.handle('tools:filter-numbers', (_event, accountId: string, numbers: string[]) => tools.filterNumbers(accountId, numbers));
   ipcMain.handle('tools:generate-numbers', (_event, payload) => tools.generateNumbers(payload));
