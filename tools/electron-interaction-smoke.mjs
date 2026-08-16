@@ -51,13 +51,15 @@ try {
       ['recruiting.jobs', window.attozap.recruiting?.jobs],
       ['warmup.create', window.attozap.warmup?.create],
       ['files.saveText', window.attozap.files?.saveText],
+      ['diagnostics.reportRendererError', window.attozap.diagnostics?.reportRendererError],
+      ['diagnostics.resetUi', window.attozap.diagnostics?.resetUi],
     ];
-    for (const [name, fn] of requiredBridges) if (typeof fn !== 'function') fail('Missing RC3 bridge: ' + name);
+    for (const [name, fn] of requiredBridges) if (typeof fn !== 'function') fail('Missing bridge: ' + name);
 
     const numbers = await window.attozap.tools.generateNumbers({ countryCode: '55', prefix: '11', start: 1, end: 100, width: 8 });
     if (!Array.isArray(numbers) || numbers.length !== 100) fail('Number generator contract failed');
 
-    const template = await window.attozap.templates.create({ name: 'Smoke RC3', category: 'test', body: 'Olá {name}' });
+    const template = await window.attozap.templates.create({ name: 'Smoke RC7', category: 'test', body: 'Olá {name}' });
     if (!template?.id) fail('Template create failed');
     await window.attozap.templates.remove(template.id);
 
@@ -87,7 +89,15 @@ try {
       warmup: await window.attozap.warmup.list(), audit: await window.attozap.audit.list(), recruiting: await window.attozap.recruiting.jobs(),
     };
 
-    return { licenseGate: true, licenseValid: false, fingerprintLength: fingerprint.length, appLockedBeforeLicense: true, protectedBlocked, generatedNumbers: numbers.length, localCrud: true, browserPortals: portals.length, rc3Bridges: requiredBridges.length, readContracts: Object.keys(contracts).length };
+    // Seed the exact legacy state that previously was not covered by the clean
+    // Windows runner. The next packaged boot must migrate these values without
+    // preventing index.html from loading.
+    const legacySecret = 'xai-smoke-legacy-secret-rc7';
+    await window.attozap.settings.set('ai_xai_key', legacySecret);
+    const legacyReadback = await window.attozap.settings.get('ai_xai_key');
+    if (legacyReadback !== legacySecret) fail('Could not seed legacy plaintext secret for reboot regression');
+
+    return { licenseGate: true, licenseValid: false, fingerprintLength: fingerprint.length, appLockedBeforeLicense: true, protectedBlocked, generatedNumbers: numbers.length, localCrud: true, browserPortals: portals.length, bridges: requiredBridges.length, readContracts: Object.keys(contracts).length, legacySecretSeeded: true };
   })()`);
-  console.log('Packaged RC3 interaction smoke passed:', JSON.stringify(result, null, 2));
+  console.log('Packaged RC7 interaction smoke passed:', JSON.stringify(result, null, 2));
 } finally { socket.close(); }
