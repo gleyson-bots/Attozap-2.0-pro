@@ -51,17 +51,36 @@ function inviteCode(value: string) {
   return candidate;
 }
 
-function unwrapContent(content: any): any {
-  let current = content;
-  for (let i = 0; i < 4; i++) {
-    const next = current?.ephemeralMessage?.message
-      ?? current?.viewOnceMessage?.message
-      ?? current?.viewOnceMessageV2?.message
-      ?? current?.viewOnceMessageV2Extension?.message;
-    if (!next) break;
-    current = next;
+const visibleMessageKeys = [
+  'conversation', 'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage',
+  'stickerMessage', 'documentMessage', 'pollCreationMessage', 'pollCreationMessageV2',
+  'pollCreationMessageV3', 'contactMessage', 'contactsArrayMessage', 'locationMessage',
+  'liveLocationMessage', 'interactiveMessage',
+];
+
+function unwrapContent(content: any, depth = 0): any {
+  if (!content || depth > 6) return content;
+  if (visibleMessageKeys.some(key => content?.[key])) return content;
+  const direct = content?.ephemeralMessage?.message
+    ?? content?.viewOnceMessage?.message
+    ?? content?.viewOnceMessageV2?.message
+    ?? content?.viewOnceMessageV2Extension?.message
+    ?? content?.deviceSentMessage?.message
+    ?? content?.documentWithCaptionMessage?.message
+    ?? content?.editedMessage?.message
+    ?? content?.protocolMessage?.editedMessage
+    ?? content?.groupMentionedMessage?.message
+    ?? content?.botInvokeMessage?.message;
+  if (direct) return unwrapContent(direct, depth + 1);
+  for (const [key, value] of Object.entries(content)) {
+    if (!key.endsWith('Message') || !value || typeof value !== 'object') continue;
+    const nested = (value as any).message;
+    if (nested) {
+      const resolved = unwrapContent(nested, depth + 1);
+      if (resolved && visibleMessageKeys.some(candidate => resolved?.[candidate])) return resolved;
+    }
   }
-  return current;
+  return content;
 }
 
 function messageText(message: WAMessage): string {
@@ -83,9 +102,9 @@ function messageInfo(message: WAMessage): { type: IncomingMessageType; fileName?
   const key = getContentType(content) ?? '';
   const node = key ? content?.[key] : undefined;
   if (key === 'imageMessage') return { type: 'image', mimetype: node?.mimetype ?? 'image/jpeg' };
-  if (key === 'videoMessage') return { type: 'video', mimetype: node?.mimetype ?? 'video/mp4' };
-  if (key === 'audioMessage') return { type: 'audio', mimetype: node?.mimetype ?? 'audio/ogg', metadata: { ptt: Boolean(node?.ptt) } };
-  if (key === 'stickerMessage') return { type: 'sticker', mimetype: node?.mimetype ?? 'image/webp' };
+  if (key === 'videoMessage') return { type: 'video', mimetype: node?.mimetype ?? 'video/mp4', metadata: { gifPlayback: Boolean(node?.gifPlayback) } };
+  if (key === 'audioMessage') return { type: 'audio', mimetype: node?.mimetype ?? 'audio/ogg', metadata: { ptt: Boolean(node?.ptt), seconds: Number(node?.seconds ?? 0) } };
+  if (key === 'stickerMessage') return { type: 'sticker', mimetype: node?.mimetype ?? 'image/webp', metadata: { animated: Boolean(node?.isAnimated) } };
   if (key === 'documentMessage') return { type: 'document', mimetype: node?.mimetype ?? 'application/octet-stream', fileName: node?.fileName ?? 'documento' };
   if (key.startsWith('pollCreationMessage')) {
     const options = Array.isArray(node?.options) ? node.options.map((item: any) => String(item?.optionName ?? item?.name ?? '')).filter(Boolean) : [];
@@ -202,6 +221,8 @@ export class BaileysProvider implements MessagingProvider {
     const remoteJid = message.key.remoteJid;
     if (!remoteJid || remoteJid === 'status@broadcast') return;
     const info = messageInfo(message);
+    const text = messageText(message);
+    if (info.type === 'unknown' && !text) return;
     let mediaPath: string | undefined;
     if (['image', 'video', 'document', 'audio', 'sticker'].includes(info.type)) {
       try { mediaPath = await this.downloadIncoming(message, info.type, info.mimetype, info.fileName); }
@@ -212,7 +233,7 @@ export class BaileysProvider implements MessagingProvider {
       id: message.key.id ?? randomUUID(), remoteJid, remoteJidAlt: message.key.remoteJidAlt ?? undefined,
       participant: message.key.participant ?? undefined, participantAlt: message.key.participantAlt ?? undefined,
       addressingMode: message.key.addressingMode ?? undefined, pushName: message.pushName ?? undefined,
-      profilePictureUrl, text: messageText(message), messageType: info.type, mediaPath, fileName: info.fileName,
+      profilePictureUrl, text, messageType: info.type, mediaPath, fileName: info.fileName,
       mimetype: info.mimetype, metadata: info.metadata, fromMe: Boolean(message.key.fromMe),
       timestamp: Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)) * 1000,
     };
