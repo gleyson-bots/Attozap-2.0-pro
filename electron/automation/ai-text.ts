@@ -1,10 +1,15 @@
 import type { AttozapDatabase } from '../database.js';
+import { getSecureSetting } from '../secure-settings.js';
 
 export type WarmupAiProvider = 'xai' | 'poolside';
 
 function setting(db: AttozapDatabase, key: string) {
   const row = db.prepare(`SELECT value FROM settings WHERE key=?`).get(key) as { value?: string } | undefined;
   return row?.value?.trim() || undefined;
+}
+
+function secret(db: AttozapDatabase, key: string) {
+  return getSecureSetting(db, key)?.trim() || setting(db, key);
 }
 
 function normalizeBase(value: string) { return value.replace(/\/+$/, ''); }
@@ -17,7 +22,7 @@ export async function generateWarmupText(db: AttozapDatabase, input: {
   recentMessages?: string[];
 }) {
   const provider = input.provider;
-  const key = provider === 'xai' ? setting(db, 'ai_xai_key') : setting(db, 'ai_poolside_key');
+  const key = provider === 'xai' ? secret(db, 'ai_xai_key') : secret(db, 'ai_poolside_key');
   if (!key) throw new Error(provider === 'xai' ? 'Configure a chave da xAI/Grok em Configurações' : 'Configure a chave da Poolside em Configurações');
 
   const configuredBase = provider === 'xai' ? 'https://api.x.ai/v1' : setting(db, 'ai_poolside_base_url');
