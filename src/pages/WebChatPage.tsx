@@ -73,6 +73,11 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     } catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
+  function appendOptimistic(message: any) {
+    setMessages(current => current.some(item => item.id === message.id) ? current : [...current, message]);
+    setTimeout(() => bottom.current?.scrollIntoView({ block: 'end' }), 25);
+  }
+
   useEffect(() => { void loadChats(); }, [accountId, search]);
   useEffect(() => { void loadMessages(); }, [accountId, selected?.jid]);
   useEffect(() => {
@@ -99,15 +104,17 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   }
 
   async function sendText() {
-    if (!accountId || !target || !text.trim()) { setError('Selecione uma conversa ou informe um destinatário e digite a mensagem.'); return; }
+    const body = text.trim();
+    if (!accountId || !target || !body) { setError('Selecione uma conversa ou informe um destinatário e digite a mensagem.'); return; }
     setBusy(true); setError('');
     try {
-      const result = await window.attozap.webchat.sendText(accountId, target, text);
+      const result = await window.attozap.webchat.sendText(accountId, target, body);
       const resolved = result.resolvedTarget ?? result.remoteJid ?? target;
+      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'text', text: body, status: 'sent', created_at: new Date(result.timestamp || Date.now()).toISOString(), metadata: {} });
       setText('');
       setSelected((current: any) => ({ ...(current ?? {}), jid: resolved, display_name: current?.display_name || current?.name || newTarget || resolved, last_message_at: new Date().toISOString() }));
       setNewTarget('');
-      await loadChats(); await loadMessages(resolved);
+      await loadChats();
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
@@ -118,14 +125,18 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     const paths = await window.attozap.files.pick({ multiple: false, filters });
     if (!paths?.[0]) return;
     const path = paths[0];
-    const ext = fileName(path).split('.').pop()?.toLowerCase() ?? '';
+    const name = fileName(path);
+    const ext = name.split('.').pop()?.toLowerCase() ?? '';
     const type: 'image'|'video'|'document'|'audio'|'sticker' = forceType || (['jpg','jpeg','png','webp','gif'].includes(ext) ? 'image' : ['mp4','mov','mkv','webm'].includes(ext) ? 'video' : ['mp3','ogg','wav','m4a','opus'].includes(ext) ? 'audio' : 'document');
     setBusy(true); setError('');
     try {
-      const result = await window.attozap.webchat.sendMedia(accountId, target, type, { path, fileName: fileName(path), ptt: type === 'audio' });
+      const result = await window.attozap.webchat.sendMedia(accountId, target, type, { path, fileName: name, ptt: type === 'audio' });
       const resolved = result.resolvedTarget ?? result.remoteJid ?? target;
+      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: type, text: name, file_name: name, status: 'sent', created_at: new Date(result.timestamp || Date.now()).toISOString(), metadata: { pendingMediaRefresh: true } });
       setSelected((current: any) => ({ ...(current ?? {}), jid: resolved, display_name: current?.display_name || current?.name || newTarget || resolved }));
-      setNewTarget(''); await loadChats(); await loadMessages(resolved);
+      setNewTarget('');
+      await loadChats();
+      setTimeout(() => void loadMessages(resolved), 350);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
@@ -135,8 +146,11 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     if (!accountId || !target || !pollQuestion.trim() || options.length < 2) { setError('Informe uma pergunta e pelo menos duas opções.'); return; }
     setBusy(true); setError('');
     try {
-      await window.attozap.webchat.sendPoll(accountId, target, { name: pollQuestion.trim(), values: options, selectableCount: 1 });
-      setPollQuestion(''); setPollOptions('Sim\nNão'); setShowPoll(false); await loadMessages(target); await loadChats();
+      const question = pollQuestion.trim();
+      const result = await window.attozap.webchat.sendPoll(accountId, target, { name: question, values: options, selectableCount: 1 });
+      const resolved = result.resolvedTarget ?? result.remoteJid ?? target;
+      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'poll', text: question, status: 'sent', created_at: new Date(result.timestamp || Date.now()).toISOString(), metadata: { question, options } });
+      setPollQuestion(''); setPollOptions('Sim\nNão'); setShowPoll(false); await loadChats();
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
