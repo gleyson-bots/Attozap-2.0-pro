@@ -17,6 +17,7 @@ import { registerChatIpc } from './chat-ipc.js';
 import { registerWarmupIpc } from './warmup-ipc.js';
 import { registerBrowserHubIpc } from './browser-hub-ipc.js';
 import { registerRecruitingIpc } from './recruiting-ipc.js';
+import { applyPendingRestore, registerSystemIpc } from './system-ipc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -45,7 +46,9 @@ async function loadRenderer(window: BrowserWindow) {
 app.whenReady().then(async () => {
   nativeTheme.themeSource = 'dark';
   const userData = app.getPath('userData');
-  const db = openDatabase(join(userData, 'attozap.sqlite3'));
+  applyPendingRestore(userData);
+  const dbPath = join(userData, 'attozap.sqlite3');
+  const db = openDatabase(dbPath);
   applyRc3Migrations(db);
   const accounts = new AccountManager(db, join(userData, 'sessions'));
   const chat = new ChatService(db, accounts);
@@ -67,6 +70,7 @@ app.whenReady().then(async () => {
   registerWarmupIpc(warmupEngine, license);
   registerBrowserHubIpc(mainWindow);
   registerRecruitingIpc(mainWindow, db);
+  registerSystemIpc({ window: mainWindow, db, accounts, userData, dbPath });
   await loadRenderer(mainWindow);
 
   const staleOnline = accounts.list().filter(account => ['connected', 'connecting', 'reconnecting', 'qr'].includes(account.status));
