@@ -17,6 +17,7 @@ import type {
   ContactCardInput,
   ContactPresence,
   GroupInviteInfo,
+  GroupJoinResult,
   GroupParticipantIdentity,
   GroupSummary,
   IncomingMessage,
@@ -39,8 +40,15 @@ function userJid(value: string) {
 
 function inviteCode(value: string) {
   const clean = value.trim();
-  const match = clean.match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i);
-  return match?.[1] ?? clean;
+  if (!clean) throw new Error('Informe um link ou código de convite do grupo');
+
+  // Accept a full URL pasted on its own or inside a message, with optional query/hash.
+  const link = clean.match(/(?:https?:\/\/)?chat\.whatsapp\.com\/([A-Za-z0-9_-]{8,128})/i);
+  const candidate = link?.[1] ?? clean.replace(/[?#].*$/, '').trim();
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(candidate)) {
+    throw new Error('Convite de grupo inválido. Use https://chat.whatsapp.com/CODIGO ou somente o código do convite.');
+  }
+  return candidate;
 }
 
 function messageText(message: WAMessage): string {
@@ -70,6 +78,35 @@ function validateProxy(proxy?: string) {
   catch { throw new Error('Proxy inválido. Use http://usuario:senha@host:porta ou https://host:porta'); }
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Este build aceita proxy HTTP/HTTPS');
   return value;
+}
+
+function groupSummary(group: any, invite?: string): GroupInviteInfo {
+  return {
+    id: String(group.id),
+    subject: String(group.subject ?? 'Grupo sem nome'),
+    description: group.desc ?? undefined,
+    size: Number(group.size ?? group.participants?.length ?? 0),
+    owner: group.owner ?? undefined,
+    inviteCode: invite,
+    joinApprovalMode: Boolean(group.joinApprovalMode),
+  };
+}
+
+function groupExists(groups: Record<string, any> | undefined, id: string) {
+  if (!groups) return false;
+  if (groups[id]) return true;
+  return Object.values(groups).some(group => group?.id === id);
+}
+
+function groupJoinError(error: unknown) {
+  const value = error as { output?: { statusCode?: number; payload?: { message?: string } }; data?: unknown; message?: string };
+  const status = value?.output?.statusCode;
+  const source = value?.output?.payload?.message || value?.message || String(error);
+  if (status === 404) return new Error('Convite não encontrado. O link pode ter sido revogado ou expirado.');
+  if (status === 409) return new Error('Esta conta já participa do grupo ou já possui uma solicitação pendente. Sincronize os grupos para confirmar.');
+  if (status === 401 || status === 403) return new Error(`O WhatsApp recusou a entrada no grupo (${status}). Verifique se o convite continua válido e se o grupo exige aprovação de novos participantes.`);
+  if (status === 429) return new Error('O WhatsApp limitou temporariamente tentativas de entrada em grupos. Aguarde e tente novamente mais tarde.');
+  return new Error(`Não foi possível entrar no grupo${status ? ` (${status})` : ''}: ${source}`);
 }
 
 export class BaileysProvider implements MessagingProvider {
@@ -342,16 +379,48 @@ export class BaileysProvider implements MessagingProvider {
       .filter(item => Boolean(item.jid));
   }
 
-  async joinGroup(invite: string) {
-    const jid = await this.requireSocket().groupAcceptInvite(inviteCode(invite));
-    if (!jid) throw new Error('O WhatsApp não retornou o grupo após aceitar o convite');
-    return jid;
+  async joinGroup(invite: string): Promise<GroupJoinResult> {
+    const socket = this.requireSocket();
+    const code = inviteCode(invite);
+
+    // Validate first. Besides producing a useful error for revoked links, this also
+    // tells us whether the group uses membership approval before we attempt entry.
+    const rawInfo = await socket.groupGetInviteInfo(code);
+    const info = groupSummary(rawInfo, code);
+    const before = await socket.groupFetchAllParticipating().catch(() => undefined);
+    if (groupExists(before, info.id)) return { ...info, status: 'already_member' };
+
+    try {
+      const joinedJid = await socket.groupAcceptInvite(code);
+      if (joinedJid) {
+        const finalId = String(joinedJid);
+        // Metadata query confirms the server accepted the membership. Failure here is
+        // non-fatal because groupAcceptInvite already returned a group JID.
+        const metadata = await socket.groupMetadata(finalId).catch(() => undefined);
+        return {
+          ...(metadata ? groupSummary(metadata, code) : info),
+          id: finalId,
+          status: 'joined',
+        };
+      }
+
+      // Approval-enabled groups may acknowledge the invite without returning a group
+      // JID immediately. Treat that as pending approval instead of a false failure.
+      const after = await socket.groupFetchAllParticipating().catch(() => undefined);
+      if (groupExists(after, info.id)) return { ...info, status: 'joined' };
+      if (info.joinApprovalMode) return { ...info, status: 'approval_required' };
+      throw new Error('O WhatsApp aceitou a solicitação, mas não confirmou a entrada no grupo. Sincronize os grupos e tente novamente.');
+    } catch (error) {
+      const after = await socket.groupFetchAllParticipating().catch(() => undefined);
+      if (groupExists(after, info.id)) return { ...info, status: 'joined' };
+      throw groupJoinError(error);
+    }
   }
 
   async verifyGroupInvite(invite: string): Promise<GroupInviteInfo> {
     const code = inviteCode(invite);
     const group = await this.requireSocket().groupGetInviteInfo(code);
-    return { id: group.id, subject: group.subject, description: group.desc, size: group.participants.length, owner: group.owner, inviteCode: code };
+    return groupSummary(group, code);
   }
 
   async getGroupInvite(groupJid: string) {
