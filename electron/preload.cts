@@ -67,6 +67,13 @@ contextBridge.exposeInMainWorld('attozap', {
     list: (accountId: string, includeGroups = false) => invoke('chats:list', accountId, includeGroups),
     grabContacts: (accountId: string) => invoke('chats:grab-contacts', accountId),
   },
+  webchat: {
+    list: (accountId: string, search = '') => invoke('webchat:list', accountId, search),
+    messages: (accountId: string, remoteJid: string, limit = 250) => invoke('webchat:messages', accountId, remoteJid, limit),
+    resolve: (accountId: string, target: string) => invoke('webchat:resolve', accountId, target),
+    sendText: (accountId: string, target: string, text: string) => invoke('webchat:send-text', accountId, target, text),
+    sendMedia: (accountId: string, target: string, type: 'image'|'video'|'document'|'audio'|'sticker', input: any) => invoke('webchat:send-media', accountId, target, type, input),
+  },
   tools: {
     filterNumbers: (accountId: string, numbers: string[]) => invoke('tools:filter-numbers', accountId, numbers),
     generateNumbers: (payload: any) => invoke('tools:generate-numbers', payload),
@@ -97,6 +104,7 @@ contextBridge.exposeInMainWorld('attozap', {
   },
   extractors: {
     webContacts: (urls: string[]) => invoke('extractors:web-contacts', urls),
+    googlePlaces: (payload: any) => invoke('extractors:google-places', payload),
   },
   importers: {
     pickContacts: () => invoke('importers:pick-contacts'),
@@ -106,6 +114,15 @@ contextBridge.exposeInMainWorld('attozap', {
     create: (payload: any) => invoke('autoreply:create', payload),
     update: (id: string, payload: any) => invoke('autoreply:update', id, payload),
     remove: (id: string) => invoke('autoreply:remove', id),
+  },
+  warmup: {
+    list: () => invoke('warmup:list'),
+    create: (payload: any) => invoke('warmup:create', payload),
+    update: (id: string, payload: any) => invoke('warmup:update', id, payload),
+    remove: (id: string) => invoke('warmup:remove', id),
+    start: (id: string) => invoke('warmup:start', id),
+    stop: (id: string) => invoke('warmup:stop', id),
+    logs: (id?: string, limit = 500) => invoke('warmup:logs', id, limit),
   },
   license: {
     status: () => invoke('license:status'),
