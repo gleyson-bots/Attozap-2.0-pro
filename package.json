@@ -1,6 +1,6 @@
 {
   "name": "attozap-2.0-pro",
-  "version": "2.0.0-rc.3",
+  "version": "2.0.0-rc.4",
   "description": "ATTOZAP WASender Pro desktop messaging tools",
   "author": "GleysonDevs",
   "private": true,
@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "pack:win": "npm run build && electron-builder --win nsis portable --x64 --publish never",
     "pack:portable": "npm run build && electron-builder --win portable --x64 --publish never",
+    "pack:store": "npm run build && electron-builder --config store-builder.cjs --win appx --x64 --publish never",
     "pack:keygen": "electron-builder --config keygen-builder.yml --win portable --x64 --publish never",
     "license:help": "node tools/license-cli.mjs --help"
   },
