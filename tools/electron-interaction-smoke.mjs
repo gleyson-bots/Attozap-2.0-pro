@@ -13,33 +13,16 @@ async function waitForTarget() {
   }
   throw new Error('Packaged Electron page target not found');
 }
-
-function connect(url) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    socket.addEventListener('open', () => resolve(socket), { once: true });
-    socket.addEventListener('error', () => reject(new Error('Could not connect to Electron DevTools WebSocket')), { once: true });
-  });
-}
-
+function connect(url) { return new Promise((resolve, reject) => { const socket = new WebSocket(url); socket.addEventListener('open', () => resolve(socket), { once: true }); socket.addEventListener('error', () => reject(new Error('Could not connect to Electron DevTools WebSocket')), { once: true }); }); }
 let nextId = 1;
 function command(socket, method, params = {}) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(`CDP timeout: ${method}`)), 20_000);
-    const onMessage = event => {
-      const message = JSON.parse(String(event.data));
-      if (message.id !== id) return;
-      clearTimeout(timeout);
-      socket.removeEventListener('message', onMessage);
-      if (message.error) reject(new Error(`${method}: ${message.error.message}`));
-      else resolve(message.result);
-    };
-    socket.addEventListener('message', onMessage);
-    socket.send(JSON.stringify({ id, method, params }));
+    const onMessage = event => { const message = JSON.parse(String(event.data)); if (message.id !== id) return; clearTimeout(timeout); socket.removeEventListener('message', onMessage); if (message.error) reject(new Error(`${method}: ${message.error.message}`)); else resolve(message.result); };
+    socket.addEventListener('message', onMessage); socket.send(JSON.stringify({ id, method, params }));
   });
 }
-
 async function evaluate(socket, expression, awaitPromise = true) {
   const result = await command(socket, 'Runtime.evaluate', { expression, awaitPromise, returnByValue: true });
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.text || 'Renderer evaluation failed');
@@ -48,140 +31,63 @@ async function evaluate(socket, expression, awaitPromise = true) {
 
 const target = await waitForTarget();
 const socket = await connect(target.webSocketDebuggerUrl);
-
 try {
   const result = await evaluate(socket, `(async () => {
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     const fail = message => { throw new Error(message); };
-    const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    const areaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-    const setValue = (element, value) => {
-      const setter = element instanceof HTMLTextAreaElement ? areaSetter : inputSetter;
-      setter.call(element, value);
-      element.dispatchEvent(new Event('input', { bubbles: true }));
-      element.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    const findButton = text => [...document.querySelectorAll('button')].find(item => item.textContent?.includes(text));
-    const clickNav = async label => {
-      const button = [...document.querySelectorAll('.nav-scroll button')].find(item => item.textContent?.includes(label));
-      if (!button) fail('Navigation button missing: ' + label);
-      button.click();
-      await sleep(100);
-      const title = document.querySelector('.topbar h1')?.textContent?.trim();
-      if (title !== label) fail('Navigation did not switch to ' + label + '; got ' + title);
-      const content = document.querySelector('.page-content')?.textContent?.trim();
-      if (!content) fail('Empty page after navigation: ' + label);
-    };
+    await sleep(300);
+    const body = document.body.textContent || '';
+    if (!body.includes('Ative sua licença para começar')) fail('License-first startup gate missing');
+    if (document.querySelector('.app-shell')) fail('Dashboard/app shell rendered before valid license');
 
-    const navLabels = [
-      'Visão geral','Contact Sender','Group Sender','Agendamentos','Templates','Poll Report',
-      'Contas','WebChat','Contatos & listas','Contact Grabber','Ferramentas de grupos','Bulk Group Tools',
-      'Auto Reply','Aquecimento','Number Filter','Google Maps & Extratores','Licença','Configurações'
-    ];
-    for (const label of navLabels) await clickNav(label);
-
-    await clickNav('Number Filter');
-    const generate = findButton('Gerar lista');
-    if (!generate) fail('Number generator button missing');
-    generate.click();
-    await sleep(140);
-    const generated = [...document.querySelectorAll('textarea')].find(item => item.value?.includes('55'));
-    if (!generated || !generated.value.trim()) fail('Number generator button did not produce output');
-
-    await clickNav('Google Maps & Extratores');
-    if (!document.body.textContent?.includes('Google Maps / Places')) fail('Google Maps extractor UI missing');
-
-    await clickNav('WebChat');
-    if (!document.body.textContent?.includes('WhatsApp WebChat')) fail('WebChat UI missing');
-
-    await clickNav('Aquecimento');
-    if (!document.body.textContent?.includes('Sistema de aquecimento')) fail('Warmup UI missing');
-
-    await clickNav('Configurações');
-    if (!document.body.textContent?.includes('Personalização da interface')) fail('UI personalization controls missing');
-
-    await clickNav('Templates');
-    const templateName = document.querySelector('input[placeholder="Boas-vindas"]');
-    const templateBody = document.querySelector('textarea.tall-area');
-    if (!templateName || !templateBody) fail('Template editor fields missing');
-    setValue(templateName, 'Smoke Template');
-    setValue(templateBody, 'Olá {name}, teste do portable.');
-    const saveTemplate = findButton('Salvar');
-    if (!saveTemplate) fail('Template Save button missing');
-    saveTemplate.click();
-    await sleep(220);
-    if (!document.body.textContent?.includes('Template salvo.')) fail('Template Save did not show success');
-    if (!document.body.textContent?.includes('Smoke Template')) fail('Saved template did not appear in list');
-    const copyTemplate = findButton('Copiar');
-    if (!copyTemplate) fail('Template Copy button missing');
-    copyTemplate.click();
-    await sleep(100);
-    if (!document.body.textContent?.includes('Conteúdo copiado')) fail('Template Copy did not show success');
-    const deleteTemplate = findButton('Excluir');
-    if (!deleteTemplate) fail('Template Delete button missing after save');
-    deleteTemplate.click();
-    await sleep(180);
-    if (!document.body.textContent?.includes('Template excluído.')) fail('Template Delete did not show success');
-
-    await clickNav('Contatos & listas');
-    const pasteList = findButton('Colar lista');
-    if (!pasteList) fail('Paste contacts button missing');
-    pasteList.click();
-    await sleep(80);
-    const contactArea = document.querySelector('.import-box textarea');
-    if (!contactArea) fail('Contact import textarea missing');
-    setValue(contactArea, '5511999999999;Smoke Contact;cidade=Teste');
-    await sleep(80);
-    const importContact = [...document.querySelectorAll('.import-box button')].find(item => item.textContent?.includes('Importar 1'));
-    if (!importContact) fail('Contact Import button did not enable');
-    importContact.click();
-    await sleep(220);
-    if (!document.body.textContent?.includes('Smoke Contact')) fail('Imported contact did not appear in list');
-    const contactRow = [...document.querySelectorAll('.contacts-row')].find(row => row.textContent?.includes('Smoke Contact'));
-    if (!contactRow) fail('Smoke contact row missing');
-    const friendlyButton = [...contactRow.querySelectorAll('button')].find(item => item.textContent?.includes('Adicionar'));
-    if (!friendlyButton) fail('Friendly List button missing');
-    friendlyButton.click();
-    await sleep(160);
-    const refreshedContactRow = [...document.querySelectorAll('.contacts-row')].find(row => row.textContent?.includes('Smoke Contact'));
-    if (!refreshedContactRow?.textContent?.includes('Na lista')) fail('Friendly List toggle did not update');
-    const blockButton = [...refreshedContactRow.querySelectorAll('button')].find(item => item.textContent?.includes('Bloquear'));
-    if (!blockButton) fail('Blocklist button missing');
-    blockButton.click();
-    await sleep(160);
-    const blockedRow = [...document.querySelectorAll('.contacts-row')].find(row => row.textContent?.includes('Smoke Contact'));
-    if (!blockedRow?.textContent?.includes('Bloqueado')) fail('Blocklist toggle did not update');
-
-    await clickNav('Contas');
-    const accountInput = document.querySelector('input[placeholder="Ex.: Comercial 01"]');
-    if (!accountInput) fail('Account name input missing');
-    setValue(accountInput, 'Smoke Account');
-    await sleep(30);
-    const add = findButton('Adicionar conta');
-    if (!add) fail('Add account button missing');
-    add.click();
-    await sleep(260);
     const licenseStatus = await window.attozap.license.status();
-    if (!licenseStatus.valid) {
-      const visibleError = document.querySelector('.notice.error')?.textContent || document.querySelector('.global-toast.error')?.textContent || '';
-      if (!/licen[cç]a/i.test(visibleError)) fail('Unlicensed Add account did not show visible feedback: ' + visibleError);
-    }
+    if (licenseStatus.valid) fail('Fresh packaged smoke environment unexpectedly has a valid license');
+    const fingerprint = document.querySelector('.fingerprint-box code')?.textContent?.trim();
+    if (!fingerprint || fingerprint.length < 32) fail('Fingerprint missing from startup license gate');
 
-    await clickNav('Licença');
-    const fingerprint = [...document.querySelectorAll('.fingerprint-box code')][0]?.textContent?.trim();
-    if (!fingerprint || fingerprint.length < 16) fail('License fingerprint was not rendered');
+    const requiredBridges = [
+      ['webchat.sendPoll', window.attozap.webchat?.sendPoll],
+      ['browser.openPortal', window.attozap.browser?.openPortal],
+      ['recruiting.jobs', window.attozap.recruiting?.jobs],
+      ['warmup.create', window.attozap.warmup?.create],
+      ['files.saveText', window.attozap.files?.saveText],
+    ];
+    for (const [name, fn] of requiredBridges) if (typeof fn !== 'function') fail('Missing RC3 bridge: ' + name);
+
+    const numbers = await window.attozap.tools.generateNumbers({ countryCode: '55', prefix: '11', start: 1, end: 100, width: 8 });
+    if (!Array.isArray(numbers) || numbers.length !== 100) fail('Number generator contract failed');
+
+    const template = await window.attozap.templates.create({ name: 'Smoke RC3', category: 'test', body: 'Olá {name}' });
+    if (!template?.id) fail('Template create failed');
+    await window.attozap.templates.remove(template.id);
+
+    await window.attozap.contacts.import([{ phone: '5511999999999', name: 'Smoke Contact' }]);
+    const contacts = await window.attozap.contacts.list('Smoke Contact');
+    if (!contacts.some(item => item.name === 'Smoke Contact')) fail('Contact import/read failed');
+
+    const job = await window.attozap.recruiting.saveJob({ title: 'Vaga Smoke', company: 'ATTOZAP', location: 'Remoto', description: 'Teste' });
+    if (!job?.id) fail('Recruiting job CRUD failed');
+    const candidate = await window.attozap.recruiting.saveCandidate({ jobId: job.id, name: 'Candidate Smoke', source: 'test' });
+    if (!candidate?.id) fail('Recruiting candidate CRUD failed');
+    await window.attozap.recruiting.removeCandidate(candidate.id);
+    await window.attozap.recruiting.removeJob(job.id);
+
+    const portals = await window.attozap.browser.portals();
+    if (!Array.isArray(portals) || !portals.some(item => item.id === 'maps') || !portals.some(item => item.id === 'linkedin')) fail('Browser portal registry failed');
+
+    let protectedBlocked = false;
+    try { await window.attozap.accounts.create('Should Not Exist'); }
+    catch (error) { protectedBlocked = /licen[cç]a/i.test(String(error?.message || error)); }
+    if (!protectedBlocked) fail('Protected WhatsApp operation was not blocked without license');
 
     const contracts = {
       accounts: await window.attozap.accounts.list(), campaigns: await window.attozap.campaigns.list(),
       contacts: await window.attozap.contacts.list(), templates: await window.attozap.templates.list(),
       polls: await window.attozap.polls.list(), autoReply: await window.attozap.autoReply.list(),
-      warmup: await window.attozap.warmup.list(), audit: await window.attozap.audit.list(),
+      warmup: await window.attozap.warmup.list(), audit: await window.attozap.audit.list(), recruiting: await window.attozap.recruiting.jobs(),
     };
 
-    return { navCount: navLabels.length, generatedNumbers: generated.value.trim().split(/\\r?\\n/).length, templateCrud: true, contactImport: true, friendlyToggle: true, blockToggle: true, mapsUi: true, webchatUi: true, warmupUi: true, licenseValid: Boolean(licenseStatus.valid), fingerprintLength: fingerprint.length, readContracts: Object.keys(contracts).length };
+    return { licenseGate: true, licenseValid: false, fingerprintLength: fingerprint.length, appLockedBeforeLicense: true, protectedBlocked, generatedNumbers: numbers.length, localCrud: true, browserPortals: portals.length, rc3Bridges: requiredBridges.length, readContracts: Object.keys(contracts).length };
   })()`);
-
-  console.log('Packaged interaction smoke passed:', JSON.stringify(result, null, 2));
-} finally {
-  socket.close();
-}
+  console.log('Packaged RC3 interaction smoke passed:', JSON.stringify(result, null, 2));
+} finally { socket.close(); }
