@@ -66,7 +66,7 @@ try {
       const button = [...document.querySelectorAll('.nav-scroll button')].find(item => item.textContent?.includes(label));
       if (!button) fail('Navigation button missing: ' + label);
       button.click();
-      await sleep(90);
+      await sleep(100);
       const title = document.querySelector('.topbar h1')?.textContent?.trim();
       if (title !== label) fail('Navigation did not switch to ' + label + '; got ' + title);
       const content = document.querySelector('.page-content')?.textContent?.trim();
@@ -75,8 +75,8 @@ try {
 
     const navLabels = [
       'Visão geral','Contact Sender','Group Sender','Agendamentos','Templates','Poll Report',
-      'Contas','Contatos & listas','Contact Grabber','Ferramentas de grupos','Bulk Group Tools',
-      'Auto Reply','Number Filter','Extratores','Licença','Configurações'
+      'Contas','WebChat','Contatos & listas','Contact Grabber','Ferramentas de grupos','Bulk Group Tools',
+      'Auto Reply','Aquecimento','Number Filter','Google Maps & Extratores','Licença','Configurações'
     ];
     for (const label of navLabels) await clickNav(label);
 
@@ -87,6 +87,18 @@ try {
     await sleep(140);
     const generated = [...document.querySelectorAll('textarea')].find(item => item.value?.includes('55'));
     if (!generated || !generated.value.trim()) fail('Number generator button did not produce output');
+
+    await clickNav('Google Maps & Extratores');
+    if (!document.body.textContent?.includes('Google Maps / Places')) fail('Google Maps extractor UI missing');
+
+    await clickNav('WebChat');
+    if (!document.body.textContent?.includes('WhatsApp WebChat')) fail('WebChat UI missing');
+
+    await clickNav('Aquecimento');
+    if (!document.body.textContent?.includes('Sistema de aquecimento')) fail('Warmup UI missing');
+
+    await clickNav('Configurações');
+    if (!document.body.textContent?.includes('Personalização da interface')) fail('UI personalization controls missing');
 
     await clickNav('Templates');
     const templateName = document.querySelector('input[placeholder="Boas-vindas"]');
@@ -160,26 +172,13 @@ try {
     if (!fingerprint || fingerprint.length < 16) fail('License fingerprint was not rendered');
 
     const contracts = {
-      accounts: await window.attozap.accounts.list(),
-      campaigns: await window.attozap.campaigns.list(),
-      contacts: await window.attozap.contacts.list(),
-      templates: await window.attozap.templates.list(),
-      polls: await window.attozap.polls.list(),
-      autoReply: await window.attozap.autoReply.list(),
-      audit: await window.attozap.audit.list(),
+      accounts: await window.attozap.accounts.list(), campaigns: await window.attozap.campaigns.list(),
+      contacts: await window.attozap.contacts.list(), templates: await window.attozap.templates.list(),
+      polls: await window.attozap.polls.list(), autoReply: await window.attozap.autoReply.list(),
+      warmup: await window.attozap.warmup.list(), audit: await window.attozap.audit.list(),
     };
 
-    return {
-      navCount: navLabels.length,
-      generatedNumbers: generated.value.trim().split(/\\r?\\n/).length,
-      templateCrud: true,
-      contactImport: true,
-      friendlyToggle: true,
-      blockToggle: true,
-      licenseValid: Boolean(licenseStatus.valid),
-      fingerprintLength: fingerprint.length,
-      readContracts: Object.keys(contracts).length,
-    };
+    return { navCount: navLabels.length, generatedNumbers: generated.value.trim().split(/\\r?\\n/).length, templateCrud: true, contactImport: true, friendlyToggle: true, blockToggle: true, mapsUi: true, webchatUi: true, warmupUi: true, licenseValid: Boolean(licenseStatus.valid), fingerprintLength: fingerprint.length, readContracts: Object.keys(contracts).length };
   })()`);
 
   console.log('Packaged interaction smoke passed:', JSON.stringify(result, null, 2));
