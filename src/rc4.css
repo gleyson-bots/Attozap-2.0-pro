@@ -1,0 +1,4 @@
+.channel-picker{display:flex;align-items:center;gap:8px;height:40px;padding:0 8px 0 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.channel-picker>span{font-size:8px;font-weight:800;letter-spacing:.9px;text-transform:uppercase;color:var(--muted-2)}
+.channel-picker .top-select{border:0;background:transparent;min-width:270px;padding-left:4px;box-shadow:none}
+@media(max-width:900px){.channel-picker>span{display:none}.channel-picker .top-select{min-width:170px}}
