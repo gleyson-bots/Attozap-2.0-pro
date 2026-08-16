@@ -52,17 +52,21 @@ export function campaignPercent(campaign: any) {
   return Math.min(100, Math.round(((Number(campaign.sent ?? 0) + Number(campaign.failed ?? 0) + Number(campaign.skipped ?? 0)) / total) * 100));
 }
 
-export function csvEscape(value: unknown) {
-  const text = String(value ?? '');
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+export function csvEscape(value: unknown, separator = ';') {
+  const text = String(value ?? '').replace(/\r?\n/g, ' ');
+  const escaped = text.replace(/"/g, '""');
+  return escaped.includes(separator) || /["\r\n]/.test(text) ? `"${escaped}"` : escaped;
 }
 
-export async function downloadCsv(name: string, rows: unknown[][]) {
-  const csv = rows.map(row => row.map(csvEscape).join(',')).join('\r\n');
-  const result = await window.attozap.files.saveText({
+export async function downloadCsv(name: string, rows: unknown[][], options?: { separator?: ';' | ',' | '\t'; excelHint?: boolean }) {
+  const separator = options?.separator ?? ';';
+  const csv = rows.map(row => row.map(value => csvEscape(value, separator)).join(separator)).join('\r\n');
+  // PT-BR Excel commonly expects semicolon because comma is the decimal separator.
+  // `sep=;` makes the delimiter explicit even when the Windows locale differs.
+  const prefix = options?.excelHint === false ? '' : `sep=${separator}\r\n`;
+  return window.attozap.files.saveText({
     suggestedName: name,
-    content: '\ufeff' + csv,
-    filters: [{ name: 'Arquivo CSV', extensions: ['csv'] }],
+    content: '\ufeff' + prefix + csv,
+    filters: [{ name: 'Arquivo CSV (Excel UTF-8)', extensions: ['csv'] }],
   });
-  return result;
 }
