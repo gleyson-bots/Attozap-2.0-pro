@@ -1,8 +1,7 @@
-const path = require('node:path');
-
 module.exports = {
   appId: 'com.gleysondevs.attozap.wasender',
   productName: 'ATTOZAP WASender Pro',
+  description: 'Ferramentas desktop ATTOZAP para mensageria e produtividade no WhatsApp.',
   asar: true,
   directories: { output: 'release-store', buildResources: 'build' },
   files: ['dist/**/*', 'dist-electron/**/*', 'package.json'],
@@ -18,7 +17,6 @@ module.exports = {
     publisher: process.env.STORE_PUBLISHER || 'CN=GleysonDevs',
     publisherDisplayName: process.env.STORE_PUBLISHER_DISPLAY_NAME || 'GleysonDevs',
     displayName: 'ATTOZAP WASender Pro',
-    description: 'Ferramentas desktop ATTOZAP para mensageria e produtividade no WhatsApp.',
     backgroundColor: '#7657FF',
     languages: ['pt-BR', 'en-US'],
     minVersion: '10.0.17763.0',
