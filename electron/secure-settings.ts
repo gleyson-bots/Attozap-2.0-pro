@@ -9,12 +9,13 @@ function rowValue(db: AttozapDatabase, key: string) {
 }
 
 export function secureStorageAvailable() {
-  return safeStorage.isEncryptionAvailable();
+  try { return safeStorage.isEncryptionAvailable(); }
+  catch { return false; }
 }
 
 export function getSecureSetting(db: AttozapDatabase, key: string) {
   const stored = rowValue(db, key);
-  if (!stored?.startsWith('enc:') || !safeStorage.isEncryptionAvailable()) return undefined;
+  if (!stored?.startsWith('enc:') || !secureStorageAvailable()) return undefined;
   try {
     return safeStorage.decryptString(Buffer.from(stored.slice(4), 'base64'));
   } catch {
@@ -28,7 +29,7 @@ export function setSecureSetting(db: AttozapDatabase, key: string, value?: strin
     db.prepare(`DELETE FROM settings WHERE key=?`).run(`${PREFIX}${key}`);
     return true;
   }
-  if (!safeStorage.isEncryptionAvailable()) {
+  if (!secureStorageAvailable()) {
     throw new Error('O armazenamento protegido do sistema operacional não está disponível neste computador.');
   }
   const encrypted = safeStorage.encryptString(clean).toString('base64');
@@ -40,11 +41,19 @@ export function setSecureSetting(db: AttozapDatabase, key: string, value?: strin
 }
 
 export function migratePlainSecret(db: AttozapDatabase, key: string) {
-  if (!safeStorage.isEncryptionAvailable() || getSecureSetting(db, key)) return false;
-  const legacy = db.prepare(`SELECT value FROM settings WHERE key=?`).get(key) as { value?: string } | undefined;
-  const clean = legacy?.value?.trim();
-  if (!clean) return false;
-  setSecureSetting(db, key, clean);
-  db.prepare(`DELETE FROM settings WHERE key=?`).run(key);
-  return true;
+  try {
+    if (!secureStorageAvailable() || getSecureSetting(db, key)) return false;
+    const legacy = db.prepare(`SELECT value FROM settings WHERE key=?`).get(key) as { value?: unknown } | undefined;
+    const clean = typeof legacy?.value === 'string' ? legacy.value.trim() : '';
+    if (!clean) return false;
+    setSecureSetting(db, key, clean);
+    db.prepare(`DELETE FROM settings WHERE key=?`).run(key);
+    return true;
+  } catch (error) {
+    // Legacy-secret migration must never block application boot. If Windows
+    // encryption is temporarily unavailable, keep the old value untouched and
+    // try again on a later startup.
+    console.warn('[secure-settings:migrate]', key, error instanceof Error ? error.message : String(error));
+    return false;
+  }
 }
