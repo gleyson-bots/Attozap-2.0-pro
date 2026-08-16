@@ -1,0 +1,122 @@
+name: Windows Portable Release
+
+on:
+  push:
+    branches: ["feat/foundation-v2", "main"]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build application
+        run: npm run build
+      - name: Signing mode
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          if ($env:WIN_CSC_LINK) {
+            Write-Host "Windows code-signing certificate configured. Release executables will be Authenticode signed."
+          } else {
+            Write-Warning "WIN_CSC_LINK is not configured. Build will be unsigned and may trigger Microsoft Defender SmartScreen."
+          }
+      - name: Build WASender portable
+        run: npx electron-builder --win portable --x64 --publish never
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Smoke test packaged renderer, actions and legacy-data reboot
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'release\win-unpacked\ATTOZAP WASender Pro.exe'
+          if (-not (Test-Path $exe)) { throw "Unpacked Electron executable not found: $exe" }
+
+          $proc = Start-Process -FilePath $exe -ArgumentList '--remote-debugging-port=9223' -PassThru
+          node tools/electron-smoke.mjs http://127.0.0.1:9223 release/smoke.png
+          $rendererExit = $LASTEXITCODE
+          if ($rendererExit -eq 0) {
+            node tools/electron-interaction-smoke.mjs http://127.0.0.1:9223
+            $interactionExit = $LASTEXITCODE
+          } else {
+            $interactionExit = $rendererExit
+          }
+          taskkill /F /T /PID $proc.Id 2>$null | Out-Null
+          if ($rendererExit -ne 0) { exit $rendererExit }
+          if ($interactionExit -ne 0) { exit $interactionExit }
+
+          Start-Sleep -Milliseconds 700
+          $proc2 = Start-Process -FilePath $exe -ArgumentList '--remote-debugging-port=9224' -PassThru
+          node tools/electron-smoke.mjs http://127.0.0.1:9224 release/migration-smoke.png
+          $rebootRendererExit = $LASTEXITCODE
+          if ($rebootRendererExit -eq 0) {
+            node tools/electron-migration-smoke.mjs http://127.0.0.1:9224
+            $migrationExit = $LASTEXITCODE
+          } else {
+            $migrationExit = $rebootRendererExit
+          }
+          taskkill /F /T /PID $proc2.Id 2>$null | Out-Null
+          if ($rebootRendererExit -ne 0) { exit $rebootRendererExit }
+          if ($migrationExit -ne 0) { exit $migrationExit }
+      - name: Verify WASender output
+        shell: pwsh
+        env:
+          SIGNING_EXPECTED: ${{ secrets.WIN_CSC_LINK != '' }}
+        run: |
+          $app = Get-ChildItem release -Filter 'ATTOZAP-WASender-Pro-*.exe' | Select-Object -First 1
+          if (-not $app) { throw 'WASender portable executable was not generated' }
+          if (-not (Test-Path 'release/smoke.png')) { throw 'Packaged renderer smoke screenshot was not generated' }
+          if (-not (Test-Path 'release/migration-smoke.png')) { throw 'Migration reboot smoke screenshot was not generated' }
+          $signature = Get-AuthenticodeSignature $app.FullName
+          Write-Host "APP=$($app.FullName) SIZE=$($app.Length) SIGNATURE=$($signature.Status) PUBLISHER=$($signature.SignerCertificate.Subject)"
+          if ($env:SIGNING_EXPECTED -eq 'true' -and $signature.Status -ne 'Valid') {
+            throw "Signing credentials were configured but the WASender signature is not valid: $($signature.Status)"
+          }
+      - name: Upload WASender portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATTOZAP-WASender-Pro-portable
+          path: release/ATTOZAP-WASender-Pro-*.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload packaged UI smoke screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATTOZAP-packaged-ui-smoke
+          path: release/*smoke.png
+          if-no-files-found: error
+          retention-days: 30
+      - name: Build KeyGen portable
+        run: npx electron-builder --config keygen-builder.yml --win portable --x64 --publish never
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Verify KeyGen output
+        shell: pwsh
+        env:
+          SIGNING_EXPECTED: ${{ secrets.WIN_CSC_LINK != '' }}
+        run: |
+          $keygen = Get-ChildItem release-keygen -Filter 'ATTOZAP-KeyGen-*.exe' | Select-Object -First 1
+          if (-not $keygen) { throw 'KeyGen portable executable was not generated' }
+          $signature = Get-AuthenticodeSignature $keygen.FullName
+          Write-Host "KEYGEN=$($keygen.FullName) SIZE=$($keygen.Length) SIGNATURE=$($signature.Status) PUBLISHER=$($signature.SignerCertificate.Subject)"
+          if ($env:SIGNING_EXPECTED -eq 'true' -and $signature.Status -ne 'Valid') {
+            throw "Signing credentials were configured but the KeyGen signature is not valid: $($signature.Status)"
+          }
+      - name: Upload KeyGen portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATTOZAP-KeyGen-portable
+          path: release-keygen/ATTOZAP-KeyGen-*.exe
+          if-no-files-found: error
+          retention-days: 30

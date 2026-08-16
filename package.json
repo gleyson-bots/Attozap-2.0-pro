@@ -1,0 +1,68 @@
+{
+  "name": "attozap-2.0-pro",
+  "version": "2.0.0-rc.8",
+  "description": "ATTOZAP WASender Pro desktop messaging tools",
+  "author": "GleysonDevs",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "ipc:check": "node tools/check-ipc-contract.mjs",
+    "build": "npm run ipc:check && tsc -b && vite build && tsc -p electron/tsconfig.json",
+    "preview": "vite preview",
+    "desktop": "electron .",
+    "typecheck": "tsc --noEmit",
+    "pack:win": "npm run build && electron-builder --win nsis portable --x64 --publish never",
+    "pack:portable": "npm run build && electron-builder --win portable --x64 --publish never",
+    "pack:store": "npm run build && electron-builder --config store-builder.cjs --win appx --x64 --publish never",
+    "pack:keygen": "electron-builder --config keygen-builder.yml --win portable --x64 --publish never",
+    "license:help": "node tools/license-cli.mjs --help"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc13",
+    "better-sqlite3": "13.0.1",
+    "https-proxy-agent": "^7.0.6",
+    "lucide-react": "^0.468.0",
+    "pino": "10.3.1",
+    "qrcode": "1.5.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^24.3.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "concurrently": "^9.2.1",
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3",
+    "typescript": "^5.9.2",
+    "vite": "8.1.5",
+    "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "com.gleysondevs.attozap.wasender",
+    "productName": "ATTOZAP WASender Pro",
+    "asar": true,
+    "directories": { "output": "release", "buildResources": "build" },
+    "files": ["dist/**/*", "dist-electron/**/*", "package.json"],
+    "extraResources": [{ "from": "resources", "to": ".", "filter": ["**/*"] }],
+    "win": {
+      "icon": "build/icon.svg",
+      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }],
+      "artifactName": "ATTOZAP-WASender-Pro-${version}-${arch}.${ext}"
+    },
+    "portable": { "artifactName": "ATTOZAP-WASender-Pro-${version}-${arch}.${ext}" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ATTOZAP WASender Pro"
+    }
+  }
+}
