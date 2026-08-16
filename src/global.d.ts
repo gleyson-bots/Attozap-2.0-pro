@@ -28,6 +28,9 @@ declare global {
       files: any;
       clipboard: any;
       settings: any;
+      secure: any;
+      system: any;
+      identities: any;
       audit: any;
       messages: any;
     };
