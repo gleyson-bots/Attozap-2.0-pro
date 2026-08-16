@@ -1,7 +1,6 @@
 module.exports = {
   appId: 'com.gleysondevs.attozap.wasender',
   productName: 'ATTOZAP WASender Pro',
-  description: 'Ferramentas desktop ATTOZAP para mensageria e produtividade no WhatsApp.',
   asar: true,
   directories: { output: 'release-store', buildResources: 'build' },
   files: ['dist/**/*', 'dist-electron/**/*', 'package.json'],
