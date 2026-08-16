@@ -93,6 +93,11 @@ export type GroupSummary = {
 
 export type GroupInviteInfo = GroupSummary & {
   inviteCode?: string;
+  joinApprovalMode?: boolean;
+};
+
+export type GroupJoinResult = GroupInviteInfo & {
+  status: 'joined' | 'already_member' | 'approval_required';
 };
 
 export interface MessagingProvider {
@@ -115,7 +120,7 @@ export interface MessagingProvider {
   getGroupMetadata(groupJid: string): Promise<GroupSummary & { participants: GroupParticipantIdentity[] }>;
   createGroup(subject: string, participants: string[]): Promise<GroupSummary>;
   addGroupParticipants(groupJid: string, participants: string[]): Promise<Array<{ jid: string; status: string }>>;
-  joinGroup(invite: string): Promise<string>;
+  joinGroup(invite: string): Promise<GroupJoinResult>;
   verifyGroupInvite(invite: string): Promise<GroupInviteInfo>;
   getGroupInvite(groupJid: string): Promise<string>;
   isConnected(): boolean;
