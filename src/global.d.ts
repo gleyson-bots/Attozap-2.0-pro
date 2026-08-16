@@ -30,6 +30,7 @@ declare global {
       settings: any;
       secure: any;
       system: any;
+      diagnostics: any;
       identities: any;
       audit: any;
       messages: any;
