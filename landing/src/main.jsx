@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import './styles.css';
 
-const GITHUB_DOWNLOAD_URL = 'https://github.com/gleyson-bots/Attozap-2.0-pro/releases/latest/download/ATTOZAP-WASender-Pro-x64.exe';
+const GITHUB_DOWNLOAD_URL = 'https://github.com/gleyson-bots/ATTOZAP-DOWNLOAD/releases/latest/download/ATTOZAP-WASender-Pro-x64.exe';
 const DOWNLOAD_URL = import.meta.env.VITE_DOWNLOAD_URL || GITHUB_DOWNLOAD_URL;
 const SALES_WHATSAPP = String(import.meta.env.VITE_SALES_WHATSAPP || '').replace(/\D/g, '');
 const SALES_EMAIL = import.meta.env.VITE_SALES_EMAIL || 'vendas@attozap.com.br';
