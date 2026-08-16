@@ -18,6 +18,7 @@ import { registerWarmupIpc } from './warmup-ipc.js';
 import { registerBrowserHubIpc } from './browser-hub-ipc.js';
 import { registerRecruitingIpc } from './recruiting-ipc.js';
 import { applyPendingRestore, registerSystemIpc } from './system-ipc.js';
+import { registerMessageStatusTracking } from './message-status.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -71,6 +72,7 @@ app.whenReady().then(async () => {
   registerBrowserHubIpc(mainWindow);
   registerRecruitingIpc(mainWindow, db);
   registerSystemIpc({ window: mainWindow, db, accounts, userData, dbPath });
+  registerMessageStatusTracking({ window: mainWindow, db, accounts });
   await loadRenderer(mainWindow);
 
   const staleOnline = accounts.list().filter(account => ['connected', 'connecting', 'reconnecting', 'qr'].includes(account.status));
