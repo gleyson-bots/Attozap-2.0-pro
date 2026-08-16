@@ -1,6 +1,6 @@
 {
   "name": "attozap-2.0-pro",
-  "version": "2.0.0-alpha.5",
+  "version": "2.0.0-rc.1",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
@@ -45,31 +45,14 @@
     "appId": "com.gleysondevs.attozap.wasender",
     "productName": "ATTOZAP WASender Pro",
     "asar": true,
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "resources",
-        "to": ".",
-        "filter": ["**/*"]
-      }
-    ],
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "dist-electron/**/*", "package.json"],
+    "extraResources": [{ "from": "resources", "to": ".", "filter": ["**/*"] }],
     "win": {
-      "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
-      ],
+      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }],
       "artifactName": "ATTOZAP-WASender-Pro-${version}-${arch}.${ext}"
     },
-    "portable": {
-      "artifactName": "ATTOZAP-WASender-Pro-${version}-${arch}.${ext}"
-    },
+    "portable": { "artifactName": "ATTOZAP-WASender-Pro-${version}-${arch}.${ext}" },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
