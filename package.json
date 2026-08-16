@@ -1,12 +1,13 @@
 {
   "name": "attozap-2.0-pro",
-  "version": "2.0.0-alpha.4",
+  "version": "2.0.0-alpha.5",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
+    "ipc:check": "node tools/check-ipc-contract.mjs",
+    "build": "npm run ipc:check && tsc -b && vite build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
     "desktop": "electron .",
     "typecheck": "tsc --noEmit",
