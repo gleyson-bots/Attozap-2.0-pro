@@ -19,6 +19,7 @@ import { registerBrowserHubIpc } from './browser-hub-ipc.js';
 import { registerRecruitingIpc } from './recruiting-ipc.js';
 import { applyPendingRestore, registerSystemIpc } from './system-ipc.js';
 import { registerMessageStatusTracking } from './message-status.js';
+import { registerRecoveryIpc } from './recovery-ipc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -44,13 +45,31 @@ async function loadRenderer(window: BrowserWindow) {
   else await window.loadFile(join(__dirname, '../dist/index.html'));
 }
 
+async function showBootFailure(window: BrowserWindow, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const html = `<!doctype html><meta charset="utf-8"><title>ATTOZAP - Falha de inicialização</title><body style="margin:0;background:#0b0d12;color:#f5f7f6;font-family:Segoe UI,Arial,sans-serif;display:grid;place-items:center;min-height:100vh"><main style="max-width:720px;padding:32px;border:1px solid #29322e;border-radius:18px;background:#111612"><div style="color:#78d79b;font-size:12px;font-weight:700;letter-spacing:.14em">ATTOZAP RECOVERY</div><h1 style="font-size:25px;margin:12px 0">Não foi possível carregar a interface.</h1><p style="color:#aeb8b2;line-height:1.6">O processo principal continua ativo, mas o arquivo da interface falhou ao abrir.</p><pre style="white-space:pre-wrap;background:#0c100d;padding:14px;border-radius:10px;color:#ffadb4">${message.replace(/[&<>]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c] ?? c))}</pre><p style="color:#8c978f">Código: RENDERER_LOAD_FAILED</p></main></body>`;
+  await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => undefined);
+}
+
+function safeRegister(name: string, action: () => void) {
+  try { action(); return true; }
+  catch (error) {
+    console.error(`[startup:${name}]`, error);
+    return false;
+  }
+}
+
 app.whenReady().then(async () => {
   nativeTheme.themeSource = 'dark';
   const userData = app.getPath('userData');
-  applyPendingRestore(userData);
+  try { applyPendingRestore(userData); }
+  catch (error) { console.error('[startup:pending-restore]', error); }
+
   const dbPath = join(userData, 'attozap.sqlite3');
   const db = openDatabase(dbPath);
-  applyRc3Migrations(db);
+  try { applyRc3Migrations(db); }
+  catch (error) { console.error('[startup:migrations]', error); }
+
   const accounts = new AccountManager(db, join(userData, 'sessions'));
   const chat = new ChatService(db, accounts);
   const campaigns = new CampaignEngine(db, accounts);
@@ -64,16 +83,22 @@ app.whenReady().then(async () => {
   ipcMain.handle('app:get-platform', () => process.platform);
 
   mainWindow = createWindow();
-  registerIpc({ window: mainWindow, db, accounts, campaigns, autoReply, tools, license });
-  registerExtractorIpc(db);
-  registerDesktopIpc(mainWindow);
-  registerChatIpc(chat, license);
-  registerWarmupIpc(warmupEngine, license);
-  registerBrowserHubIpc(mainWindow);
-  registerRecruitingIpc(mainWindow, db);
-  registerSystemIpc({ window: mainWindow, db, accounts, userData, dbPath });
-  registerMessageStatusTracking({ window: mainWindow, db, accounts });
-  await loadRenderer(mainWindow);
+
+  // Recovery IPC is intentionally registered first and kept independent from
+  // optional modules, so a renderer crash can always be reported locally.
+  safeRegister('recovery-ipc', () => registerRecoveryIpc(db, userData));
+  safeRegister('core-ipc', () => registerIpc({ window: mainWindow!, db, accounts, campaigns, autoReply, tools, license }));
+  safeRegister('extractor-ipc', () => registerExtractorIpc(db));
+  safeRegister('desktop-ipc', () => registerDesktopIpc(mainWindow!));
+  safeRegister('chat-ipc', () => registerChatIpc(chat, license));
+  safeRegister('warmup-ipc', () => registerWarmupIpc(warmupEngine!, license));
+  safeRegister('browser-hub-ipc', () => registerBrowserHubIpc(mainWindow!));
+  safeRegister('recruiting-ipc', () => registerRecruitingIpc(mainWindow!, db));
+  safeRegister('system-ipc', () => registerSystemIpc({ window: mainWindow!, db, accounts, userData, dbPath }));
+  safeRegister('message-status', () => registerMessageStatusTracking({ window: mainWindow!, db, accounts }));
+
+  try { await loadRenderer(mainWindow); }
+  catch (error) { console.error('[startup:renderer]', error); await showBootFailure(mainWindow, error); }
 
   const staleOnline = accounts.list().filter(account => ['connected', 'connecting', 'reconnecting', 'qr'].includes(account.status));
   for (const account of staleOnline) {
@@ -85,9 +110,13 @@ app.whenReady().then(async () => {
 
   scheduler = setInterval(() => void campaigns.runDueSchedules().catch(error => console.error('[scheduler]', error)), 30_000);
   app.on('activate', async () => {
-    if (BrowserWindow.getAllWindows().length === 0) { mainWindow = createWindow(); await loadRenderer(mainWindow); }
+    if (BrowserWindow.getAllWindows().length === 0) {
+      mainWindow = createWindow();
+      try { await loadRenderer(mainWindow); }
+      catch (error) { await showBootFailure(mainWindow, error); }
+    }
   });
-});
+}).catch(error => console.error('[startup:fatal]', error));
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => { if (scheduler) clearInterval(scheduler); warmupEngine?.shutdown(); });
