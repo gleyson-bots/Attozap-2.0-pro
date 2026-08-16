@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Activity, Ban, BarChart3, Bot, CalendarClock, ChevronRight, ContactRound, FileSearch, FileText, Gauge, Group,
-  KeyRound, LayoutDashboard, Menu, MessageSquareText, Moon, Search, Send, Settings,
-  ShieldCheck, Sun, Users, Wifi, Wrench, X, Zap,
+  Activity, Ban, BarChart3, Bot, CalendarClock, ChevronRight, ContactRound, FileSearch, FileText, Flame, Gauge, Group,
+  KeyRound, LayoutDashboard, Menu, MessageCircle, MessageSquareText, Moon, Search, Send, Settings,
+  ShieldCheck, Sun, Users, Wifi, Wrench, X,
 } from 'lucide-react';
+import attoLogo from './assets/attozap-logo.svg';
 import { AccountsPage } from './pages/AccountsPage';
 import { SenderPage } from './pages/SenderPage';
 import { NumberFilterPage } from './pages/ToolsPages';
@@ -16,9 +17,12 @@ import { PollReportPage } from './pages/PollReportPage';
 import { ExtractorsPage } from './pages/ExtractorsPage';
 import { AutoReplyPage, SchedulerPage } from './pages/AutomationPages';
 import { LicenseActivationPage } from './pages/LicensePage';
+import { WebChatPage } from './pages/WebChatPage';
+import { WarmupPage } from './pages/WarmupPage';
+import { SettingsPage, applyUiPreferences } from './pages/SettingsPage';
 import { campaignPercent, toLocalDateTime } from './lib';
 
-type View = 'dashboard'|'sender'|'groupSender'|'scheduler'|'templates'|'pollReport'|'accounts'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'extractors'|'license'|'settings';
+type View = 'dashboard'|'sender'|'groupSender'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'license'|'settings';
 type NavItem = { id: View; label: string; icon: any };
 
 const sections: Array<{ label: string; items: NavItem[] }> = [
@@ -32,15 +36,19 @@ const sections: Array<{ label: string; items: NavItem[] }> = [
   ] },
   { label: 'WHATSAPP', items: [
     { id: 'accounts', label: 'Contas', icon: Wifi },
+    { id: 'webchat', label: 'WebChat', icon: MessageCircle },
     { id: 'contacts', label: 'Contatos & listas', icon: ContactRound },
     { id: 'contactGrabber', label: 'Contact Grabber', icon: MessageSquareText },
     { id: 'groups', label: 'Ferramentas de grupos', icon: Users },
     { id: 'bulkGroups', label: 'Bulk Group Tools', icon: Group },
   ] },
-  { label: 'AUTOMAÇÃO', items: [{ id: 'autoReply', label: 'Auto Reply', icon: Bot }] },
+  { label: 'AUTOMAÇÃO', items: [
+    { id: 'autoReply', label: 'Auto Reply', icon: Bot },
+    { id: 'warmup', label: 'Aquecimento', icon: Flame },
+  ] },
   { label: 'FERRAMENTAS', items: [
     { id: 'numberFilter', label: 'Number Filter', icon: FileSearch },
-    { id: 'extractors', label: 'Extratores', icon: Wrench },
+    { id: 'extractors', label: 'Google Maps & Extratores', icon: Wrench },
   ] },
   { label: 'SISTEMA', items: [
     { id: 'license', label: 'Licença', icon: KeyRound },
@@ -63,10 +71,24 @@ export default function App() {
     void reloadAccounts();
     void reloadCampaigns();
     void window.attozap.app.version().then(setVersion);
+    void (async () => {
+      const [theme, fontScale, accent, density] = await Promise.all([
+        window.attozap.settings.get('ui_theme'), window.attozap.settings.get('ui_font_scale'),
+        window.attozap.settings.get('ui_accent'), window.attozap.settings.get('ui_density'),
+      ]);
+      setDark(theme !== 'light');
+      applyUiPreferences({ fontScale: fontScale || '112', accent: accent || 'violet', density: density || 'comfortable' });
+    })();
     const offState = window.attozap.accounts.onState(() => void reloadAccounts());
     const offProgress = window.attozap.campaigns.onProgress(() => void reloadCampaigns());
     return () => { offState?.(); offProgress?.(); };
   }, [reloadAccounts, reloadCampaigns]);
+
+  async function toggleTheme() {
+    const next = !dark;
+    setDark(next);
+    await window.attozap.settings.set('ui_theme', next ? 'dark' : 'light');
+  }
 
   const active = sections.flatMap(section => section.items).find(item => item.id === view);
   const connected = accounts.filter(account => account.status === 'connected').length;
@@ -74,7 +96,7 @@ export default function App() {
   return <div className={`app-shell ${dark ? 'theme-dark' : 'theme-light'}`}>
     <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
       <div className="brand">
-        <div className="brand-mark"><Zap size={20} fill="currentColor"/></div>
+        <div className="brand-mark brand-bot"><img src={attoLogo} alt="ATTOZAP Bot"/></div>
         <div><strong>ATTOZAP</strong><span>WASENDER PRO</span></div>
         <button className="sidebar-close" onClick={() => setMobileNav(false)}><X size={18}/></button>
       </div>
@@ -89,12 +111,12 @@ export default function App() {
           {section.items.map(item => {
             const Icon = item.icon;
             return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => { setView(item.id); setMobileNav(false); }}>
-              <Icon size={17}/><span>{item.label}</span>{view === item.id && <ChevronRight size={14}/>} 
+              <Icon size={18}/><span>{item.label}</span>{view === item.id && <ChevronRight size={14}/>} 
             </button>;
           })}
         </div>)}
       </nav>
-      <div className="sidebar-footer"><ShieldCheck size={15}/><div><b>ATTOZAP {version}</b><span>Desktop Edition</span></div></div>
+      <div className="sidebar-footer"><img src={attoLogo} alt=""/><div><b>ATTOZAP {version}</b><span>ATTO FLOW BY GLEYSONDEVS</span></div></div>
     </aside>
 
     <main className="workspace">
@@ -103,7 +125,7 @@ export default function App() {
         <div><span className="breadcrumb">ATTOZAP / WASENDER</span><h1>{active?.label ?? 'ATTOZAP'}</h1></div>
         <div className="topbar-actions">
           <div className="top-search"><Search size={16}/><span>Ferramentas WASender</span></div>
-          <button className="icon-button" onClick={() => setDark(value => !value)}>{dark ? <Sun size={17}/> : <Moon size={17}/>}</button>
+          <button className="icon-button" onClick={() => void toggleTheme()}>{dark ? <Sun size={17}/> : <Moon size={17}/>}</button>
           <button className="account-pill" onClick={() => setView('accounts')}><span className={connected ? 'online-dot' : 'offline-dot'}/><div><b>{connected ? 'WhatsApp ativo' : 'Desconectado'}</b><small>{connected ? `${connected} sessão(ões)` : 'Conectar conta'}</small></div></button>
         </div>
       </header>
@@ -115,12 +137,14 @@ export default function App() {
         {view === 'templates' && <TemplatesPage/>} 
         {view === 'pollReport' && <PollReportPage accounts={accounts}/>} 
         {view === 'accounts' && <AccountsPage accounts={accounts} reload={reloadAccounts}/>} 
+        {view === 'webchat' && <WebChatPage accounts={accounts} reloadAccounts={reloadAccounts}/>} 
         {view === 'contacts' && <ContactsPage/>} 
         {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} 
         {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>} 
         {view === 'groups' && <GroupToolsPage accounts={accounts}/>} 
         {view === 'bulkGroups' && <BulkGroupsPage accounts={accounts}/>} 
         {view === 'autoReply' && <AutoReplyPage accounts={accounts}/>} 
+        {view === 'warmup' && <WarmupPage accounts={accounts}/>} 
         {view === 'extractors' && <ExtractorsPage/>}
         {view === 'license' && <LicenseActivationPage/>}
         {view === 'settings' && <SettingsPage accounts={accounts}/>} 
@@ -138,8 +162,8 @@ function Dashboard({ accounts, campaigns, go }: { accounts: any[]; campaigns: an
 
   return <div className="page-stack">
     <section className="dashboard-hero">
-      <div><span className="kicker">WASENDER DESKTOP</span><h2>Envie, filtre e organize sem complicação.</h2><p>As ferramentas principais do WASender reunidas em uma interface moderna e com sessões persistentes.</p><div className="hero-actions"><button className="button primary big" onClick={() => go('sender')}><Send size={18}/> Novo envio</button><button className="button ghost big" onClick={() => go('accounts')}><Wifi size={18}/> Gerenciar contas</button></div></div>
-      <div className="hero-visual"><div className="pulse-ring"><MessageSquareText size={31}/></div><span>{online ? 'Motor conectado' : 'Aguardando conexão'}</span><b>{online} / {accounts.length}</b><small>contas online</small></div>
+      <div><span className="kicker">WASENDER DESKTOP</span><h2>Envie, converse e organize sem complicação.</h2><p>Sender, WebChat, grupos, Google Maps, filtros e automações em uma interface desktop local.</p><div className="hero-actions"><button className="button primary big" onClick={() => go('sender')}><Send size={18}/> Novo envio</button><button className="button ghost big" onClick={() => go('webchat')}><MessageCircle size={18}/> Abrir WebChat</button><button className="button ghost big" onClick={() => go('accounts')}><Wifi size={18}/> Contas</button></div></div>
+      <div className="hero-visual"><img src={attoLogo} alt="ATTOZAP Bot"/><span>{online ? 'Motor conectado' : 'Aguardando conexão'}</span><b>{online} / {accounts.length}</b><small>contas online</small></div>
     </section>
     <section className="metric-grid">
       <Metric icon={Wifi} label="Contas online" value={`${online}/${accounts.length}`} sub="Sessões persistentes"/>
@@ -152,34 +176,22 @@ function Dashboard({ accounts, campaigns, go }: { accounts: any[]; campaigns: an
       <section className="card"><div className="card-head"><div><h3>Contas</h3><p>Status atual das sessões</p></div><button className="text-button" onClick={() => go('accounts')}>Gerenciar →</button></div><div className="dash-accounts">{accounts.map(account => <div key={account.id}><span className={`wa-avatar ${account.status === 'connected' ? 'online' : ''}`}><Wifi size={15}/></span><div className="grow"><b>{account.name}</b><small>{account.phone ? `+${account.phone}` : 'Sem número vinculado'}</small></div><span className={`status-chip ${account.status}`}>{account.status}</span></div>)}{!accounts.length && <Empty text="Adicione uma conta para começar."/>}</div></section>
     </div>
     <section className="quick-tools">
-      <button onClick={() => go('numberFilter')}><FileSearch size={18}/><span><b>Number Filter</b><small>Validar números</small></span></button>
-      <button onClick={() => go('contactGrabber')}><MessageSquareText size={18}/><span><b>Contact Grabber</b><small>JID/LID observados</small></span></button>
-      <button onClick={() => go('groups')}><Users size={18}/><span><b>Group Tools</b><small>Membros e convites</small></span></button>
-      <button onClick={() => go('bulkGroups')}><Group size={18}/><span><b>Bulk Groups</b><small>Criar/adicionar em lote</small></span></button>
-      <button onClick={() => go('templates')}><FileText size={18}/><span><b>Templates</b><small>Mensagens reutilizáveis</small></span></button>
-      <button onClick={() => go('pollReport')}><BarChart3 size={18}/><span><b>Poll Report</b><small>Resultados de enquetes</small></span></button>
-      <button onClick={() => go('autoReply')}><Bot size={18}/><span><b>Auto Reply</b><small>Respostas automáticas</small></span></button>
-      <button onClick={() => go('contacts')}><Ban size={18}/><span><b>Listas</b><small>Block & Friendly</small></span></button>
+      <button onClick={() => go('webchat')}><MessageCircle size={19}/><span><b>WebChat</b><small>Conversa direta + mídia</small></span></button>
+      <button onClick={() => go('extractors')}><Wrench size={19}/><span><b>Google Maps</b><small>Empresas e contatos</small></span></button>
+      <button onClick={() => go('numberFilter')}><FileSearch size={19}/><span><b>Number Filter</b><small>Validar números</small></span></button>
+      <button onClick={() => go('contactGrabber')}><MessageSquareText size={19}/><span><b>Contact Grabber</b><small>JID/LID observados</small></span></button>
+      <button onClick={() => go('groups')}><Users size={19}/><span><b>Group Tools</b><small>Membros e convites</small></span></button>
+      <button onClick={() => go('warmup')}><Flame size={19}/><span><b>Aquecimento</b><small>Cadência controlada</small></span></button>
+      <button onClick={() => go('autoReply')}><Bot size={19}/><span><b>Auto Reply</b><small>Respostas automáticas</small></span></button>
+      <button onClick={() => go('contacts')}><Ban size={19}/><span><b>Listas</b><small>Block & Friendly</small></span></button>
     </section>
   </div>;
 }
 
 function Metric({ icon: Icon, label, value, sub }: { icon: any; label: string; value: string; sub: string }) {
-  return <article className="metric-card"><div className="metric-icon"><Icon size={18}/></div><span>{label}</span><b>{value}</b><small>{sub}</small></article>;
+  return <article className="metric-card"><div className="metric-icon"><Icon size={19}/></div><span>{label}</span><b>{value}</b><small>{sub}</small></article>;
 }
 
 function Empty({ text }: { text: string }) {
   return <div className="empty mini"><MessageSquareText size={23}/><p>{text}</p></div>;
-}
-
-function SettingsPage({ accounts }: { accounts: any[] }) {
-  const [audit, setAudit] = useState<any[]>([]);
-  useEffect(() => { void window.attozap.audit.list().then(setAudit); }, []);
-  return <div className="page-stack">
-    <div className="page-head"><div><span className="kicker">SETTINGS</span><h2>Configurações & administração</h2><p>Ajustes locais, diagnóstico e auditoria do aplicativo.</p></div></div>
-    <div className="settings-grid">
-      <section className="card"><div className="card-head"><div><h3>Diagnóstico</h3><p>Resumo do ambiente atual</p></div><Settings size={18}/></div><div className="diagnostic"><div><span>Contas cadastradas</span><b>{accounts.length}</b></div><div><span>Contas online</span><b>{accounts.filter(account => account.status === 'connected').length}</b></div><div><span>Banco</span><b>SQLite WAL</b></div><div><span>Motor</span><b>Baileys Provider</b></div></div></section>
-      <section className="card"><div className="card-head"><div><h3>Auditoria recente</h3><p>Últimas ações persistidas</p></div></div><div className="audit-list">{audit.slice(0, 20).map(row => <div key={row.id}><span className="audit-dot"/><div><b>{row.action}</b><small>{row.entity_type} · {row.entity_id ?? '—'}</small></div><time>{toLocalDateTime(row.created_at)}</time></div>)}{!audit.length && <Empty text="Nenhum evento registrado."/>}</div></section>
-    </div>
-  </div>;
 }
