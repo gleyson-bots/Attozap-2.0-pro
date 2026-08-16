@@ -80,6 +80,19 @@ export function openDatabase(path: string) {
       PRIMARY KEY(account_id, jid),
       FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS message_log (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      remote_jid TEXT NOT NULL,
+      participant_jid TEXT,
+      direction TEXT NOT NULL CHECK(direction IN ('in','out')),
+      message_type TEXT NOT NULL DEFAULT 'text',
+      text TEXT,
+      status TEXT NOT NULL DEFAULT 'received',
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS campaigns (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL,
@@ -156,6 +169,37 @@ export function openDatabase(path: string) {
       PRIMARY KEY(account_id, group_id, participant_jid),
       FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS warmup_profiles (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      targets_json TEXT NOT NULL DEFAULT '[]',
+      messages_json TEXT NOT NULL DEFAULT '[]',
+      min_delay_seconds INTEGER NOT NULL DEFAULT 180,
+      max_delay_seconds INTEGER NOT NULL DEFAULT 600,
+      daily_limit INTEGER NOT NULL DEFAULT 20,
+      active_hour_start INTEGER NOT NULL DEFAULT 9,
+      active_hour_end INTEGER NOT NULL DEFAULT 20,
+      status TEXT NOT NULL DEFAULT 'stopped',
+      sent_today INTEGER NOT NULL DEFAULT 0,
+      last_run_at TEXT,
+      last_reset_date TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS warmup_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      target_jid TEXT,
+      message TEXT,
+      status TEXT NOT NULL,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(profile_id) REFERENCES warmup_profiles(id) ON DELETE CASCADE,
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       actor TEXT NOT NULL,
@@ -173,11 +217,14 @@ export function openDatabase(path: string) {
     CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
     CREATE INDEX IF NOT EXISTS idx_contacts_lists ON contacts(is_blocked, is_friendly);
     CREATE INDEX IF NOT EXISTS idx_chat_cache_recent ON chat_cache(account_id, is_group, last_message_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_message_log_chat ON message_log(account_id, remote_jid, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_campaign_status ON campaigns(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_recipients_campaign_status ON campaign_recipients(campaign_id, status);
     CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(status, run_at);
     CREATE INDEX IF NOT EXISTS idx_auto_reply_account ON auto_reply_rules(account_id, enabled, priority DESC);
     CREATE INDEX IF NOT EXISTS idx_group_activity_recent ON group_activity(account_id, group_id, last_message_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_warmup_status ON warmup_profiles(status, account_id);
+    CREATE INDEX IF NOT EXISTS idx_warmup_logs ON warmup_logs(profile_id, created_at DESC);
   `);
 
   ensureColumn(db, 'instances', 'proxy_url', 'TEXT');
