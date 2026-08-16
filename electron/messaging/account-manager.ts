@@ -72,6 +72,7 @@ export class AccountManager extends EventEmitter {
       onQr: qr => this.emit('qr', { accountId: id, qr }),
       onError: error => this.emit('error', { accountId: id, message: error.message }),
       onMessage: message => void this.onMessage(id, message, provider),
+      onMessageStatus: event => this.emit('message-status', { accountId: id, ...event }),
       onPollUpdate: event => this.emit('poll-update', { accountId: id, ...event }),
     });
     return this.get(id);
