@@ -8,6 +8,7 @@ import './sender.css';
 import './group-tools.css';
 import './feedback.css';
 import './final-ui.css';
+import './rc3.css';
 
 installGlobalErrorHandlers();
 const root = createRoot(document.getElementById('root')!);
