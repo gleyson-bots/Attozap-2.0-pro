@@ -22,8 +22,9 @@ export type WarmupProfileInput = {
   peerAccountIds?: string[];
 };
 
-type Runtime = { stopped: boolean; timer?: NodeJS.Timeout };
 type OwnAccount = { id: string; name: string; phone?: string; status: string };
+type PendingReply = { sender: OwnAccount; recipient: OwnAccount; target: string; nextIndex: number };
+type Runtime = { stopped: boolean; timer?: NodeJS.Timeout; pendingReply?: PendingReply };
 function unique(values: string[]) { return [...new Set(values.map(value => value.trim()).filter(Boolean))]; }
 function digits(value: string) { return value.replace(/\D/g, ''); }
 function clamp(value: number | undefined, min: number, max: number, fallback: number) { const number = Number(value); return Number.isFinite(number) ? Math.max(min, Math.min(max, Math.floor(number))) : fallback; }
@@ -147,8 +148,11 @@ export class WarmupEngine {
     return Number(row?.total ?? 0);
   }
 
-  private recentMessages(profileId: string, target: string) {
-    return (this.db.prepare(`SELECT message FROM warmup_logs WHERE profile_id=? AND target_jid=? AND status='sent' ORDER BY created_at DESC LIMIT 8`).all(profileId, target) as Array<{ message?: string }>).map(row => row.message || '').filter(Boolean).reverse();
+  private recentMessages(profileId: string, target: string, pool = false) {
+    const rows = pool
+      ? this.db.prepare(`SELECT message FROM warmup_logs WHERE profile_id=? AND status='sent' ORDER BY created_at DESC LIMIT 10`).all(profileId)
+      : this.db.prepare(`SELECT message FROM warmup_logs WHERE profile_id=? AND target_jid=? AND status='sent' ORDER BY created_at DESC LIMIT 8`).all(profileId, target);
+    return (rows as Array<{ message?: string }>).map(row => row.message || '').filter(Boolean).reverse();
   }
 
   private async chooseMessage(profile: any, target: string, senderName?: string, recipientName?: string): Promise<{ text: string; source: 'library'|'ai' }> {
@@ -156,7 +160,7 @@ export class WarmupEngine {
     if (profile.message_source === 'ai' && profile.ai_provider && this.aiUsedToday(profile.id) < profile.ai_daily_limit) {
       try {
         const relationship = senderName && recipientName ? `Você é ${senderName} respondendo para ${recipientName}. Continue naturalmente a conversa curta entre duas contas de teste próprias.` : '';
-        const text = await generateWarmupText(this.db, { provider: profile.ai_provider, model: profile.ai_model, prompt: [profile.ai_prompt, relationship].filter(Boolean).join('\n'), target, recentMessages: this.recentMessages(profile.id, target) });
+        const text = await generateWarmupText(this.db, { provider: profile.ai_provider, model: profile.ai_model, prompt: [profile.ai_prompt, relationship].filter(Boolean).join('\n'), target, recentMessages: this.recentMessages(profile.id, target, profile.mode === 'pool') });
         return { text, source: 'ai' };
       } catch (error) {
         if (!messages.length) throw error;
@@ -172,8 +176,12 @@ export class WarmupEngine {
     const index = Math.max(0, Number(profile.round_robin_index ?? 0)) % peers.length;
     const sender = peers[index];
     const recipient = peers[(index + 1) % peers.length];
-    if (!recipient.phone) throw new Error(`Número da conta ${recipient.name} ainda não foi resolvido`);
+    if (!recipient.phone || !sender.phone) throw new Error('As contas do Pool precisam ter números resolvidos');
     return { sender, recipient, target: recipient.phone, nextIndex: (index + 1) % peers.length };
+  }
+
+  private schedule(id: string, runtime: Runtime, seconds: number) {
+    runtime.timer = setTimeout(() => void this.tick(id, runtime), Math.max(1, seconds) * 1000);
   }
 
   private async tick(id: string, runtime: Runtime) {
@@ -183,7 +191,7 @@ export class WarmupEngine {
     const today = todayLocal();
     if (profile.last_reset_date !== today) { this.db.prepare(`UPDATE warmup_profiles SET sent_today=0,last_reset_date=? WHERE id=?`).run(today, id); profile.sent_today = 0; profile.last_reset_date = today; }
     const hour = new Date().getHours();
-    if (hour < profile.active_hour_start || hour >= profile.active_hour_end || profile.sent_today >= profile.daily_limit) { runtime.timer = setTimeout(() => void this.tick(id, runtime), 60_000); return; }
+    if (hour < profile.active_hour_start || hour >= profile.active_hour_end || profile.sent_today >= profile.daily_limit) { this.schedule(id, runtime, 60); return; }
 
     let senderAccountId = profile.account_id as string;
     let recipientAccountId: string | undefined;
@@ -191,32 +199,67 @@ export class WarmupEngine {
     let senderName: string | undefined;
     let recipientName: string | undefined;
     let nextIndex: number | undefined;
+    let isReply = false;
 
     if (profile.mode === 'pool') {
-      const pair = this.nextPoolPair(profile);
-      senderAccountId = pair.sender.id;
-      recipientAccountId = pair.recipient.id;
-      target = pair.target;
-      senderName = pair.sender.name;
-      recipientName = pair.recipient.name;
-      nextIndex = pair.nextIndex;
+      if (runtime.pendingReply) {
+        const pending = runtime.pendingReply;
+        senderAccountId = pending.sender.id;
+        recipientAccountId = pending.recipient.id;
+        target = pending.target;
+        senderName = pending.sender.name;
+        recipientName = pending.recipient.name;
+        nextIndex = pending.nextIndex;
+        isReply = true;
+      } else {
+        const pair = this.nextPoolPair(profile);
+        senderAccountId = pair.sender.id;
+        recipientAccountId = pair.recipient.id;
+        target = pair.target;
+        senderName = pair.sender.name;
+        recipientName = pair.recipient.name;
+        runtime.pendingReply = {
+          sender: pair.recipient,
+          recipient: pair.sender,
+          target: pair.sender.phone!,
+          nextIndex: pair.nextIndex,
+        };
+      }
     } else {
       const targets = profile.targets as string[];
       target = targets[Math.floor(Math.random() * targets.length)];
     }
 
     let chosen: { text: string; source: 'library'|'ai' } | undefined;
+    let success = false;
     try {
       chosen = await this.chooseMessage(profile, target, senderName, recipientName);
       const sent = await this.chats.sendText(senderAccountId, target, chosen.text);
       this.db.prepare(`INSERT INTO warmup_logs (profile_id,account_id,target_jid,message,status,source,sender_account_id,recipient_account_id) VALUES (?,?,?,?, 'sent',?,?,?)`).run(id, senderAccountId, sent.resolvedTarget ?? target, chosen.text, chosen.source, senderAccountId, recipientAccountId ?? null);
-      this.db.prepare(`UPDATE warmup_profiles SET sent_today=sent_today+1,last_run_at=CURRENT_TIMESTAMP,round_robin_index=COALESCE(?,round_robin_index),updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(nextIndex ?? null, id);
+      this.db.prepare(`UPDATE warmup_profiles SET sent_today=sent_today+1,last_run_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);
+      success = true;
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       this.db.prepare(`INSERT INTO warmup_logs (profile_id,account_id,target_jid,message,status,error,source,sender_account_id,recipient_account_id) VALUES (?,?,?,?, 'failed',?,?,?,?)`).run(id, senderAccountId, target, chosen?.text ?? null, text, chosen?.source ?? (profile.message_source === 'ai' ? 'ai' : 'library'), senderAccountId, recipientAccountId ?? null);
     }
+
+    if (profile.mode === 'pool') {
+      if (!isReply && success && runtime.pendingReply) {
+        const replyDelaySeconds = randomBetween(45, 120);
+        this.schedule(id, runtime, replyDelaySeconds);
+        return;
+      }
+      if (isReply) {
+        runtime.pendingReply = undefined;
+        if (nextIndex !== undefined) this.db.prepare(`UPDATE warmup_profiles SET round_robin_index=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(nextIndex, id);
+      } else if (!success) {
+        runtime.pendingReply = undefined;
+        if (runtime.pendingReply?.nextIndex !== undefined) this.db.prepare(`UPDATE warmup_profiles SET round_robin_index=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(runtime.pendingReply.nextIndex, id);
+      }
+    }
+
     const delaySeconds = randomBetween(profile.min_delay_seconds, profile.max_delay_seconds);
-    runtime.timer = setTimeout(() => void this.tick(id, runtime), delaySeconds * 1000);
+    this.schedule(id, runtime, delaySeconds);
   }
 
   private hydrate = (row: any) => ({ ...row, targets: JSON.parse(row.targets_json || '[]'), messages: JSON.parse(row.messages_json || '[]'), peer_account_ids: JSON.parse(row.peer_account_ids_json || '[]') });
