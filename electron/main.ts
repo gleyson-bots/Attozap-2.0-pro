@@ -45,9 +45,13 @@ async function loadRenderer(window: BrowserWindow) {
   else await window.loadFile(join(__dirname, '../dist/index.html'));
 }
 
+function escapeHtml(value: string) {
+  return value.replace(/[&<>]/g, character => character === '&' ? '&amp;' : character === '<' ? '&lt;' : '&gt;');
+}
+
 async function showBootFailure(window: BrowserWindow, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  const html = `<!doctype html><meta charset="utf-8"><title>ATTOZAP - Falha de inicialização</title><body style="margin:0;background:#0b0d12;color:#f5f7f6;font-family:Segoe UI,Arial,sans-serif;display:grid;place-items:center;min-height:100vh"><main style="max-width:720px;padding:32px;border:1px solid #29322e;border-radius:18px;background:#111612"><div style="color:#78d79b;font-size:12px;font-weight:700;letter-spacing:.14em">ATTOZAP RECOVERY</div><h1 style="font-size:25px;margin:12px 0">Não foi possível carregar a interface.</h1><p style="color:#aeb8b2;line-height:1.6">O processo principal continua ativo, mas o arquivo da interface falhou ao abrir.</p><pre style="white-space:pre-wrap;background:#0c100d;padding:14px;border-radius:10px;color:#ffadb4">${message.replace(/[&<>]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c] ?? c))}</pre><p style="color:#8c978f">Código: RENDERER_LOAD_FAILED</p></main></body>`;
+  const html = `<!doctype html><meta charset="utf-8"><title>ATTOZAP - Falha de inicialização</title><body style="margin:0;background:#0b0d12;color:#f5f7f6;font-family:Segoe UI,Arial,sans-serif;display:grid;place-items:center;min-height:100vh"><main style="max-width:720px;padding:32px;border:1px solid #29322e;border-radius:18px;background:#111612"><div style="color:#78d79b;font-size:12px;font-weight:700;letter-spacing:.14em">ATTOZAP RECOVERY</div><h1 style="font-size:25px;margin:12px 0">Não foi possível carregar a interface.</h1><p style="color:#aeb8b2;line-height:1.6">O processo principal continua ativo, mas o arquivo da interface falhou ao abrir.</p><pre style="white-space:pre-wrap;background:#0c100d;padding:14px;border-radius:10px;color:#ffadb4">${escapeHtml(message)}</pre><p style="color:#8c978f">Código: RENDERER_LOAD_FAILED</p></main></body>`;
   await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => undefined);
 }
 
@@ -84,8 +88,6 @@ app.whenReady().then(async () => {
 
   mainWindow = createWindow();
 
-  // Recovery IPC is intentionally registered first and kept independent from
-  // optional modules, so a renderer crash can always be reported locally.
   safeRegister('recovery-ipc', () => registerRecoveryIpc(db, userData));
   safeRegister('core-ipc', () => registerIpc({ window: mainWindow!, db, accounts, campaigns, autoReply, tools, license }));
   safeRegister('extractor-ipc', () => registerExtractorIpc(db));
