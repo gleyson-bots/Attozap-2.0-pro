@@ -16,7 +16,12 @@ export function applyRc3Migrations(db: AttozapDatabase) {
   ensureColumn(db, 'warmup_profiles', 'ai_model', 'TEXT');
   ensureColumn(db, 'warmup_profiles', 'ai_prompt', 'TEXT');
   ensureColumn(db, 'warmup_profiles', 'ai_daily_limit', 'INTEGER NOT NULL DEFAULT 8');
+  ensureColumn(db, 'warmup_profiles', 'mode', "TEXT NOT NULL DEFAULT 'direct'");
+  ensureColumn(db, 'warmup_profiles', 'peer_account_ids_json', "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, 'warmup_profiles', 'round_robin_index', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'warmup_logs', 'source', "TEXT NOT NULL DEFAULT 'library'");
+  ensureColumn(db, 'warmup_logs', 'sender_account_id', 'TEXT');
+  ensureColumn(db, 'warmup_logs', 'recipient_account_id', 'TEXT');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS recruiting_jobs (
