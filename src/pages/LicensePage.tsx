@@ -26,30 +26,51 @@ export function LicenseActivationPage() {
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [encoded, setEncoded] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function reload() {
-    setStatus(await window.attozap.license.status());
+    try {
+      setStatus(await window.attozap.license.status());
+      setError('');
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
   }
 
   useEffect(() => { void reload(); }, []);
 
   async function activate() {
-    if (!encoded.trim()) return;
-    setBusy(true); setError('');
+    if (!encoded.trim()) { setError('Cole a chave de licença antes de ativar.'); return; }
+    setBusy(true); setError(''); setNotice('');
     try {
-      setStatus(await window.attozap.license.activate(encoded.trim()));
+      const next = await window.attozap.license.activate(encoded.trim());
+      setStatus(next);
       setEncoded('');
+      setNotice(next.valid ? 'Licença ativada com sucesso nesta máquina.' : `A licença foi salva, mas não é válida: ${next.reason ?? 'INVALID_LICENSE'}.`);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally { setBusy(false); }
   }
 
   async function deactivate() {
-    setBusy(true); setError('');
-    try { setStatus(await window.attozap.license.deactivate()); }
-    catch (e: any) { setError(e?.message ?? String(e)); }
+    setBusy(true); setError(''); setNotice('');
+    try {
+      setStatus(await window.attozap.license.deactivate());
+      setNotice('Licença removida desta máquina.');
+    } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
+  }
+
+  async function copyFingerprint() {
+    if (!status?.fingerprint) return;
+    setError(''); setNotice('');
+    try {
+      await window.attozap.clipboard.writeText(status.fingerprint);
+      setNotice('Fingerprint copiado para a área de transferência.');
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
   }
 
   return <div className="page-stack">
@@ -58,6 +79,7 @@ export function LicenseActivationPage() {
       <button className="button ghost" onClick={() => void reload()}><RefreshCw size={15}/> Validar novamente</button>
     </div>
     {error && <div className="notice error">{error}</div>}
+    {notice && <div className="notice info">{notice}</div>}
     {status && !status.configured && <div className="notice info">Este build ainda não contém a chave pública da sua License Authority. Coloque <code>resources/license-public.pem</code> antes de distribuir ou configure <code>ATTOZAP_LICENSE_PUBLIC_KEY</code>.</div>}
 
     <div className="license-layout">
@@ -89,7 +111,7 @@ export function LicenseActivationPage() {
           <div className="field"><label>Chave de licença</label><textarea value={encoded} onChange={e => setEncoded(e.target.value)} placeholder="Cole aqui a licença codificada emitida pelo painel proprietário..."/></div>
           <button className="button primary full" disabled={busy || !encoded.trim() || !status?.configured} onClick={() => void activate()}><KeyRound size={16}/>{busy ? 'Validando...' : 'Ativar licença'}</button>
         </div>}
-        <div className="fingerprint-box"><div><span>FINGERPRINT DESTA MÁQUINA</span><code>{status?.fingerprint ?? 'Carregando...'}</code></div><button className="icon-button" title="Copiar fingerprint" onClick={() => status?.fingerprint && navigator.clipboard.writeText(status.fingerprint)}><Copy size={14}/></button></div>
+        <div className="fingerprint-box"><div><span>FINGERPRINT DESTA MÁQUINA</span><code>{status?.fingerprint ?? 'Carregando...'}</code></div><button className="icon-button" title="Copiar fingerprint" disabled={!status?.fingerprint} onClick={() => void copyFingerprint()}><Copy size={14}/></button></div>
       </section>
     </div>
   </div>;
