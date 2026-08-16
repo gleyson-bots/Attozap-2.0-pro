@@ -9,6 +9,7 @@ import { WaSenderTools } from './tools/wasender-tools.js';
 import { LicenseService } from './license-service.js';
 import { registerIpc } from './ipc.js';
 import { registerExtractorIpc } from './extractor-ipc.js';
+import { registerDesktopIpc } from './desktop-ipc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -66,6 +67,7 @@ app.whenReady().then(async () => {
   mainWindow = createWindow();
   registerIpc({ window: mainWindow, db, accounts, campaigns, autoReply, tools, license });
   registerExtractorIpc();
+  registerDesktopIpc(mainWindow);
   await loadRenderer(mainWindow);
 
   scheduler = setInterval(() => {
