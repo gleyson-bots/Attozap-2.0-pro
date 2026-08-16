@@ -26,6 +26,8 @@ export type ProviderEvents = {
   onPollUpdate?: (event: PollUpdateEvent) => void;
 };
 
+export type IncomingMessageType = 'text' | 'image' | 'video' | 'document' | 'audio' | 'sticker' | 'poll' | 'unknown';
+
 export type IncomingMessage = {
   id: string;
   remoteJid: string;
@@ -34,7 +36,13 @@ export type IncomingMessage = {
   participantAlt?: string;
   addressingMode?: string;
   pushName?: string;
+  profilePictureUrl?: string;
   text: string;
+  messageType: IncomingMessageType;
+  mediaPath?: string;
+  fileName?: string;
+  mimetype?: string;
+  metadata?: Record<string, unknown>;
   fromMe: boolean;
   timestamp: number;
 };
@@ -116,6 +124,7 @@ export interface MessagingProvider {
   sendPoll(remoteJid: string, input: PollInput): Promise<MessageResult>;
   checkNumbers(numbers: string[]): Promise<ContactPresence[]>;
   resolveIdentity(jid: string, alternateJid?: string): Promise<ContactPresence>;
+  profilePictureUrl(jid: string): Promise<string | undefined>;
   listGroups(): Promise<GroupSummary[]>;
   getGroupMetadata(groupJid: string): Promise<GroupSummary & { participants: GroupParticipantIdentity[] }>;
   createGroup(subject: string, participants: string[]): Promise<GroupSummary>;
