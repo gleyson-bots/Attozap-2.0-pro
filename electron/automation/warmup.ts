@@ -253,8 +253,9 @@ export class WarmupEngine {
         runtime.pendingReply = undefined;
         if (nextIndex !== undefined) this.db.prepare(`UPDATE warmup_profiles SET round_robin_index=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(nextIndex, id);
       } else if (!success) {
+        const failedNextIndex: number | undefined = runtime.pendingReply ? runtime.pendingReply.nextIndex : undefined;
         runtime.pendingReply = undefined;
-        if (runtime.pendingReply?.nextIndex !== undefined) this.db.prepare(`UPDATE warmup_profiles SET round_robin_index=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(runtime.pendingReply.nextIndex, id);
+        if (failedNextIndex !== undefined) this.db.prepare(`UPDATE warmup_profiles SET round_robin_index=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(failedNextIndex, id);
       }
     }
 
