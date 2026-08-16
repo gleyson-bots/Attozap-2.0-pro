@@ -1,6 +1,6 @@
 {
   "name": "attozap-keygen",
-  "version": "2.0.0-alpha.5",
+  "version": "2.0.0-rc.1",
   "private": true,
   "description": "ATTOZAP License Authority portable KeyGen",
   "main": "main.cjs"
