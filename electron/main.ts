@@ -16,6 +16,7 @@ import { registerDesktopIpc } from './desktop-ipc.js';
 import { registerChatIpc } from './chat-ipc.js';
 import { registerWarmupIpc } from './warmup-ipc.js';
 import { registerBrowserHubIpc } from './browser-hub-ipc.js';
+import { registerRecruitingIpc } from './recruiting-ipc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -26,31 +27,13 @@ if (process.platform === 'win32') app.setAppUserModelId('com.gleysondevs.attozap
 
 function createWindow() {
   const window = new BrowserWindow({
-    width: 1480,
-    height: 940,
-    minWidth: 1080,
-    minHeight: 720,
-    backgroundColor: '#0b0d12',
-    autoHideMenuBar: true,
-    titleBarStyle: 'hiddenInset',
-    webPreferences: {
-      preload: join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
+    width: 1480, height: 940, minWidth: 1080, minHeight: 720,
+    backgroundColor: '#0b0d12', autoHideMenuBar: true, titleBarStyle: 'hiddenInset',
+    webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
-
-  window.webContents.on('did-fail-load', (_event, code, description, url) => {
-    console.error('[renderer:did-fail-load]', { code, description, url });
-  });
-  window.webContents.on('render-process-gone', (_event, details) => {
-    console.error('[renderer:gone]', details);
-  });
-  window.webContents.on('preload-error', (_event, preloadPath, error) => {
-    console.error('[renderer:preload-error]', { preloadPath, error });
-  });
-
+  window.webContents.on('did-fail-load', (_event, code, description, url) => console.error('[renderer:did-fail-load]', { code, description, url }));
+  window.webContents.on('render-process-gone', (_event, details) => console.error('[renderer:gone]', details));
+  window.webContents.on('preload-error', (_event, preloadPath, error) => console.error('[renderer:preload-error]', { preloadPath, error }));
   return window;
 }
 
@@ -83,6 +66,7 @@ app.whenReady().then(async () => {
   registerChatIpc(chat, license);
   registerWarmupIpc(warmupEngine, license);
   registerBrowserHubIpc(mainWindow);
+  registerRecruitingIpc(mainWindow, db);
   await loadRenderer(mainWindow);
 
   const staleOnline = accounts.list().filter(account => ['connected', 'connecting', 'reconnecting', 'qr'].includes(account.status));
@@ -93,23 +77,11 @@ app.whenReady().then(async () => {
     });
   }
 
-  scheduler = setInterval(() => {
-    void campaigns.runDueSchedules().catch(error => console.error('[scheduler]', error));
-  }, 30_000);
-
+  scheduler = setInterval(() => void campaigns.runDueSchedules().catch(error => console.error('[scheduler]', error)), 30_000);
   app.on('activate', async () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createWindow();
-      await loadRenderer(mainWindow);
-    }
+    if (BrowserWindow.getAllWindows().length === 0) { mainWindow = createWindow(); await loadRenderer(mainWindow); }
   });
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-
-app.on('before-quit', () => {
-  if (scheduler) clearInterval(scheduler);
-  warmupEngine?.shutdown();
-});
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('before-quit', () => { if (scheduler) clearInterval(scheduler); warmupEngine?.shutdown(); });
