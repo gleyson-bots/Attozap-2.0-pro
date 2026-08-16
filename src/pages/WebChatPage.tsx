@@ -81,12 +81,16 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   useEffect(() => { void loadChats(); }, [accountId, search]);
   useEffect(() => { void loadMessages(); }, [accountId, selected?.jid]);
   useEffect(() => {
-    const off = window.attozap.messages.onIncoming((payload: any) => {
+    const offIncoming = window.attozap.messages.onIncoming((payload: any) => {
       if (payload?.accountId !== accountId) return;
       void loadChats();
       if (selected?.jid) void loadMessages(selected.jid);
     });
-    return () => off?.();
+    const offStatus = window.attozap.messages.onStatus((payload: any) => {
+      if (payload?.accountId !== accountId || !payload?.id) return;
+      setMessages(current => current.map(message => message.id === payload.id ? { ...message, status: payload.status } : message));
+    });
+    return () => { offIncoming?.(); offStatus?.(); };
   }, [accountId, selected?.jid]);
 
   const activeAccount = useMemo(() => accounts.find(account => account.id === accountId), [accounts, accountId]);
