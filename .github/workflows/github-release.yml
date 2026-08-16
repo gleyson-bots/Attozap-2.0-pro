@@ -1,0 +1,74 @@
+name: GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build application
+        run: npm run build
+
+      - name: Build WASender portable
+        run: npx electron-builder --win portable --x64 --publish never
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Prepare stable release filename
+        shell: pwsh
+        run: |
+          $app = Get-ChildItem release -Filter 'ATTOZAP-WASender-Pro-*.exe' | Select-Object -First 1
+          if (-not $app) { throw 'WASender portable executable was not generated' }
+          Copy-Item $app.FullName 'release/ATTOZAP-WASender-Pro-x64.exe' -Force
+          $hash = (Get-FileHash 'release/ATTOZAP-WASender-Pro-x64.exe' -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path 'release/SHA256SUMS.txt' -Value "$hash  ATTOZAP-WASender-Pro-x64.exe"
+
+      - name: Resolve release tag
+        id: meta
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $tag = '${{ github.ref_name }}'
+          } else {
+            $version = (Get-Content package.json | ConvertFrom-Json).version
+            $tag = "v$version"
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          $existing = gh release view $env:TAG 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG 'release/ATTOZAP-WASender-Pro-x64.exe' 'release/SHA256SUMS.txt' --clobber
+          } else {
+            gh release create $env:TAG 'release/ATTOZAP-WASender-Pro-x64.exe' 'release/SHA256SUMS.txt' --title "ATTOZAP WASender Pro $env:TAG" --generate-notes
+          }
+
+      - name: Verify latest download asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          gh release view $env:TAG --json assets --jq '.assets[].name'
+          Write-Host 'Stable download URL: https://github.com/gleyson-bots/Attozap-2.0-pro/releases/latest/download/ATTOZAP-WASender-Pro-x64.exe'
