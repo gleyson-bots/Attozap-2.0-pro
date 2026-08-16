@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Cable, KeyRound, Link2, LogOut, Plus, QrCode, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { Cable, KeyRound, Link2, LogOut, Plus, QrCode, RefreshCw, Settings2, Trash2, Wifi, WifiOff } from 'lucide-react';
 
 export function AccountsPage({ accounts, reload }: { accounts: any[]; reload: () => Promise<void> }) {
   const [name, setName] = useState('');
@@ -50,7 +50,7 @@ export function AccountsPage({ accounts, reload }: { accounts: any[]; reload: ()
 
   return <div className="page-stack">
     <div className="page-head">
-      <div><span className="kicker">MULTI ACCOUNT</span><h2>Contas do WhatsApp</h2><p>Cada conta possui sessão independente e persistente.</p></div>
+      <div><span className="kicker">MULTI ACCOUNT</span><h2>Contas do WhatsApp</h2><p>Cada conta possui sessão independente, persistente e proxy opcional.</p></div>
       <button className="button ghost" onClick={() => void Promise.all([reload(), reloadLicense()])}><RefreshCw size={16}/> Atualizar</button>
     </div>
 
@@ -71,6 +71,7 @@ export function AccountsPage({ accounts, reload }: { accounts: any[]; reload: ()
           <span className={`status-chip ${account.status}`}>{account.status === 'connected' ? 'Conectado' : account.status === 'qr' ? 'Aguardando QR' : account.status}</span>
         </div>
         <div className="account-meta"><span><Cable size={14}/> Baileys</span><span><Link2 size={14}/>{account.proxy ? ' Proxy configurado' : ' Sem proxy'}</span></div>
+        <ProxyEditor account={account} onSaved={reload}/>
         <div className="account-actions">
           {account.status !== 'connected'
             ? <button className="button primary" disabled={busy === account.id} onClick={() => void act(account.id, () => window.attozap.accounts.connect(account.id))}><QrCode size={16}/> Conectar</button>
@@ -83,4 +84,18 @@ export function AccountsPage({ accounts, reload }: { accounts: any[]; reload: ()
 
     {qr && <div className="modal-backdrop" onMouseDown={() => setQr(null)}><div className="qr-modal card" onMouseDown={e => e.stopPropagation()}><div className="qr-icon"><QrCode size={20}/></div><h3>Conectar WhatsApp</h3><p>No celular, abra <b>Aparelhos conectados</b> e leia este QR Code.</p><img src={qr.dataUrl} alt="QR Code de conexão"/><small>O QR é renovado automaticamente quando necessário.</small><button className="button ghost full" onClick={() => setQr(null)}>Fechar</button></div></div>}
   </div>;
+}
+
+function ProxyEditor({ account, onSaved }: { account: any; onSaved: () => Promise<void> }) {
+  const [value, setValue] = useState(account.proxy ?? '');
+  const [message, setMessage] = useState('');
+  useEffect(() => setValue(account.proxy ?? ''), [account.proxy]);
+  async function save() {
+    try {
+      await window.attozap.accounts.setProxy(account.id, value.trim() || undefined);
+      setMessage(value.trim() ? 'Proxy salvo. Reconecte a conta para garantir um novo transporte.' : 'Proxy removido.');
+      await onSaved();
+    } catch (e: any) { setMessage(e?.message ?? String(e)); }
+  }
+  return <details className="advanced account-proxy"><summary><Settings2 size={14}/> Proxy por conta</summary><div className="field"><label>HTTP/HTTPS</label><input value={value} onChange={e => setValue(e.target.value)} placeholder="http://usuario:senha@host:porta"/><small>O proxy é aplicado ao WebSocket e às requisições de mídia do provider.</small></div><button className="button tiny" onClick={() => void save()}>Salvar proxy</button>{message && <small className="proxy-message">{message}</small>}</details>;
 }
