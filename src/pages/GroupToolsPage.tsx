@@ -13,6 +13,8 @@ export function GroupToolsPage({ accounts }: { accounts: any[] }) {
   const [activeDays, setActiveDays] = useState(30);
   const [invite, setInvite] = useState('');
   const [verified, setVerified] = useState<any | null>(null);
+  const [joinResult, setJoinResult] = useState<any | null>(null);
+  const [joining, setJoining] = useState(false);
   const [subject, setSubject] = useState('');
   const [participants, setParticipants] = useState('');
   const [bulkInvites, setBulkInvites] = useState('');
@@ -81,6 +83,37 @@ export function GroupToolsPage({ accounts }: { accounts: any[] }) {
     downloadCsv('group-links.csv', rows);
   }
 
+  async function verifyInvite() {
+    if (!accountId || !invite.trim()) return;
+    try {
+      const result = await window.attozap.groups.verify(accountId, invite);
+      setVerified(result);
+      setJoinResult(null);
+      setError('');
+    } catch (e: any) {
+      setVerified(null);
+      setJoinResult(null);
+      setError(e?.message ?? String(e));
+    }
+  }
+
+  async function joinInvite() {
+    if (!accountId || !invite.trim()) return;
+    setJoining(true);
+    setJoinResult(null);
+    setError('');
+    try {
+      const result = await window.attozap.groups.join(accountId, invite);
+      setVerified(result);
+      setJoinResult(result);
+      if (result?.status !== 'approval_required') await reload(true);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setJoining(false);
+    }
+  }
+
   async function verifyBulk() {
     const links = bulkInvites.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
     if (!links.length || !accountId) return;
@@ -95,7 +128,7 @@ export function GroupToolsPage({ accounts }: { accounts: any[] }) {
     <div className="page-head">
       <div><span className="kicker">GROUP TOOLS</span><h2>Ferramentas de grupos</h2><p>Metadata, membros, LID/PN, convites e atividade observada.</p></div>
       <div className="head-actions">
-        <select className="top-select" value={accountId} onChange={e => setAccountId(e.target.value)}><option value="">Conta...</option>{connected.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
+        <select className="top-select" value={accountId} onChange={e => { setAccountId(e.target.value); setVerified(null); setJoinResult(null); }}><option value="">Conta...</option>{connected.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
         <button className="button ghost" disabled={!groups.length} onClick={() => void exportGroupLinks()}><Download size={16}/> Links</button>
         <button className="button primary" disabled={!accountId} onClick={() => void reload(true)}><RefreshCw size={16}/> Sincronizar</button>
       </div>
@@ -122,10 +155,13 @@ export function GroupToolsPage({ accounts }: { accounts: any[] }) {
 
     <div className="tools-grid">
       <section className="card">
-        <div className="card-head"><div><h3>Link de grupo</h3><p>Verificar ou entrar por convite.</p></div><Link size={18}/></div>
-        <div className="field"><label>Convite</label><input value={invite} onChange={e => setInvite(e.target.value)} placeholder="https://chat.whatsapp.com/..."/></div>
-        <div className="head-actions"><button className="button ghost" disabled={!accountId || !invite} onClick={async () => { try { setVerified(await window.attozap.groups.verify(accountId, invite)); setError(''); } catch (e: any) { setError(e?.message ?? String(e)); } }}>Verificar</button><button className="button primary" disabled={!accountId || !invite} onClick={async () => { try { await window.attozap.groups.join(accountId, invite); await reload(true); } catch (e: any) { setError(e?.message ?? String(e)); } }}>Entrar no grupo</button></div>
-        {verified && <div className="verified-group"><CheckCircle2 size={17}/><div><b>{verified.subject}</b><span>{verified.size} membros</span><p>{verified.description || 'Sem descrição'}</p></div></div>}
+        <div className="card-head"><div><h3>Link de grupo</h3><p>Valide o convite antes de entrar e acompanhe o resultado real.</p></div><Link size={18}/></div>
+        <div className="field"><label>Convite</label><input value={invite} onChange={e => { setInvite(e.target.value); setVerified(null); setJoinResult(null); }} placeholder="https://chat.whatsapp.com/... ou código"/></div>
+        <div className="head-actions"><button className="button ghost" disabled={!accountId || !invite.trim() || joining} onClick={() => void verifyInvite()}>Verificar</button><button className="button primary" disabled={!accountId || !invite.trim() || joining} onClick={() => void joinInvite()}>{joining ? 'Entrando...' : 'Entrar no grupo'}</button></div>
+        {verified && <div className="verified-group"><CheckCircle2 size={17}/><div><b>{verified.subject}</b><span>{verified.size} membros · {verified.joinApprovalMode ? 'aprovação de novos membros ativa' : 'entrada direta'}</span><p>{verified.description || 'Sem descrição'}</p></div></div>}
+        {joinResult?.status === 'joined' && <div className="notice info"><CheckCircle2 size={16}/> Entrada confirmada em <b>{joinResult.subject}</b>. A lista de grupos foi sincronizada.</div>}
+        {joinResult?.status === 'already_member' && <div className="notice info"><CheckCircle2 size={16}/> Esta conta já participa de <b>{joinResult.subject}</b>.</div>}
+        {joinResult?.status === 'approval_required' && <div className="notice warning"><Activity size={16}/> O grupo <b>{joinResult.subject}</b> exige aprovação. A solicitação foi enviada/aceita pelo fluxo de convite, mas a conta só aparecerá como membro depois da aprovação do administrador.</div>}
       </section>
 
       <section className="card">
@@ -138,7 +174,7 @@ export function GroupToolsPage({ accounts }: { accounts: any[] }) {
 
     <section className="card bulk-verify-card">
       <div className="card-head"><div><h3>Bulk Group Links Verify</h3><p>Valide uma lista de convites.</p></div>{bulkResults.length > 0 && <button className="button tiny" onClick={() => downloadCsv('group-link-verify.csv', [['invite','valid','group','members','error'], ...bulkResults.map(result => [result.invite,result.valid,result.group?.subject ?? '',result.group?.size ?? '',result.error ?? ''])])}><Download size={14}/> CSV</button>}</div>
-      <div className="bulk-verify-grid"><div className="field"><label>Links — um por linha</label><textarea value={bulkInvites} onChange={e => setBulkInvites(e.target.value)} placeholder={'https://chat.whatsapp.com/...\nhttps://chat.whatsapp.com/...'}/><button className="button primary" disabled={!accountId || !bulkInvites.trim()} onClick={() => void verifyBulk()}><CheckCircle2 size={15}/> Verificar links</button></div><div className="bulk-results">{bulkResults.map(result => <div key={result.invite} className={result.valid ? 'valid-row' : 'invalid-row'}>{result.valid ? <CheckCircle2 size={14}/> : <XCircle size={14}/>}<div><b>{result.group?.subject ?? (result.valid ? 'Grupo válido' : 'Link inválido')}</b><small>{result.valid ? `${result.group?.size ?? 0} membros` : result.error}</small><code>{result.invite}</code></div></div>)}{!bulkResults.length && <div className="empty mini"><Link size={23}/><p>Os links validados aparecerão aqui.</p></div>}</div></div>
+      <div className="bulk-verify-grid"><div className="field"><label>Links — um por linha</label><textarea value={bulkInvites} onChange={e => setBulkInvites(e.target.value)} placeholder={'https://chat.whatsapp.com/...\nhttps://chat.whatsapp.com/...'}/><button className="button primary" disabled={!accountId || !bulkInvites.trim()} onClick={() => void verifyBulk()}><CheckCircle2 size={15}/> Verificar links</button></div><div className="bulk-results">{bulkResults.map(result => <div key={result.invite} className={result.valid ? 'valid-row' : 'invalid-row'}>{result.valid ? <CheckCircle2 size={14}/> : <XCircle size={14}/>}<div><b>{result.group?.subject ?? (result.valid ? 'Grupo válido' : 'Link inválido')}</b><small>{result.valid ? `${result.group?.size ?? 0} membros${result.group?.joinApprovalMode ? ' · aprovação ativa' : ''}` : result.error}</small><code>{result.invite}</code></div></div>)}{!bulkResults.length && <div className="empty mini"><Link size={23}/><p>Os links validados aparecerão aqui.</p></div>}</div></div>
     </section>
 
     <div className="notice info">LIDs são tratados como identificadores opacos. A interface só mostra/importa telefone quando existe PN/telefone resolvido pelo WhatsApp.</div>
