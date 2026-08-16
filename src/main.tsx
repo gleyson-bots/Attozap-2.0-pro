@@ -1,11 +1,13 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { GlobalFeedback, installGlobalErrorHandlers } from './feedback';
 import './styles.css';
 import './license.css';
 import './sender.css';
 import './group-tools.css';
 
+installGlobalErrorHandlers();
 const root = createRoot(document.getElementById('root')!);
 
 if (!(window as any).attozap) {
@@ -21,6 +23,7 @@ if (!(window as any).attozap) {
 } else {
   root.render(
     <React.StrictMode>
+      <GlobalFeedback />
       <App />
     </React.StrictMode>,
   );
