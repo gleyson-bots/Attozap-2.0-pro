@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Activity, BarChart3, Bot, BriefcaseBusiness, CalendarClock, ChevronRight, ContactRound, FileSearch, FileText, Fingerprint, Flame, Gauge, Group,
   HeartPulse, KeyRound, LayoutDashboard, Menu, MessageCircle, MessageSquareText, Moon, PanelLeftClose, PanelLeftOpen, Search, Send, Settings,
@@ -95,7 +95,12 @@ export default function App() {
     if (mode === 'basic' && current?.advanced) setView('dashboard');
   }
 
-  const visibleSections = useMemo(() => sections.map(section => ({ ...section, items: section.items.filter(item => uiMode === 'advanced' || !item.advanced) })).filter(section => section.items.length), [uiMode]);
+  // This is intentionally not a hook. The app returns the StartupGate before this
+  // section while the license/tutorial gate is active, so using useMemo here would
+  // change the number of hooks between renders and trigger React error #310.
+  const visibleSections = sections
+    .map(section => ({ ...section, items: section.items.filter(item => uiMode === 'advanced' || !item.advanced) }))
+    .filter(section => section.items.length);
   const active = sections.flatMap(section => section.items).find(item => item.id === view);
   const connected = accounts.filter(account => account.status === 'connected').length;
   const fullWorkspace = view === 'webchat';
