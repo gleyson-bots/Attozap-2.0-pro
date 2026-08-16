@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from './database.js';
+import { applyRc3Migrations } from './rc3-migrations.js';
 import { AccountManager } from './messaging/account-manager.js';
 import { ChatService } from './messaging/chat-service.js';
 import { CampaignEngine } from './campaigns/engine.js';
@@ -14,6 +15,7 @@ import { registerExtractorIpc } from './extractor-ipc.js';
 import { registerDesktopIpc } from './desktop-ipc.js';
 import { registerChatIpc } from './chat-ipc.js';
 import { registerWarmupIpc } from './warmup-ipc.js';
+import { registerBrowserHubIpc } from './browser-hub-ipc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -61,6 +63,7 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = 'dark';
   const userData = app.getPath('userData');
   const db = openDatabase(join(userData, 'attozap.sqlite3'));
+  applyRc3Migrations(db);
   const accounts = new AccountManager(db, join(userData, 'sessions'));
   const chat = new ChatService(db, accounts);
   const campaigns = new CampaignEngine(db, accounts);
@@ -79,11 +82,9 @@ app.whenReady().then(async () => {
   registerDesktopIpc(mainWindow);
   registerChatIpc(chat, license);
   registerWarmupIpc(warmupEngine, license);
+  registerBrowserHubIpc(mainWindow);
   await loadRenderer(mainWindow);
 
-  // A desktop process restart destroys the in-memory socket even though the SQLite
-  // row may still say "connected". Restore those sessions so UI state and provider
-  // state cannot diverge. Failed restores are explicitly marked disconnected.
   const staleOnline = accounts.list().filter(account => ['connected', 'connecting', 'reconnecting', 'qr'].includes(account.status));
   for (const account of staleOnline) {
     void accounts.connect(account.id).catch(error => {
