@@ -73,7 +73,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       const result = await window.attozap.webchat.sendText(accountId, target, text);
       const resolved = result.resolvedTarget ?? result.remoteJid ?? target;
       setText('');
-      setSelected(current => ({ ...(current ?? {}), jid: resolved, name: current?.name || newTarget || resolved, last_message_at: new Date().toISOString() }));
+      setSelected((current: any) => ({ ...(current ?? {}), jid: resolved, name: current?.name || newTarget || resolved, last_message_at: new Date().toISOString() }));
       setNewTarget('');
       await loadChats();
       await loadMessages(resolved);
@@ -93,7 +93,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     try {
       const result = await window.attozap.webchat.sendMedia(accountId, target, type, { path, fileName: fileName(path), ptt: type === 'audio' });
       const resolved = result.resolvedTarget ?? result.remoteJid ?? target;
-      setSelected(current => ({ ...(current ?? {}), jid: resolved, name: current?.name || newTarget || resolved }));
+      setSelected((current: any) => ({ ...(current ?? {}), jid: resolved, name: current?.name || newTarget || resolved }));
       setNewTarget('');
       await loadChats(); await loadMessages(resolved);
     } catch (e: any) { setError(e?.message ?? String(e)); }
