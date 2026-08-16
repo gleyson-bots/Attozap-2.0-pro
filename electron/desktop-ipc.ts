@@ -1,20 +1,7 @@
 import { BrowserWindow, clipboard, dialog, ipcMain } from 'electron';
 import { writeFile } from 'node:fs/promises';
-import { parseContactFile } from './tools/contact-file-import.js';
 
 export function registerDesktopIpc(window: BrowserWindow) {
-  ipcMain.handle('importers:pick-contacts', async () => {
-    const result = await dialog.showOpenDialog(window, {
-      title: 'Importar contatos',
-      properties: ['openFile'],
-      filters: [
-        { name: 'Listas de contatos', extensions: ['csv', 'txt', 'tsv'] },
-      ],
-    });
-    if (result.canceled || !result.filePaths[0]) return null;
-    return parseContactFile(result.filePaths[0]);
-  });
-
   ipcMain.handle('files:save-text', async (_event, payload: {
     suggestedName: string;
     content: string;
