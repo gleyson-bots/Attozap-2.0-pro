@@ -11,11 +11,8 @@ function cleanError(error: unknown) {
 }
 
 async function invoke<T = any>(channel: string, ...args: any[]): Promise<T> {
-  try {
-    return await ipcRenderer.invoke(channel, ...args) as T;
-  } catch (error) {
-    throw new Error(cleanError(error) || `Falha em ${channel}`);
-  }
+  try { return await ipcRenderer.invoke(channel, ...args) as T; }
+  catch (error) { throw new Error(cleanError(error) || `Falha em ${channel}`); }
 }
 
 const on = (channel: string, callback: Listener) => {
@@ -25,121 +22,66 @@ const on = (channel: string, callback: Listener) => {
 };
 
 contextBridge.exposeInMainWorld('attozap', {
-  app: {
-    version: () => invoke<string>('app:get-version'),
-    platform: () => invoke<string>('app:get-platform'),
-  },
+  app: { version: () => invoke<string>('app:get-version'), platform: () => invoke<string>('app:get-platform') },
   accounts: {
-    list: () => invoke('accounts:list'),
-    create: (name: string) => invoke('accounts:create', name),
+    list: () => invoke('accounts:list'), create: (name: string) => invoke('accounts:create', name),
     rename: (id: string, name: string) => invoke('accounts:rename', id, name),
     setProxy: (id: string, proxy?: string) => invoke('accounts:set-proxy', id, proxy),
-    connect: (id: string) => invoke('accounts:connect', id),
-    disconnect: (id: string, logout = false) => invoke('accounts:disconnect', id, logout),
-    remove: (id: string) => invoke('accounts:remove', id),
-    onState: (callback: Listener) => on('accounts:state', callback),
-    onQr: (callback: Listener) => on('accounts:qr', callback),
-    onError: (callback: Listener) => on('accounts:error', callback),
+    connect: (id: string) => invoke('accounts:connect', id), disconnect: (id: string, logout = false) => invoke('accounts:disconnect', id, logout),
+    remove: (id: string) => invoke('accounts:remove', id), onState: (callback: Listener) => on('accounts:state', callback),
+    onQr: (callback: Listener) => on('accounts:qr', callback), onError: (callback: Listener) => on('accounts:error', callback),
   },
   campaigns: {
-    create: (payload: any) => invoke('campaigns:create', payload),
-    list: () => invoke('campaigns:list'),
-    get: (id: string) => invoke('campaigns:get', id),
-    recipients: (id: string) => invoke('campaigns:recipients', id),
-    start: (id: string) => invoke('campaigns:start', id),
-    pause: (id: string) => invoke('campaigns:pause', id),
-    resume: (id: string) => invoke('campaigns:resume', id),
-    stop: (id: string) => invoke('campaigns:stop', id),
-    schedule: (id: string, runAt: string) => invoke('campaigns:schedule', id, runAt),
-    schedules: () => invoke('campaigns:schedules'),
-    onProgress: (callback: Listener) => on('campaigns:progress', callback),
-    onError: (callback: Listener) => on('campaigns:error', callback),
+    create: (payload: any) => invoke('campaigns:create', payload), list: () => invoke('campaigns:list'), get: (id: string) => invoke('campaigns:get', id),
+    recipients: (id: string) => invoke('campaigns:recipients', id), start: (id: string) => invoke('campaigns:start', id), pause: (id: string) => invoke('campaigns:pause', id),
+    resume: (id: string) => invoke('campaigns:resume', id), stop: (id: string) => invoke('campaigns:stop', id), schedule: (id: string, runAt: string) => invoke('campaigns:schedule', id, runAt),
+    schedules: () => invoke('campaigns:schedules'), onProgress: (callback: Listener) => on('campaigns:progress', callback), onError: (callback: Listener) => on('campaigns:error', callback),
   },
   contacts: {
-    list: (search?: string) => invoke('contacts:list', search),
-    import: (contacts: any[]) => invoke('contacts:import', contacts),
-    block: (phone: string, blocked: boolean) => invoke('contacts:block', phone, blocked),
-    friendly: (phone: string, friendly: boolean) => invoke('contacts:friendly', phone, friendly),
-    blocked: () => invoke('contacts:blocked'),
-    friendlyList: () => invoke('contacts:friendly-list'),
+    list: (search?: string) => invoke('contacts:list', search), import: (contacts: any[]) => invoke('contacts:import', contacts),
+    block: (phone: string, blocked: boolean) => invoke('contacts:block', phone, blocked), friendly: (phone: string, friendly: boolean) => invoke('contacts:friendly', phone, friendly),
+    blocked: () => invoke('contacts:blocked'), friendlyList: () => invoke('contacts:friendly-list'),
   },
-  chats: {
-    list: (accountId: string, includeGroups = false) => invoke('chats:list', accountId, includeGroups),
-    grabContacts: (accountId: string) => invoke('chats:grab-contacts', accountId),
-  },
+  chats: { list: (accountId: string, includeGroups = false) => invoke('chats:list', accountId, includeGroups), grabContacts: (accountId: string) => invoke('chats:grab-contacts', accountId) },
   webchat: {
     list: (accountId: string, search = '') => invoke('webchat:list', accountId, search),
     messages: (accountId: string, remoteJid: string, limit = 250) => invoke('webchat:messages', accountId, remoteJid, limit),
     resolve: (accountId: string, target: string) => invoke('webchat:resolve', accountId, target),
     sendText: (accountId: string, target: string, text: string) => invoke('webchat:send-text', accountId, target, text),
     sendMedia: (accountId: string, target: string, type: 'image'|'video'|'document'|'audio'|'sticker', input: any) => invoke('webchat:send-media', accountId, target, type, input),
+    sendPoll: (accountId: string, target: string, input: { name: string; values: string[]; selectableCount?: number }) => invoke('webchat:send-poll', accountId, target, input),
   },
-  tools: {
-    filterNumbers: (accountId: string, numbers: string[]) => invoke('tools:filter-numbers', accountId, numbers),
-    generateNumbers: (payload: any) => invoke('tools:generate-numbers', payload),
+  browser: {
+    portals: () => invoke('browser:portal-list'),
+    openPortal: (portalId: string) => invoke('browser:open-portal', portalId),
   },
+  tools: { filterNumbers: (accountId: string, numbers: string[]) => invoke('tools:filter-numbers', accountId, numbers), generateNumbers: (payload: any) => invoke('tools:generate-numbers', payload) },
   groups: {
-    sync: (accountId: string) => invoke('groups:sync', accountId),
-    list: (accountId: string) => invoke('groups:list', accountId),
-    members: (accountId: string, groupJid: string) => invoke('groups:members', accountId, groupJid),
-    activeMembers: (accountId: string, groupJid: string, days = 30) => invoke('groups:active-members', accountId, groupJid, days),
+    sync: (accountId: string) => invoke('groups:sync', accountId), list: (accountId: string) => invoke('groups:list', accountId),
+    members: (accountId: string, groupJid: string) => invoke('groups:members', accountId, groupJid), activeMembers: (accountId: string, groupJid: string, days = 30) => invoke('groups:active-members', accountId, groupJid, days),
     create: (accountId: string, subject: string, participants: string[]) => invoke('groups:create', accountId, subject, participants),
     createMany: (accountId: string, jobs: Array<{ subject: string; participants: string[] }>, delayMs = 1000) => invoke('groups:create-many', accountId, jobs, delayMs),
     add: (accountId: string, groupJid: string, participants: string[]) => invoke('groups:add', accountId, groupJid, participants),
     addMany: (accountId: string, jobs: Array<{ groupJid: string; participants: string[] }>, delayMs = 1000) => invoke('groups:add-many', accountId, jobs, delayMs),
-    join: (accountId: string, invite: string) => invoke('groups:join', accountId, invite),
-    verify: (accountId: string, invite: string) => invoke('groups:verify', accountId, invite),
-    verifyMany: (accountId: string, invites: string[]) => invoke('groups:verify-many', accountId, invites),
-    invite: (accountId: string, groupJid: string) => invoke('groups:invite', accountId, groupJid),
+    join: (accountId: string, invite: string) => invoke('groups:join', accountId, invite), verify: (accountId: string, invite: string) => invoke('groups:verify', accountId, invite),
+    verifyMany: (accountId: string, invites: string[]) => invoke('groups:verify-many', accountId, invites), invite: (accountId: string, groupJid: string) => invoke('groups:invite', accountId, groupJid),
   },
-  templates: {
-    list: () => invoke('templates:list'),
-    create: (payload: any) => invoke('templates:create', payload),
-    update: (id: string, payload: any) => invoke('templates:update', id, payload),
-    remove: (id: string) => invoke('templates:remove', id),
-  },
-  polls: {
-    list: (accountId?: string) => invoke('polls:list', accountId),
-    onUpdate: (callback: Listener) => on('polls:update', callback),
-  },
-  extractors: {
-    webContacts: (urls: string[]) => invoke('extractors:web-contacts', urls),
-    googlePlaces: (payload: any) => invoke('extractors:google-places', payload),
-  },
-  importers: {
-    pickContacts: () => invoke('importers:pick-contacts'),
-  },
-  autoReply: {
-    list: (accountId?: string) => invoke('autoreply:list', accountId),
-    create: (payload: any) => invoke('autoreply:create', payload),
-    update: (id: string, payload: any) => invoke('autoreply:update', id, payload),
-    remove: (id: string) => invoke('autoreply:remove', id),
-  },
+  templates: { list: () => invoke('templates:list'), create: (payload: any) => invoke('templates:create', payload), update: (id: string, payload: any) => invoke('templates:update', id, payload), remove: (id: string) => invoke('templates:remove', id) },
+  polls: { list: (accountId?: string) => invoke('polls:list', accountId), onUpdate: (callback: Listener) => on('polls:update', callback) },
+  extractors: { webContacts: (urls: string[]) => invoke('extractors:web-contacts', urls), googlePlaces: (payload: any) => invoke('extractors:google-places', payload) },
+  importers: { pickContacts: () => invoke('importers:pick-contacts') },
+  autoReply: { list: (accountId?: string) => invoke('autoreply:list', accountId), create: (payload: any) => invoke('autoreply:create', payload), update: (id: string, payload: any) => invoke('autoreply:update', id, payload), remove: (id: string) => invoke('autoreply:remove', id) },
   warmup: {
-    list: () => invoke('warmup:list'),
-    create: (payload: any) => invoke('warmup:create', payload),
-    update: (id: string, payload: any) => invoke('warmup:update', id, payload),
-    remove: (id: string) => invoke('warmup:remove', id),
-    start: (id: string) => invoke('warmup:start', id),
-    stop: (id: string) => invoke('warmup:stop', id),
-    logs: (id?: string, limit = 500) => invoke('warmup:logs', id, limit),
+    list: () => invoke('warmup:list'), create: (payload: any) => invoke('warmup:create', payload), update: (id: string, payload: any) => invoke('warmup:update', id, payload),
+    remove: (id: string) => invoke('warmup:remove', id), start: (id: string) => invoke('warmup:start', id), stop: (id: string) => invoke('warmup:stop', id), logs: (id?: string, limit = 500) => invoke('warmup:logs', id, limit),
   },
-  license: {
-    status: () => invoke('license:status'),
-    activate: (encoded: string) => invoke('license:activate', encoded),
-    deactivate: () => invoke('license:deactivate'),
-  },
+  license: { status: () => invoke('license:status'), activate: (encoded: string) => invoke('license:activate', encoded), deactivate: () => invoke('license:deactivate') },
   files: {
     pick: (options?: any) => invoke('files:pick', options),
     saveText: (payload: { suggestedName: string; content: string; filters?: Array<{ name: string; extensions: string[] }> }) => invoke('files:save-text', payload),
   },
-  clipboard: {
-    writeText: (text: string) => invoke('clipboard:write-text', text),
-  },
-  settings: {
-    get: (key: string) => invoke('settings:get', key),
-    set: (key: string, value: string) => invoke('settings:set', key, value),
-  },
+  clipboard: { writeText: (text: string) => invoke('clipboard:write-text', text) },
+  settings: { get: (key: string) => invoke('settings:get', key), set: (key: string, value: string) => invoke('settings:set', key, value) },
   audit: { list: () => invoke('audit:list') },
   messages: { onIncoming: (callback: Listener) => on('messages:incoming', callback) },
 });
