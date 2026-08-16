@@ -21,8 +21,21 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Build application
         run: npm run build
+      - name: Signing mode
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          if ($env:WIN_CSC_LINK) {
+            Write-Host "Windows code-signing certificate configured. Release executables will be Authenticode signed."
+          } else {
+            Write-Warning "WIN_CSC_LINK is not configured. Build will be unsigned and may trigger Microsoft Defender SmartScreen."
+          }
       - name: Build WASender portable
         run: npx electron-builder --win portable --x64 --publish never
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       - name: Smoke test packaged renderer and actions
         shell: pwsh
         run: |
@@ -42,11 +55,17 @@ jobs:
           if ($interactionExit -ne 0) { exit $interactionExit }
       - name: Verify WASender output
         shell: pwsh
+        env:
+          SIGNING_EXPECTED: ${{ secrets.WIN_CSC_LINK != '' }}
         run: |
           $app = Get-ChildItem release -Filter 'ATTOZAP-WASender-Pro-*.exe' | Select-Object -First 1
           if (-not $app) { throw 'WASender portable executable was not generated' }
           if (-not (Test-Path 'release/smoke.png')) { throw 'Packaged renderer smoke screenshot was not generated' }
-          Write-Host "APP=$($app.FullName) SIZE=$($app.Length)"
+          $signature = Get-AuthenticodeSignature $app.FullName
+          Write-Host "APP=$($app.FullName) SIZE=$($app.Length) SIGNATURE=$($signature.Status) PUBLISHER=$($signature.SignerCertificate.Subject)"
+          if ($env:SIGNING_EXPECTED -eq 'true' -and $signature.Status -ne 'Valid') {
+            throw "Signing credentials were configured but the WASender signature is not valid: $($signature.Status)"
+          }
       - name: Upload WASender portable
         uses: actions/upload-artifact@v4
         with:
@@ -63,12 +82,21 @@ jobs:
           retention-days: 30
       - name: Build KeyGen portable
         run: npx electron-builder --config keygen-builder.yml --win portable --x64 --publish never
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       - name: Verify KeyGen output
         shell: pwsh
+        env:
+          SIGNING_EXPECTED: ${{ secrets.WIN_CSC_LINK != '' }}
         run: |
           $keygen = Get-ChildItem release-keygen -Filter 'ATTOZAP-KeyGen-*.exe' | Select-Object -First 1
           if (-not $keygen) { throw 'KeyGen portable executable was not generated' }
-          Write-Host "KEYGEN=$($keygen.FullName) SIZE=$($keygen.Length)"
+          $signature = Get-AuthenticodeSignature $keygen.FullName
+          Write-Host "KEYGEN=$($keygen.FullName) SIZE=$($keygen.Length) SIGNATURE=$($signature.Status) PUBLISHER=$($signature.SignerCertificate.Subject)"
+          if ($env:SIGNING_EXPECTED -eq 'true' -and $signature.Status -ne 'Valid') {
+            throw "Signing credentials were configured but the KeyGen signature is not valid: $($signature.Status)"
+          }
       - name: Upload KeyGen portable
         uses: actions/upload-artifact@v4
         with:
