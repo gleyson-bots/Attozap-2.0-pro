@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { File, FileUp, Image, MessageCircle, Mic, Paperclip, RefreshCw, Search, Send, Settings2, Smile, Video, Vote, Wifi, X } from 'lucide-react';
+import { File, FileUp, MessageCircle, Paperclip, RefreshCw, Search, Send, Settings2, Smile, Vote, Wifi, X } from 'lucide-react';
 import { toLocalDateTime } from '../lib';
 
 function labelFor(chat: any) { return chat?.display_name || chat?.name || (chat?.phone ? `+${chat.phone}` : chat?.jid || 'Conversa'); }
 function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
+function aliases(chat: any) { return new Set([chat?.jid, chat?.lid, chat?.pn_jid].filter(Boolean)); }
+function sameIdentity(a: any, b: any) { const aa = aliases(a); return [...aliases(b)].some(value => aa.has(value)); }
 function Avatar({ chat, large = false }: { chat: any; large?: boolean }) {
   const label = String(labelFor(chat)).slice(0, 1).toUpperCase();
   return <span className={`conversation-avatar ${large ? 'large' : ''}`}>{chat?.profile_url ? <img src={chat.profile_url} alt=""/> : label}</span>;
@@ -56,7 +58,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       const data = await window.attozap.webchat.list(accountId, search);
       setChats(data);
       if (selected) {
-        const fresh = data.find((item: any) => item.jid === selected.jid);
+        const fresh = data.find((item: any) => sameIdentity(item, selected));
         if (fresh) setSelected(fresh);
       }
       setError('');
@@ -77,7 +79,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     const off = window.attozap.messages.onIncoming((payload: any) => {
       if (payload?.accountId !== accountId) return;
       void loadChats();
-      if (selected?.jid && payload?.message?.remoteJid === selected.jid) void loadMessages(selected.jid);
+      if (selected?.jid) void loadMessages(selected.jid);
     });
     return () => off?.();
   }, [accountId, selected?.jid]);
@@ -147,18 +149,18 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
 
   return <div className="webchat-full">
     <div className="webchat-toolbar">
-      <div><b>WebChat</b><span>JID/LID · mídia · pushname · perfil</span></div>
-      <div className="head-actions"><select className="top-select" value={accountId} onChange={e => { setAccountId(e.target.value); setSelected(null); }}><option value="">Conta...</option>{connected.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select><button className="icon-button" title="Proxy" disabled={!accountId} onClick={() => setShowProxy(v => !v)}><Settings2 size={16}/></button><button className="icon-button" title="Atualizar" disabled={!accountId} onClick={() => { void loadChats(); void loadMessages(); }}><RefreshCw size={16}/></button></div>
+      <div><b>WebChat</b><span>Tempo real · JID/LID · mídia · pushname · perfil</span></div>
+      <div className="head-actions"><label className="channel-picker"><span>Canal</span><select className="top-select" value={accountId} onChange={e => { setAccountId(e.target.value); setSelected(null); setMessages([]); }}><option value="">Escolha o canal...</option>{connected.map(account => <option key={account.id} value={account.id}>{String(account.provider || 'baileys').toUpperCase()} · {account.name}{account.phone ? ` · +${account.phone}` : ''}</option>)}</select></label><button className="icon-button" title="Proxy do canal" disabled={!accountId} onClick={() => setShowProxy(v => !v)}><Settings2 size={16}/></button><button className="icon-button" title="Atualizar" disabled={!accountId} onClick={() => { void loadChats(); void loadMessages(); }}><RefreshCw size={16}/></button></div>
     </div>
     {error && <div className="notice error webchat-notice">{error}<button onClick={() => setError('')}><X size={14}/></button></div>}
-    {showProxy && <div className="webchat-proxy"><b>Proxy da conta</b><input value={proxy} onChange={e => setProxy(e.target.value)} placeholder="http://usuario:senha@host:porta"/><button className="button primary" onClick={() => void saveProxy()}>Salvar</button></div>}
+    {showProxy && <div className="webchat-proxy"><b>Proxy do canal</b><input value={proxy} onChange={e => setProxy(e.target.value)} placeholder="http://usuario:senha@host:porta"/><button className="button primary" onClick={() => void saveProxy()}>Salvar</button></div>}
 
     <div className="webchat-workspace">
       <aside className="webchat-list-pane">
-        <div className="webchat-account"><span className="wa-avatar online"><Wifi size={16}/></span><div><b>{activeAccount?.name ?? 'Selecione uma conta'}</b><small>{activeAccount?.phone ? `+${activeAccount.phone}` : 'Sessão conectada'}</small></div></div>
+        <div className="webchat-account"><span className="wa-avatar online"><Wifi size={16}/></span><div><b>{activeAccount?.name ?? 'Selecione um canal'}</b><small>{activeAccount ? `${String(activeAccount.provider || 'baileys').toUpperCase()}${activeAccount.phone ? ` · +${activeAccount.phone}` : ''}` : 'Nenhuma sessão selecionada'}</small></div></div>
         <div className="webchat-search"><Search size={15}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar conversa..."/></div>
         <div className="new-chat"><input value={newTarget} onChange={e => setNewTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && void openNewTarget()} placeholder="Novo: número, PN JID ou LID"/><button className="icon-button" disabled={busy || !newTarget.trim()} onClick={() => void openNewTarget()}><MessageCircle size={16}/></button></div>
-        <div className="conversation-list">{chats.map(chat => <button key={chat.jid} className={selected?.jid === chat.jid ? 'active' : ''} onClick={() => setSelected(chat)}><Avatar chat={chat}/><span className="grow"><b>{labelFor(chat)}</b><small>{chat.last_text || (chat.last_message_type && chat.last_message_type !== 'text' ? `[${chat.last_message_type}]` : chat.jid)}</small></span><time>{chat.last_message_at ? new Date(chat.last_message_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : ''}</time></button>)}{!chats.length && <div className="empty mini"><MessageCircle size={25}/><p>Nenhuma conversa observada ainda.</p></div>}</div>
+        <div className="conversation-list">{chats.map(chat => <button key={chat.jid} className={selected && sameIdentity(selected, chat) ? 'active' : ''} onClick={() => setSelected(chat)}><Avatar chat={chat}/><span className="grow"><b>{labelFor(chat)}</b><small>{chat.last_text || (chat.last_message_type && chat.last_message_type !== 'text' ? `[${chat.last_message_type}]` : chat.jid)}</small></span><time>{chat.last_message_at ? new Date(chat.last_message_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : ''}</time></button>)}{!chats.length && <div className="empty mini"><MessageCircle size={25}/><p>Nenhuma conversa observada ainda.</p></div>}</div>
       </aside>
 
       <section className="webchat-thread-pane">
