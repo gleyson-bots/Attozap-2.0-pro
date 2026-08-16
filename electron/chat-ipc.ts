@@ -16,4 +16,8 @@ export function registerChatIpc(chat: ChatService, license: LicenseService) {
     requireLicense();
     return chat.sendMedia(accountId, target, type, input);
   });
+  ipcMain.handle('webchat:send-poll', (_event, accountId: string, target: string, input: { name: string; values: string[]; selectableCount?: number }) => {
+    requireLicense();
+    return chat.sendPoll(accountId, target, input);
+  });
 }
