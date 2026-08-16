@@ -23,16 +23,23 @@ jobs:
         run: npm run build
       - name: Build WASender portable
         run: npx electron-builder --win portable --x64 --publish never
-      - name: Smoke test packaged renderer
+      - name: Smoke test packaged renderer and actions
         shell: pwsh
         run: |
           $exe = Join-Path $PWD 'release\win-unpacked\ATTOZAP WASender Pro.exe'
           if (-not (Test-Path $exe)) { throw "Unpacked Electron executable not found: $exe" }
           $proc = Start-Process -FilePath $exe -ArgumentList '--remote-debugging-port=9223' -PassThru
           node tools/electron-smoke.mjs http://127.0.0.1:9223 release/smoke.png
-          $smokeExit = $LASTEXITCODE
+          $rendererExit = $LASTEXITCODE
+          if ($rendererExit -eq 0) {
+            node tools/electron-interaction-smoke.mjs http://127.0.0.1:9223
+            $interactionExit = $LASTEXITCODE
+          } else {
+            $interactionExit = $rendererExit
+          }
           taskkill /F /T /PID $proc.Id 2>$null | Out-Null
-          if ($smokeExit -ne 0) { exit $smokeExit }
+          if ($rendererExit -ne 0) { exit $rendererExit }
+          if ($interactionExit -ne 0) { exit $interactionExit }
       - name: Verify WASender output
         shell: pwsh
         run: |
