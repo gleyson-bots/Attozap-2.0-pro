@@ -6,6 +6,16 @@ export type MessageResult = {
   timestamp: number;
 };
 
+export type MessageDeliveryStatus = 'sent' | 'delivered' | 'read' | 'played';
+export type MessageStatusEvent = {
+  id: string;
+  remoteJid?: string;
+  participant?: string;
+  status: MessageDeliveryStatus;
+  rawStatus?: number;
+  timestamp?: number;
+};
+
 export type PollVoteAggregate = {
   name: string;
   voters: string[];
@@ -23,6 +33,7 @@ export type ProviderEvents = {
   onQr?: (qr: string) => void;
   onError?: (error: Error) => void;
   onMessage?: (message: IncomingMessage) => void;
+  onMessageStatus?: (event: MessageStatusEvent) => void;
   onPollUpdate?: (event: PollUpdateEvent) => void;
 };
 
