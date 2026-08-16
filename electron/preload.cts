@@ -35,5 +35,9 @@ contextBridge.exposeInMainWorld('attozap', {
   files: { pick: (options?: any) => invoke('files:pick', options), saveText: (payload: { suggestedName: string; content: string; filters?: Array<{ name: string; extensions: string[] }> }) => invoke('files:save-text', payload) },
   clipboard: { writeText: (text: string) => invoke('clipboard:write-text', text) },
   settings: { get: (key: string) => invoke('settings:get', key), set: (key: string, value: string) => invoke('settings:set', key, value) },
-  audit: { list: () => invoke('audit:list') }, messages: { onIncoming: (callback: Listener) => on('messages:incoming', callback) },
+  secure: { available: () => invoke('secure:available'), get: (key: string) => invoke('secure:get', key), set: (key: string, value: string) => invoke('secure:set', key, value) },
+  system: { health: () => invoke('system:health'), backup: (includeSessions = true) => invoke('system:backup', includeSessions), restore: () => invoke('system:restore'), optimize: () => invoke('system:optimize'), diagnostics: () => invoke('system:diagnostics') },
+  identities: { list: (accountId?: string, search = '') => invoke('identities:list', accountId, search), stats: () => invoke('identities:stats') },
+  audit: { list: () => invoke('audit:list') },
+  messages: { onIncoming: (callback: Listener) => on('messages:incoming', callback), onStatus: (callback: Listener) => on('messages:status', callback) },
 });
