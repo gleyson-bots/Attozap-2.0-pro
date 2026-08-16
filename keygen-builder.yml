@@ -8,6 +8,7 @@ directories:
 files:
   - "**/*"
 win:
+  icon: build/icon.svg
   target:
     - target: portable
       arch:
