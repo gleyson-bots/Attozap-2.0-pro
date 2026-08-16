@@ -8,15 +8,18 @@ export function TemplatesPage() {
   const [form, setForm] = useState({ name: '', category: '', body: 'Olá {name}!' });
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
   async function reload(selectId?: string) {
-    const rows = await window.attozap.templates.list();
-    setTemplates(rows);
-    const id = selectId ?? selectedId;
-    if (id) {
-      const selected = rows.find((item: any) => item.id === id);
-      if (selected) setForm({ name: selected.name, category: selected.category ?? '', body: selected.body });
-    }
+    try {
+      const rows = await window.attozap.templates.list();
+      setTemplates(rows);
+      const id = selectId ?? selectedId;
+      if (id) {
+        const selected = rows.find((item: any) => item.id === id);
+        if (selected) setForm({ name: selected.name, category: selected.category ?? '', body: selected.body });
+      }
+    } catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
   useEffect(() => { void reload(); }, []);
@@ -40,7 +43,7 @@ export function TemplatesPage() {
   }
 
   async function save() {
-    setError(''); setNotice('');
+    setBusy(true); setError(''); setNotice('');
     try {
       const saved = selectedId
         ? await window.attozap.templates.update(selectedId, form)
@@ -49,19 +52,28 @@ export function TemplatesPage() {
       setNotice('Template salvo.');
       await reload(saved.id);
     } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setBusy(false); }
   }
 
   async function remove() {
     if (!selectedId) return;
-    await window.attozap.templates.remove(selectedId);
-    setSelectedId(null);
-    setForm({ name: '', category: '', body: 'Olá {name}!' });
-    await reload();
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await window.attozap.templates.remove(selectedId);
+      setSelectedId(null);
+      setForm({ name: '', category: '', body: 'Olá {name}!' });
+      setNotice('Template excluído.');
+      await reload();
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setBusy(false); }
   }
 
   async function copyBody() {
-    await navigator.clipboard.writeText(form.body);
-    setNotice('Conteúdo copiado para a área de transferência.');
+    setError(''); setNotice('');
+    try {
+      await window.attozap.clipboard.writeText(form.body);
+      setNotice('Conteúdo copiado para a área de transferência.');
+    } catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
   return <div className="page-stack">
@@ -80,7 +92,7 @@ export function TemplatesPage() {
         <div className="form-grid two"><div className="field"><label>Nome</label><input value={form.name} onChange={e => setForm(value => ({...value, name: e.target.value}))} placeholder="Boas-vindas"/></div><div className="field"><label>Categoria</label><input value={form.category} onChange={e => setForm(value => ({...value, category: e.target.value}))} placeholder="Vendas"/></div></div>
         <div className="field"><label>Conteúdo</label><textarea className="tall-area" value={form.body} onChange={e => setForm(value => ({...value, body: e.target.value}))}/></div>
         <div className="variable-row"><span>Variáveis:</span><button onClick={() => setForm(value => ({...value, body: value.body + ' {name}'}))}>{'{name}'}</button><button onClick={() => setForm(value => ({...value, body: value.body + ' {phone}'}))}>{'{phone}'}</button></div>
-        <div className="head-actions"><button className="button ghost" onClick={() => void copyBody()}><Copy size={15}/> Copiar</button>{selectedId && <button className="button ghost" onClick={() => void remove()}><Trash2 size={15}/> Excluir</button>}<button className="button primary" onClick={() => void save()}><Save size={15}/> Salvar</button></div>
+        <div className="head-actions"><button className="button ghost" disabled={busy} onClick={() => void copyBody()}><Copy size={15}/> Copiar</button>{selectedId && <button className="button ghost" disabled={busy} onClick={() => void remove()}><Trash2 size={15}/> Excluir</button>}<button className="button primary" disabled={busy} onClick={() => void save()}><Save size={15}/>{busy ? 'Salvando...' : 'Salvar'}</button></div>
       </section>
     </div>
   </div>;
