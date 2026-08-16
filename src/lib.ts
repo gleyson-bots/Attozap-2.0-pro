@@ -57,12 +57,12 @@ export function csvEscape(value: unknown) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-export function downloadCsv(name: string, rows: unknown[][]) {
+export async function downloadCsv(name: string, rows: unknown[][]) {
   const csv = rows.map(row => row.map(csvEscape).join(',')).join('\r\n');
-  const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  link.click();
-  URL.revokeObjectURL(url);
+  const result = await window.attozap.files.saveText({
+    suggestedName: name,
+    content: '\ufeff' + csv,
+    filters: [{ name: 'Arquivo CSV', extensions: ['csv'] }],
+  });
+  return result;
 }
