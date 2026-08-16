@@ -8,6 +8,7 @@ declare global {
       campaigns: any;
       contacts: any;
       chats: any;
+      webchat: any;
       tools: any;
       groups: any;
       templates: any;
@@ -15,6 +16,7 @@ declare global {
       extractors: any;
       importers: any;
       autoReply: any;
+      warmup: any;
       license: any;
       files: any;
       clipboard: any;
