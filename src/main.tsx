@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { GlobalFeedback, installGlobalErrorHandlers } from './feedback';
+import { AppErrorBoundary, GlobalFeedback, installGlobalErrorHandlers } from './feedback';
 import './styles.css';
 import './license.css';
 import './sender.css';
@@ -13,7 +13,9 @@ import './rc4.css';
 import './system.css';
 
 installGlobalErrorHandlers();
-const root = createRoot(document.getElementById('root')!);
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error('ROOT_ELEMENT_MISSING');
+const root = createRoot(rootElement);
 
 if (!(window as any).attozap) {
   root.render(
@@ -21,15 +23,17 @@ if (!(window as any).attozap) {
       <div style={{ maxWidth: 680, padding: 28, border: '1px solid #2b3430', borderRadius: 18, background: '#111612' }}>
         <div style={{ fontSize: 12, letterSpacing: '0.16em', color: '#78d79b', marginBottom: 10 }}>ATTOZAP DIAGNOSTIC</div>
         <h1 style={{ margin: '0 0 12px', fontSize: 24 }}>A ponte do aplicativo não foi carregada.</h1>
-        <p style={{ margin: 0, lineHeight: 1.6, color: '#aeb8b2' }}>Código: PRELOAD_BRIDGE_MISSING. Feche o aplicativo e use a versão mais recente. Se o erro continuar, envie uma captura desta tela.</p>
+        <p style={{ margin: 0, lineHeight: 1.6, color: '#aeb8b2' }}>Código: PRELOAD_BRIDGE_MISSING. Feche o aplicativo e use a versão mais recente.</p>
       </div>
     </div>,
   );
 } else {
   root.render(
     <React.StrictMode>
-      <GlobalFeedback />
-      <App />
+      <AppErrorBoundary>
+        <GlobalFeedback />
+        <App />
+      </AppErrorBoundary>
     </React.StrictMode>,
   );
 }
