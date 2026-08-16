@@ -14,6 +14,8 @@ declare global {
       contacts: any;
       chats: any;
       webchat: any;
+      browser: any;
+      recruiting: any;
       tools: any;
       groups: any;
       templates: any;
