@@ -155,17 +155,23 @@ export class CampaignEngine extends EventEmitter {
     try {
       let allowedNumbers: Set<string> | undefined;
       const resolvedTargets = new Map<string, string>();
-      if (targetType === 'contact' && options.filterBeforeSend) {
-        const plainNumbers = rows.map(row => String(row.target)).filter(target => !isJid(target)).map(digits).filter(Boolean);
-        const checked = plainNumbers.length ? await providers[0].provider.checkNumbers(plainNumbers) : [];
-        allowedNumbers = new Set(checked.filter(item => item.exists).map(item => digits(item.input)));
-        const upsert = this.db.prepare(`
-          INSERT INTO contacts (phone, wa_exists, last_checked_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(phone) DO UPDATE SET wa_exists=excluded.wa_exists, last_checked_at=CURRENT_TIMESTAMP
-        `);
-        for (const item of checked) {
-          upsert.run(digits(item.input), item.exists ? 1 : 0);
-          if (item.exists && item.jid) resolvedTargets.set(digits(item.input), item.jid);
+
+      // Resolve plain phone numbers through WhatsApp first. On current WhatsApp/Baileys
+      // the canonical destination may be a PN JID or a LID; phone is only an alias.
+      if (targetType === 'contact') {
+        const plainNumbers = [...new Set(rows.map(row => String(row.target)).filter(target => !isJid(target)).map(digits).filter(Boolean))];
+        if (plainNumbers.length) {
+          const checked = await providers[0].provider.checkNumbers(plainNumbers);
+          if (options.filterBeforeSend) allowedNumbers = new Set(checked.filter(item => item.exists).map(item => digits(item.input)));
+          const upsert = this.db.prepare(`
+            INSERT INTO contacts (phone, wa_exists, last_checked_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(phone) DO UPDATE SET wa_exists=excluded.wa_exists, last_checked_at=CURRENT_TIMESTAMP
+          `);
+          for (const item of checked) {
+            const phone = digits(item.input);
+            upsert.run(phone, item.exists ? 1 : 0);
+            if (item.exists && item.jid) resolvedTargets.set(phone, item.jid);
+          }
         }
       }
 
@@ -176,7 +182,8 @@ export class CampaignEngine extends EventEmitter {
         if (state.stopped) break;
 
         const originalTarget = String(row.target).trim();
-        const sendTarget = isJid(originalTarget) ? originalTarget : resolvedTargets.get(digits(originalTarget)) ?? originalTarget;
+        const normalizedPhone = isJid(originalTarget) ? '' : digits(originalTarget);
+        const sendTarget = isJid(originalTarget) ? originalTarget : resolvedTargets.get(normalizedPhone) ?? originalTarget;
         const recipient: CampaignRecipient = {
           target: sendTarget,
           name: row.name ?? undefined,
@@ -190,7 +197,7 @@ export class CampaignEngine extends EventEmitter {
           this.emitProgress(id);
           continue;
         }
-        if (allowedNumbers && !isJid(originalTarget) && !allowedNumbers.has(digits(originalTarget))) {
+        if (allowedNumbers && !isJid(originalTarget) && !allowedNumbers.has(normalizedPhone)) {
           this.markRecipient(row.id, 'skipped', 'Número não localizado no WhatsApp');
           this.increment(id, 'skipped');
           this.emitProgress(id);
@@ -211,23 +218,31 @@ export class CampaignEngine extends EventEmitter {
 
           for (let index = 0; index < selectedMessages.length; index++) {
             const text = renderTemplate(selectedMessages[index], recipient).trim();
-            if (text) messageId = (await selected.provider.sendText(sendTarget, text)).id;
+            if (text) {
+              const receipt = await selected.provider.sendText(sendTarget, text);
+              messageId = receipt.id;
+              this.logMessage(receipt.id, selected.accountId, receipt.remoteJid || sendTarget, 'out', 'text', text, 'sent');
+            }
             if (index < selectedMessages.length - 1) await sleep(partDelay(options));
           }
 
           for (let index = 0; index < parts.length; index++) {
             const result = await this.sendPart(selected.provider, sendTarget, parts[index], recipient);
             messageId = result.id;
+            this.logMessage(result.id, selected.accountId, result.remoteJid || sendTarget, 'out', parts[index].type, '', 'sent');
             if (index < parts.length - 1) await sleep(partDelay(options));
           }
 
-          this.db.prepare(`UPDATE campaign_recipients SET status='sent', error=NULL, message_id=?, sent_at=CURRENT_TIMESTAMP WHERE id=?`).run(messageId ?? null, row.id);
+          if (!messageId) throw new Error('A campanha não contém conteúdo enviável');
+          this.db.prepare(`UPDATE campaign_recipients SET status='sent', error=NULL, message_id=?, sent_at=CURRENT_TIMESTAMP WHERE id=?`).run(messageId, row.id);
           this.increment(id, 'sent');
           processedRecipients++;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           this.markRecipient(row.id, 'failed', `[${selected.accountId}] ${message}`);
           this.increment(id, 'failed');
+          this.logMessage(randomUUID(), selected.accountId, sendTarget, 'out', 'text', '', 'failed', message);
+          this.emit('error', { campaignId: id, recipientId: row.id, target: originalTarget, resolvedTarget: sendTarget, message });
           processedRecipients++;
         }
         this.emitProgress(id);
@@ -333,15 +348,25 @@ export class CampaignEngine extends EventEmitter {
     this.db.prepare(`UPDATE campaign_recipients SET status=?, error=? WHERE id=?`).run(status, error ?? null, id);
   }
 
-  private increment(id: string, field: 'sent' | 'failed' | 'skipped') {
-    this.db.prepare(`UPDATE campaigns SET ${field}=${field}+1 WHERE id=?`).run(id);
+  private increment(campaignId: string, field: 'sent'|'failed'|'skipped') {
+    this.db.prepare(`UPDATE campaigns SET ${field}=${field}+1 WHERE id=?`).run(campaignId);
   }
 
-  private emitProgress(id: string) {
-    this.emit('progress', this.get(id));
+  private emitProgress(campaignId: string) {
+    this.emit('progress', this.get(campaignId));
+  }
+
+  private logMessage(id: string, accountId: string, remoteJid: string, direction: 'in'|'out', type: string, text: string, status: string, error?: string) {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO message_log (id, account_id, remote_jid, direction, message_type, text, status, error, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).run(id, accountId, remoteJid, direction, type, text || null, status, error ?? null);
   }
 
   private audit(action: string, entityId: string, metadata?: unknown) {
-    this.db.prepare(`INSERT INTO audit_log (actor, action, entity_type, entity_id, metadata_json) VALUES ('local-user', ?, 'campaign', ?, ?)`).run(action, entityId, metadata ? JSON.stringify(metadata) : null);
+    this.db.prepare(`
+      INSERT INTO audit_log (actor, action, entity_type, entity_id, metadata_json)
+      VALUES ('local-user', ?, 'campaign', ?, ?)
+    `).run(action, entityId, metadata ? JSON.stringify(metadata) : null);
   }
 }
