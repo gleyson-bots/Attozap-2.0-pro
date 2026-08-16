@@ -16,6 +16,7 @@ export function applyRc3Migrations(db: AttozapDatabase) {
   ensureColumn(db, 'warmup_profiles', 'ai_model', 'TEXT');
   ensureColumn(db, 'warmup_profiles', 'ai_prompt', 'TEXT');
   ensureColumn(db, 'warmup_profiles', 'ai_daily_limit', 'INTEGER NOT NULL DEFAULT 8');
+  ensureColumn(db, 'warmup_logs', 'source', "TEXT NOT NULL DEFAULT 'library'");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS recruiting_jobs (
