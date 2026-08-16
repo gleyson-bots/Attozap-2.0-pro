@@ -10,6 +10,7 @@ import './feedback.css';
 import './final-ui.css';
 import './rc3.css';
 import './rc4.css';
+import './system.css';
 
 installGlobalErrorHandlers();
 const root = createRoot(document.getElementById('root')!);
