@@ -1,7 +1,9 @@
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   getAggregateVotesInPollMessage,
+  getContentType,
   isLidUser,
   isPnUser,
   jidNormalizedUser,
@@ -10,6 +12,8 @@ import makeWASocket, {
   type WASocket,
 } from '@whiskeysockets/baileys';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import P from 'pino';
 import { identityFromPair, mergeIdentity, normalizeJid, phoneFromPnJid } from './identity.js';
@@ -21,6 +25,7 @@ import type {
   GroupParticipantIdentity,
   GroupSummary,
   IncomingMessage,
+  IncomingMessageType,
   LocationInput,
   MessagingProvider,
   MessageResult,
@@ -29,10 +34,9 @@ import type {
   SendMediaInput,
 } from './provider.js';
 
-function digits(value: string) {
-  return value.replace(/\D/g, '');
-}
+const logger = P({ level: 'silent' });
 
+function digits(value: string) { return value.replace(/\D/g, ''); }
 function userJid(value: string) {
   if (value.includes('@')) return normalizeJid(value) ?? value;
   return `${digits(value)}@s.whatsapp.net`;
@@ -41,18 +45,27 @@ function userJid(value: string) {
 function inviteCode(value: string) {
   const clean = value.trim();
   if (!clean) throw new Error('Informe um link ou código de convite do grupo');
-
-  // Accept a full URL pasted on its own or inside a message, with optional query/hash.
   const link = clean.match(/(?:https?:\/\/)?chat\.whatsapp\.com\/([A-Za-z0-9_-]{8,128})/i);
   const candidate = link?.[1] ?? clean.replace(/[?#].*$/, '').trim();
-  if (!/^[A-Za-z0-9_-]{8,128}$/.test(candidate)) {
-    throw new Error('Convite de grupo inválido. Use https://chat.whatsapp.com/CODIGO ou somente o código do convite.');
-  }
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(candidate)) throw new Error('Convite de grupo inválido. Use https://chat.whatsapp.com/CODIGO ou somente o código do convite.');
   return candidate;
 }
 
+function unwrapContent(content: any): any {
+  let current = content;
+  for (let i = 0; i < 4; i++) {
+    const next = current?.ephemeralMessage?.message
+      ?? current?.viewOnceMessage?.message
+      ?? current?.viewOnceMessageV2?.message
+      ?? current?.viewOnceMessageV2Extension?.message;
+    if (!next) break;
+    current = next;
+  }
+  return current;
+}
+
 function messageText(message: WAMessage): string {
-  const content = message.message;
+  const content = unwrapContent(message.message);
   if (!content) return '';
   return content.conversation
     ?? content.extendedTextMessage?.text
@@ -65,6 +78,38 @@ function messageText(message: WAMessage): string {
     ?? '';
 }
 
+function messageInfo(message: WAMessage): { type: IncomingMessageType; fileName?: string; mimetype?: string; metadata?: Record<string, unknown> } {
+  const content = unwrapContent(message.message);
+  const key = getContentType(content) ?? '';
+  const node = key ? content?.[key] : undefined;
+  if (key === 'imageMessage') return { type: 'image', mimetype: node?.mimetype ?? 'image/jpeg' };
+  if (key === 'videoMessage') return { type: 'video', mimetype: node?.mimetype ?? 'video/mp4' };
+  if (key === 'audioMessage') return { type: 'audio', mimetype: node?.mimetype ?? 'audio/ogg', metadata: { ptt: Boolean(node?.ptt) } };
+  if (key === 'stickerMessage') return { type: 'sticker', mimetype: node?.mimetype ?? 'image/webp' };
+  if (key === 'documentMessage') return { type: 'document', mimetype: node?.mimetype ?? 'application/octet-stream', fileName: node?.fileName ?? 'documento' };
+  if (key.startsWith('pollCreationMessage')) {
+    const options = Array.isArray(node?.options) ? node.options.map((item: any) => String(item?.optionName ?? item?.name ?? '')).filter(Boolean) : [];
+    return { type: 'poll', metadata: { question: String(node?.name ?? ''), options, selectableCount: Number(node?.selectableOptionsCount ?? 1) } };
+  }
+  if (key === 'conversation' || key === 'extendedTextMessage') return { type: 'text' };
+  return { type: 'unknown', metadata: key ? { baileysType: key } : undefined };
+}
+
+function safeName(value: string) { return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100); }
+function extensionFor(type: IncomingMessageType, mimetype?: string, fileName?: string) {
+  const original = fileName ? extname(fileName) : '';
+  if (original && original.length <= 10) return original;
+  const mime = String(mimetype ?? '').toLowerCase();
+  if (mime.includes('webp')) return '.webp';
+  if (mime.includes('png')) return '.png';
+  if (mime.includes('jpeg') || mime.includes('jpg')) return '.jpg';
+  if (mime.includes('mp4')) return '.mp4';
+  if (mime.includes('ogg') || mime.includes('opus')) return '.ogg';
+  if (mime.includes('mpeg')) return type === 'audio' ? '.mp3' : '.mpeg';
+  if (mime.includes('pdf')) return '.pdf';
+  return type === 'image' ? '.jpg' : type === 'video' ? '.mp4' : type === 'audio' ? '.ogg' : type === 'sticker' ? '.webp' : '.bin';
+}
+
 function receipt(result: WAMessage | undefined): MessageResult {
   if (!result?.key?.id || !result.key.remoteJid) throw new Error('Provider returned an invalid message receipt');
   return { id: result.key.id, remoteJid: result.key.remoteJid, timestamp: Date.now() };
@@ -74,32 +119,17 @@ function validateProxy(proxy?: string) {
   const value = proxy?.trim();
   if (!value) return undefined;
   let parsed: URL;
-  try { parsed = new URL(value); }
-  catch { throw new Error('Proxy inválido. Use http://usuario:senha@host:porta ou https://host:porta'); }
+  try { parsed = new URL(value); } catch { throw new Error('Proxy inválido. Use http://usuario:senha@host:porta ou https://host:porta'); }
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Este build aceita proxy HTTP/HTTPS');
   return value;
 }
 
 function groupSummary(group: any, invite?: string): GroupInviteInfo {
-  return {
-    id: String(group.id),
-    subject: String(group.subject ?? 'Grupo sem nome'),
-    description: group.desc ?? undefined,
-    size: Number(group.size ?? group.participants?.length ?? 0),
-    owner: group.owner ?? undefined,
-    inviteCode: invite,
-    joinApprovalMode: Boolean(group.joinApprovalMode),
-  };
+  return { id: String(group.id), subject: String(group.subject ?? 'Grupo sem nome'), description: group.desc ?? undefined, size: Number(group.size ?? group.participants?.length ?? 0), owner: group.owner ?? undefined, inviteCode: invite, joinApprovalMode: Boolean(group.joinApprovalMode) };
 }
-
-function groupExists(groups: Record<string, any> | undefined, id: string) {
-  if (!groups) return false;
-  if (groups[id]) return true;
-  return Object.values(groups).some(group => group?.id === id);
-}
-
+function groupExists(groups: Record<string, any> | undefined, id: string) { return Boolean(groups && (groups[id] || Object.values(groups).some(group => group?.id === id))); }
 function groupJoinError(error: unknown) {
-  const value = error as { output?: { statusCode?: number; payload?: { message?: string } }; data?: unknown; message?: string };
+  const value = error as { output?: { statusCode?: number; payload?: { message?: string } }; message?: string };
   const status = value?.output?.statusCode;
   const source = value?.output?.payload?.message || value?.message || String(error);
   if (status === 404) return new Error('Convite não encontrado. O link pode ter sido revogado ou expirado.');
@@ -117,14 +147,10 @@ export class BaileysProvider implements MessagingProvider {
   private events: ProviderEvents = {};
   private proxyUrl?: string;
   private readonly pollCreations = new Map<string, { remoteJid: string; question: string; message: NonNullable<WAMessage['message']> }>();
+  private readonly pictureCache = new Map<string, { url?: string; expires: number }>();
 
-  constructor(private readonly authDirectory: string, proxyUrl?: string) {
-    this.proxyUrl = validateProxy(proxyUrl);
-  }
-
-  setProxy(proxyUrl?: string) {
-    this.proxyUrl = validateProxy(proxyUrl);
-  }
+  constructor(private readonly authDirectory: string, proxyUrl?: string) { this.proxyUrl = validateProxy(proxyUrl); }
+  setProxy(proxyUrl?: string) { this.proxyUrl = validateProxy(proxyUrl); }
 
   async connect(events: ProviderEvents = {}) {
     this.events = events;
@@ -133,39 +159,15 @@ export class BaileysProvider implements MessagingProvider {
     const { state, saveCreds } = await useMultiFileAuthState(this.authDirectory);
     const { version } = await fetchLatestBaileysVersion();
     const proxyAgent = this.proxyUrl ? new HttpsProxyAgent(this.proxyUrl) : undefined;
-
-    const socket = makeWASocket({
-      version,
-      auth: state,
-      printQRInTerminal: false,
-      logger: P({ level: 'silent' }),
-      markOnlineOnConnect: false,
-      syncFullHistory: false,
-      generateHighQualityLinkPreview: false,
-      agent: proxyAgent,
-      fetchAgent: proxyAgent,
-    });
+    const socket = makeWASocket({ version, auth: state, printQRInTerminal: false, logger, markOnlineOnConnect: false, syncFullHistory: false, generateHighQualityLinkPreview: false, agent: proxyAgent, fetchAgent: proxyAgent });
 
     this.socket = socket;
     socket.ev.on('creds.update', saveCreds);
     socket.ev.on('messages.upsert', ({ messages }) => {
-      for (const message of messages) {
-        const remoteJid = message.key.remoteJid;
-        if (!remoteJid || remoteJid === 'status@broadcast') continue;
-        const incoming: IncomingMessage = {
-          id: message.key.id ?? randomUUID(),
-          remoteJid,
-          remoteJidAlt: message.key.remoteJidAlt ?? undefined,
-          participant: message.key.participant ?? undefined,
-          participantAlt: message.key.participantAlt ?? undefined,
-          addressingMode: message.key.addressingMode ?? undefined,
-          pushName: message.pushName ?? undefined,
-          text: messageText(message),
-          fromMe: Boolean(message.key.fromMe),
-          timestamp: Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)) * 1000,
-        };
-        this.events.onMessage?.(incoming);
-      }
+      for (const message of messages) void this.emitIncoming(message);
+    });
+    socket.ev.on('contacts.update', updates => {
+      for (const item of updates) if (item.id && typeof item.imgUrl !== 'undefined') this.pictureCache.delete(item.id);
     });
 
     socket.ev.on('messages.update', updates => {
@@ -174,31 +176,15 @@ export class BaileysProvider implements MessagingProvider {
         const creation = this.pollCreations.get(key.id);
         if (!creation) continue;
         try {
-          const aggregate = getAggregateVotesInPollMessage({
-            message: creation.message,
-            pollUpdates: update.pollUpdates,
-          }) as Array<{ name?: string; voters?: string[] }>;
-          this.events.onPollUpdate?.({
-            pollId: key.id,
-            remoteJid: key.remoteJid ?? creation.remoteJid,
-            question: creation.question,
-            votes: aggregate.map(item => ({ name: String(item.name ?? ''), voters: (item.voters ?? []).map(String) })),
-          });
-        } catch (error) {
-          this.events.onError?.(error instanceof Error ? error : new Error(String(error)));
-        }
+          const aggregate = getAggregateVotesInPollMessage({ message: creation.message, pollUpdates: update.pollUpdates }) as Array<{ name?: string; voters?: string[] }>;
+          this.events.onPollUpdate?.({ pollId: key.id, remoteJid: key.remoteJid ?? creation.remoteJid, question: creation.question, votes: aggregate.map(item => ({ name: String(item.name ?? ''), voters: (item.voters ?? []).map(String) })) });
+        } catch (error) { this.events.onError?.(error instanceof Error ? error : new Error(String(error))); }
       }
     });
 
     socket.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-      if (qr) {
-        events.onState?.('qr');
-        events.onQr?.(qr);
-      }
-      if (connection === 'open') {
-        this.connected = true;
-        events.onState?.('connected');
-      }
+      if (qr) { events.onState?.('qr'); events.onQr?.(qr); }
+      if (connection === 'open') { this.connected = true; events.onState?.('connected'); }
       if (connection === 'close') {
         this.connected = false;
         events.onState?.('disconnected');
@@ -212,27 +198,51 @@ export class BaileysProvider implements MessagingProvider {
     });
   }
 
-  async disconnect(logout = false) {
-    this.connected = false;
-    this.manuallyClosing = true;
-    const socket = this.socket;
-    this.socket = null;
-    if (!socket) return;
-    if (logout) await socket.logout().catch(() => undefined);
-    else socket.end(new Error('Manual disconnect'));
+  private async emitIncoming(message: WAMessage) {
+    const remoteJid = message.key.remoteJid;
+    if (!remoteJid || remoteJid === 'status@broadcast') return;
+    const info = messageInfo(message);
+    let mediaPath: string | undefined;
+    if (['image', 'video', 'document', 'audio', 'sticker'].includes(info.type)) {
+      try { mediaPath = await this.downloadIncoming(message, info.type, info.mimetype, info.fileName); }
+      catch (error) { this.events.onError?.(new Error(`Falha ao baixar mídia ${message.key.id ?? ''}: ${error instanceof Error ? error.message : String(error)}`)); }
+    }
+    const profilePictureUrl = await this.profilePictureUrl(remoteJid).catch(() => undefined);
+    const incoming: IncomingMessage = {
+      id: message.key.id ?? randomUUID(), remoteJid, remoteJidAlt: message.key.remoteJidAlt ?? undefined,
+      participant: message.key.participant ?? undefined, participantAlt: message.key.participantAlt ?? undefined,
+      addressingMode: message.key.addressingMode ?? undefined, pushName: message.pushName ?? undefined,
+      profilePictureUrl, text: messageText(message), messageType: info.type, mediaPath, fileName: info.fileName,
+      mimetype: info.mimetype, metadata: info.metadata, fromMe: Boolean(message.key.fromMe),
+      timestamp: Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)) * 1000,
+    };
+    this.events.onMessage?.(incoming);
   }
 
-  private requireSocket() {
-    if (!this.socket || !this.connected) throw new Error('A conta do WhatsApp não está conectada');
-    return this.socket;
+  private async downloadIncoming(message: WAMessage, type: IncomingMessageType, mimetype?: string, fileName?: string) {
+    const socket = this.requireSocket();
+    const mediaDir = join(this.authDirectory, 'media');
+    await mkdir(mediaDir, { recursive: true });
+    const id = safeName(message.key.id ?? randomUUID());
+    const path = join(mediaDir, `${id}${extensionFor(type, mimetype, fileName)}`);
+    const buffer = await downloadMediaMessage(message, 'buffer', {}, { logger, reuploadRequest: socket.updateMediaMessage });
+    await writeFile(path, buffer);
+    return path;
   }
+
+  async disconnect(logout = false) {
+    this.connected = false; this.manuallyClosing = true;
+    const socket = this.socket; this.socket = null;
+    if (!socket) return;
+    if (logout) await socket.logout().catch(() => undefined); else socket.end(new Error('Manual disconnect'));
+  }
+  private requireSocket() { if (!this.socket || !this.connected) throw new Error('A conta do WhatsApp não está conectada'); return this.socket; }
 
   async resolveIdentity(jid: string, alternateJid?: string): Promise<ContactPresence> {
     const socket = this.requireSocket();
     const normalized = normalizeJid(jid) ?? jid;
     const alternate = normalizeJid(alternateJid);
     let identity = identityFromPair(normalized, alternate);
-
     if (isLidUser(normalized) && !identity?.pnJid) {
       const pnJid = await socket.signalRepository.lidMapping.getPNForLID(normalized).catch(() => undefined);
       identity = mergeIdentity(identity, identityFromPair(normalized, pnJid));
@@ -240,76 +250,33 @@ export class BaileysProvider implements MessagingProvider {
       const lid = await socket.signalRepository.lidMapping.getLIDForPN(normalized).catch(() => undefined);
       identity = mergeIdentity(identity, identityFromPair(lid, normalized), identityFromPair(normalized, lid));
     }
-
-    return {
-      input: jid,
-      jid: identity?.jid ?? normalized,
-      lid: identity?.lid,
-      pnJid: identity?.pnJid,
-      phone: identity?.phone ?? phoneFromPnJid(identity?.pnJid),
-      exists: true,
-    };
+    return { input: jid, jid: identity?.jid ?? normalized, lid: identity?.lid, pnJid: identity?.pnJid, phone: identity?.phone ?? phoneFromPnJid(identity?.pnJid), exists: true };
   }
 
-  async sendText(remoteJid: string, text: string) {
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { text }));
+  async profilePictureUrl(jid: string) {
+    const normalized = normalizeJid(jid) ?? jid;
+    const cached = this.pictureCache.get(normalized);
+    if (cached && cached.expires > Date.now()) return cached.url;
+    const url = await this.requireSocket().profilePictureUrl(normalized, 'preview').catch(() => undefined);
+    this.pictureCache.set(normalized, { url, expires: Date.now() + 60 * 60 * 1000 });
+    return url;
   }
 
-  async sendImage(remoteJid: string, input: SendMediaInput) {
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { image: { url: input.path }, caption: input.caption }));
-  }
-
-  async sendVideo(remoteJid: string, input: SendMediaInput) {
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { video: { url: input.path }, caption: input.caption, mimetype: input.mimetype }));
-  }
-
-  async sendDocument(remoteJid: string, input: SendMediaInput) {
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
-      document: { url: input.path },
-      caption: input.caption,
-      fileName: input.fileName,
-      mimetype: input.mimetype ?? 'application/octet-stream',
-    }));
-  }
-
-  async sendAudio(remoteJid: string, input: SendMediaInput) {
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
-      audio: { url: input.path },
-      mimetype: input.mimetype ?? 'audio/mpeg',
-      ptt: input.ptt ?? false,
-    }));
-  }
-
-  async sendSticker(remoteJid: string, input: SendMediaInput) {
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { sticker: { url: input.path } }));
-  }
-
-  async sendLocation(remoteJid: string, input: LocationInput) {
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
-      location: { degreesLatitude: input.latitude, degreesLongitude: input.longitude, name: input.name, address: input.address },
-    }));
-  }
-
+  async sendText(remoteJid: string, text: string) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { text })); }
+  async sendImage(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { image: { url: input.path }, caption: input.caption })); }
+  async sendVideo(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { video: { url: input.path }, caption: input.caption, mimetype: input.mimetype })); }
+  async sendDocument(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { document: { url: input.path }, caption: input.caption, fileName: input.fileName, mimetype: input.mimetype ?? 'application/octet-stream' })); }
+  async sendAudio(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { audio: { url: input.path }, mimetype: input.mimetype ?? 'audio/mpeg', ptt: input.ptt ?? false })); }
+  async sendSticker(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { sticker: { url: input.path } })); }
+  async sendLocation(remoteJid: string, input: LocationInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { location: { degreesLatitude: input.latitude, degreesLongitude: input.longitude, name: input.name, address: input.address } })); }
   async sendContact(remoteJid: string, input: ContactCardInput) {
     const phone = digits(input.phone);
-    const vcard = [
-      'BEGIN:VCARD', 'VERSION:3.0', `FN:${input.displayName}`,
-      input.organization ? `ORG:${input.organization}` : undefined,
-      `TEL;type=CELL;type=VOICE;waid=${phone}:+${phone}`,
-      'END:VCARD',
-    ].filter(Boolean).join('\n');
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), {
-      contacts: { displayName: input.displayName, contacts: [{ displayName: input.displayName, vcard }] },
-    }));
+    const vcard = ['BEGIN:VCARD', 'VERSION:3.0', `FN:${input.displayName}`, input.organization ? `ORG:${input.organization}` : undefined, `TEL;type=CELL;type=VOICE;waid=${phone}:+${phone}`, 'END:VCARD'].filter(Boolean).join('\n');
+    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { contacts: { displayName: input.displayName, contacts: [{ displayName: input.displayName, vcard }] } }));
   }
-
   async sendPoll(remoteJid: string, input: PollInput) {
-    const result = await this.requireSocket().sendMessage(userJid(remoteJid), {
-      poll: { name: input.name, values: input.values, selectableCount: input.selectableCount ?? 1 },
-    });
-    if (result?.key.id && result.message) {
-      this.pollCreations.set(result.key.id, { remoteJid: result.key.remoteJid ?? userJid(remoteJid), question: input.name, message: result.message });
-    }
+    const result = await this.requireSocket().sendMessage(userJid(remoteJid), { poll: { name: input.name, values: input.values, selectableCount: input.selectableCount ?? 1 } });
+    if (result?.key.id && result.message) this.pollCreations.set(result.key.id, { remoteJid: result.key.remoteJid ?? userJid(remoteJid), question: input.name, message: result.message });
     return receipt(result);
   }
 
@@ -319,13 +286,9 @@ export class BaileysProvider implements MessagingProvider {
     const result = await socket.onWhatsApp(...unique);
     const byNumber = new Map((result ?? []).map(item => [digits(item.jid), item]));
     const output: ContactPresence[] = [];
-
     for (const input of unique) {
       const match = byNumber.get(input);
-      if (!match?.exists) {
-        output.push({ input, exists: false });
-        continue;
-      }
+      if (!match?.exists) { output.push({ input, exists: false }); continue; }
       const resolved = await this.resolveIdentity(match.jid);
       output.push({ ...resolved, input, exists: true, phone: resolved.phone ?? input });
     }
@@ -334,78 +297,39 @@ export class BaileysProvider implements MessagingProvider {
 
   async listGroups(): Promise<GroupSummary[]> {
     const groups = await this.requireSocket().groupFetchAllParticipating();
-    return Object.values(groups).map(group => ({
-      id: group.id,
-      subject: group.subject,
-      description: group.desc,
-      size: group.participants.length,
-      owner: group.owner,
-    })).sort((a, b) => a.subject.localeCompare(b.subject));
+    return Object.values(groups).map(group => ({ id: group.id, subject: group.subject, description: group.desc, size: group.participants.length, owner: group.owner })).sort((a, b) => a.subject.localeCompare(b.subject));
   }
-
   async getGroupMetadata(groupJid: string) {
     const group = await this.requireSocket().groupMetadata(groupJid);
     const participants: GroupParticipantIdentity[] = [];
     for (const participant of group.participants) {
       const resolved = await this.resolveIdentity(participant.id, participant.phoneNumber ?? participant.lid);
-      participants.push({
-        jid: resolved.jid ?? participant.id,
-        lid: resolved.lid ?? participant.lid,
-        pnJid: resolved.pnJid ?? participant.phoneNumber,
-        phone: resolved.phone ?? phoneFromPnJid(participant.phoneNumber),
-        admin: participant.admin,
-      });
+      participants.push({ jid: resolved.jid ?? participant.id, lid: resolved.lid ?? participant.lid, pnJid: resolved.pnJid ?? participant.phoneNumber, phone: resolved.phone ?? phoneFromPnJid(participant.phoneNumber), admin: participant.admin });
     }
-    return {
-      id: group.id,
-      subject: group.subject,
-      description: group.desc,
-      size: group.participants.length,
-      owner: group.owner,
-      participants,
-    };
+    return { id: group.id, subject: group.subject, description: group.desc, size: group.participants.length, owner: group.owner, participants };
   }
-
   async createGroup(subject: string, participants: string[]) {
     const group = await this.requireSocket().groupCreate(subject, participants.map(userJid));
     return { id: group.id, subject: group.subject, description: group.desc, size: group.participants.length, owner: group.owner };
   }
-
   async addGroupParticipants(groupJid: string, participants: string[]): Promise<Array<{ jid: string; status: string }>> {
     const normalized = participants.map(userJid);
     const result = await this.requireSocket().groupParticipantsUpdate(groupJid, normalized, 'add');
-    return result
-      .map((item, index) => ({ jid: item.jid ?? normalized[index] ?? '', status: item.status }))
-      .filter(item => Boolean(item.jid));
+    return result.map((item, index) => ({ jid: item.jid ?? normalized[index] ?? '', status: item.status })).filter(item => Boolean(item.jid));
   }
 
   async joinGroup(invite: string): Promise<GroupJoinResult> {
-    const socket = this.requireSocket();
-    const code = inviteCode(invite);
-
-    // Validate first. Besides producing a useful error for revoked links, this also
-    // tells us whether the group uses membership approval before we attempt entry.
-    const rawInfo = await socket.groupGetInviteInfo(code);
-    const info = groupSummary(rawInfo, code);
+    const socket = this.requireSocket(); const code = inviteCode(invite);
+    const rawInfo = await socket.groupGetInviteInfo(code); const info = groupSummary(rawInfo, code);
     const before = await socket.groupFetchAllParticipating().catch(() => undefined);
     if (groupExists(before, info.id)) return { ...info, status: 'already_member' };
-
     try {
       const joinedJid = await socket.groupAcceptInvite(code);
       if (joinedJid) {
         const finalId = String(joinedJid);
-        // Metadata query confirms the server accepted the membership. Failure here is
-        // non-fatal because groupAcceptInvite already returned a group JID.
         const metadata = await socket.groupMetadata(finalId).catch(() => undefined);
-        return {
-          ...(metadata ? groupSummary(metadata, code) : info),
-          id: finalId,
-          status: 'joined',
-        };
+        return { ...(metadata ? groupSummary(metadata, code) : info), id: finalId, status: 'joined' };
       }
-
-      // Approval-enabled groups may acknowledge the invite without returning a group
-      // JID immediately. Treat that as pending approval instead of a false failure.
       const after = await socket.groupFetchAllParticipating().catch(() => undefined);
       if (groupExists(after, info.id)) return { ...info, status: 'joined' };
       if (info.joinApprovalMode) return { ...info, status: 'approval_required' };
@@ -416,19 +340,8 @@ export class BaileysProvider implements MessagingProvider {
       throw groupJoinError(error);
     }
   }
-
-  async verifyGroupInvite(invite: string): Promise<GroupInviteInfo> {
-    const code = inviteCode(invite);
-    const group = await this.requireSocket().groupGetInviteInfo(code);
-    return groupSummary(group, code);
-  }
-
-  async getGroupInvite(groupJid: string) {
-    const code = await this.requireSocket().groupInviteCode(groupJid);
-    if (!code) throw new Error('Não foi possível obter o convite do grupo');
-    return `https://chat.whatsapp.com/${code}`;
-  }
-
+  async verifyGroupInvite(invite: string): Promise<GroupInviteInfo> { const code = inviteCode(invite); return groupSummary(await this.requireSocket().groupGetInviteInfo(code), code); }
+  async getGroupInvite(groupJid: string) { const code = await this.requireSocket().groupInviteCode(groupJid); if (!code) throw new Error('Não foi possível obter o convite do grupo'); return `https://chat.whatsapp.com/${code}`; }
   isConnected() { return this.connected; }
   getSelfJid() { return this.socket?.user?.id ? jidNormalizedUser(this.socket.user.id) : undefined; }
 }
