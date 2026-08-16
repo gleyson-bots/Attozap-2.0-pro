@@ -17,6 +17,7 @@ declare global {
       autoReply: any;
       license: any;
       files: any;
+      clipboard: any;
       settings: any;
       audit: any;
       messages: any;
