@@ -27,6 +27,7 @@ import type {
   IncomingMessage,
   IncomingMessageType,
   LocationInput,
+  MessageDeliveryStatus,
   MessagingProvider,
   MessageResult,
   PollInput,
@@ -129,6 +130,16 @@ function extensionFor(type: IncomingMessageType, mimetype?: string, fileName?: s
   return type === 'image' ? '.jpg' : type === 'video' ? '.mp4' : type === 'audio' ? '.ogg' : type === 'sticker' ? '.webp' : '.bin';
 }
 
+function deliveryStatus(raw: unknown): MessageDeliveryStatus | undefined {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return undefined;
+  if (value >= 5) return 'played';
+  if (value >= 4) return 'read';
+  if (value >= 3) return 'delivered';
+  if (value >= 2) return 'sent';
+  return undefined;
+}
+
 function receipt(result: WAMessage | undefined): MessageResult {
   if (!result?.key?.id || !result.key.remoteJid) throw new Error('Provider returned an invalid message receipt');
   return { id: result.key.id, remoteJid: result.key.remoteJid, timestamp: Date.now() };
@@ -191,6 +202,11 @@ export class BaileysProvider implements MessagingProvider {
 
     socket.ev.on('messages.update', updates => {
       for (const { key, update } of updates) {
+        if (key.id) {
+          const rawStatus = Number((update as any).status);
+          const status = deliveryStatus(rawStatus);
+          if (status) this.events.onMessageStatus?.({ id: key.id, remoteJid: key.remoteJid ?? undefined, participant: key.participant ?? undefined, status, rawStatus, timestamp: Date.now() });
+        }
         if (!key.id || !update.pollUpdates?.length) continue;
         const creation = this.pollCreations.get(key.id);
         if (!creation) continue;
@@ -198,6 +214,24 @@ export class BaileysProvider implements MessagingProvider {
           const aggregate = getAggregateVotesInPollMessage({ message: creation.message, pollUpdates: update.pollUpdates }) as Array<{ name?: string; voters?: string[] }>;
           this.events.onPollUpdate?.({ pollId: key.id, remoteJid: key.remoteJid ?? creation.remoteJid, question: creation.question, votes: aggregate.map(item => ({ name: String(item.name ?? ''), voters: (item.voters ?? []).map(String) })) });
         } catch (error) { this.events.onError?.(error instanceof Error ? error : new Error(String(error))); }
+      }
+    });
+
+    socket.ev.on('message-receipt.update', updates => {
+      for (const item of updates) {
+        const key = item.key;
+        const receiptInfo = item.receipt as any;
+        if (!key?.id || !receiptInfo) continue;
+        const status: MessageDeliveryStatus | undefined = receiptInfo.playedTimestamp ? 'played' : receiptInfo.readTimestamp ? 'read' : receiptInfo.receiptTimestamp ? 'delivered' : undefined;
+        if (!status) continue;
+        const rawTime = Number(receiptInfo.playedTimestamp ?? receiptInfo.readTimestamp ?? receiptInfo.receiptTimestamp ?? 0);
+        this.events.onMessageStatus?.({
+          id: key.id,
+          remoteJid: key.remoteJid ?? undefined,
+          participant: receiptInfo.userJid ?? key.participant ?? undefined,
+          status,
+          timestamp: rawTime > 0 ? rawTime * 1000 : Date.now(),
+        });
       }
     });
 
