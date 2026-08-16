@@ -20,6 +20,8 @@ let mainWindow: BrowserWindow | null = null;
 let scheduler: NodeJS.Timeout | null = null;
 let warmupEngine: WarmupEngine | null = null;
 
+if (process.platform === 'win32') app.setAppUserModelId('com.gleysondevs.attozap.wasender');
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1480,
