@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, statfsSync } from 'node:fs';
+import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, statfsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { AttozapDatabase } from './database.js';
 import type { AccountManager } from './messaging/account-manager.js';
@@ -36,21 +36,10 @@ export function applyPendingRestore(userData: string) {
   if (existsSync(stagedSessions)) {
     const sessions = join(userData, 'sessions');
     rmSync(sessions, { recursive: true, force: true });
-    cpSyncCompat(stagedSessions, sessions);
+    cpSync(stagedSessions, sessions, { recursive: true, force: true });
   }
   rmSync(pending, { recursive: true, force: true });
   return true;
-}
-
-function cpSyncCompat(source: string, destination: string) {
-  const { cpSync } = requireNodeFs();
-  cpSync(source, destination, { recursive: true, force: true });
-}
-
-function requireNodeFs(): typeof import('node:fs') {
-  // Kept isolated so restore executes before the database is opened.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return eval('require')('node:fs') as typeof import('node:fs');
 }
 
 function bytes(value: number) { return Math.max(0, Math.round(value)); }
