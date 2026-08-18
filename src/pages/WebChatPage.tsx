@@ -6,19 +6,37 @@ function labelFor(chat: any) { return chat?.display_name || chat?.name || (chat?
 function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
 function aliases(chat: any) { return new Set([chat?.jid, chat?.lid, chat?.pn_jid].filter(Boolean)); }
 function sameIdentity(a: any, b: any) { const aa = aliases(a); return [...aliases(b)].some(value => aa.has(value)); }
-function messageTime(message: any) { const parsed = Date.parse(String(message?.created_at ?? '')); return Number.isFinite(parsed) ? parsed : 0; }
+function epochMs(value: unknown) {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+  const parsed = Date.parse(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+function messageTime(message: any) { return epochMs(message?.created_at); }
 function orderMessages(rows: any[]) {
   const byId = new Map<string, any>();
   for (const row of rows) {
     const key = String(row?.id ?? `${row?.remote_jid}-${row?.created_at}-${row?.direction}`);
     const previous = byId.get(key);
-    byId.set(key, previous ? { ...previous, ...row, metadata: { ...(previous.metadata ?? {}), ...(row.metadata ?? {}) } } : row);
+    if (!previous) { byId.set(key, row); continue; }
+    const persisted = Number(row?._seq ?? 0) > 0;
+    byId.set(key, {
+      ...previous,
+      ...row,
+      metadata: {
+        ...(previous.metadata ?? {}),
+        ...(row.metadata ?? {}),
+        ...(persisted ? { optimistic: false } : {}),
+      },
+      _local_seq: Math.min(Number(previous?._local_seq ?? Number.MAX_SAFE_INTEGER), Number(row?._local_seq ?? Number.MAX_SAFE_INTEGER)),
+    });
   }
   return [...byId.values()].sort((a, b) => {
     const time = messageTime(a) - messageTime(b);
     if (time !== 0) return time;
-    const seq = Number(a?._seq ?? 0) - Number(b?._seq ?? 0);
-    if (seq !== 0) return seq;
+    const seqA = Number(a?._seq ?? a?._local_seq ?? 0);
+    const seqB = Number(b?._seq ?? b?._local_seq ?? 0);
+    if (seqA !== seqB) return seqA - seqB;
     return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
   });
 }
@@ -33,7 +51,6 @@ function Avatar({ chat, large = false }: { chat: any; large?: boolean }) {
   const label = String(labelFor(chat)).slice(0, 1).toUpperCase();
   return <span className={`conversation-avatar ${large ? 'large' : ''}`}>{chat?.profile_url ? <img src={chat.profile_url} alt=""/> : label}</span>;
 }
-
 function MessageBody({ message }: { message: any }) {
   const type = message.message_type || 'text';
   const url = message.media_url;
@@ -68,6 +85,9 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const [error, setError] = useState('');
   const bottom = useRef<HTMLDivElement | null>(null);
   const lastAutoScroll = useRef(0);
+  const messageLoadGeneration = useRef(0);
+  const localSequence = useRef(0);
+  const reconcileTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const available = connected.find(account => account.id === accountId);
@@ -98,43 +118,65 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
 
   async function loadMessages(jid = selected?.jid, autoScroll = true) {
     if (!accountId || !jid) { setMessages([]); return; }
+    const generation = ++messageLoadGeneration.current;
     try {
       const rows = await window.attozap.webchat.messages(accountId, jid, 500);
+      if (generation !== messageLoadGeneration.current) return;
       setMessages(current => orderMessages([...current.filter(item => item?.metadata?.optimistic), ...rows]));
       if (autoScroll) scrollToBottom();
-    } catch (e: any) { setError(e?.message ?? String(e)); }
+    } catch (e: any) {
+      if (generation === messageLoadGeneration.current) setError(e?.message ?? String(e));
+    }
+  }
+
+  function scheduleReconcile(jid: string, delay = 50) {
+    if (reconcileTimer.current) window.clearTimeout(reconcileTimer.current);
+    reconcileTimer.current = window.setTimeout(() => { reconcileTimer.current = null; void loadMessages(jid, true); }, delay);
   }
 
   function appendOptimistic(message: any) {
-    setMessages(current => orderMessages([...current, { ...message, metadata: { ...(message.metadata ?? {}), optimistic: true } }]));
+    const sequence = ++localSequence.current;
+    setMessages(current => orderMessages([...current, {
+      ...message,
+      _local_seq: sequence,
+      metadata: { ...(message.metadata ?? {}), optimistic: true },
+    }]));
     scrollToBottom(true);
   }
 
   useEffect(() => { void loadChats(); }, [accountId, search]);
-  useEffect(() => { setMessages([]); void loadMessages(selected?.jid, true); }, [accountId, selected?.jid]);
+  useEffect(() => {
+    messageLoadGeneration.current++;
+    setMessages([]);
+    if (selected?.jid) void loadMessages(selected.jid, true);
+  }, [accountId, selected?.jid]);
 
   useEffect(() => {
     const offIncoming = window.attozap.messages.onIncoming((payload: any) => {
       if (payload?.accountId !== accountId) return;
       void loadChats();
-      if (selected?.jid && payloadMatchesSelected(payload, selected)) void loadMessages(selected.jid, true);
+      if (selected?.jid && payloadMatchesSelected(payload, selected)) scheduleReconcile(selected.jid, 35);
     });
     const offStatus = window.attozap.messages.onStatus((payload: any) => {
       if (payload?.accountId !== accountId || !payload?.id) return;
       setMessages(current => orderMessages(current.map(message => message.id === payload.id ? { ...message, status: payload.status } : message)));
     });
-    return () => { offIncoming?.(); offStatus?.(); };
+    return () => {
+      offIncoming?.(); offStatus?.();
+      if (reconcileTimer.current) window.clearTimeout(reconcileTimer.current);
+      reconcileTimer.current = null;
+    };
   }, [accountId, selected?.jid, selected?.lid, selected?.pn_jid]);
 
-  // Local reconciliation catches messages produced by Auto Reply, campaigns or another
-  // renderer action even when the transient event was emitted before this page subscribed.
+  // Event-first: o polling existe somente como reconciliação de segurança caso um evento
+  // tenha ocorrido antes do renderer assinar o canal ou durante suspensão da janela.
   useEffect(() => {
     if (!accountId) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
       void loadChats();
       if (selected?.jid) void loadMessages(selected.jid, false);
-    }, 1400);
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [accountId, selected?.jid, search]);
 
@@ -159,12 +201,12 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     try {
       const result = await window.attozap.webchat.sendText(accountId, target, body);
       const resolved = result.resolvedTarget ?? result.remoteJid ?? target;
-      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'text', text: body, status: 'sent', created_at: new Date(result.timestamp || Date.now()).toISOString(), metadata: {} });
+      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'text', text: body, status: 'sent', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: {} });
       setText('');
       setSelected((current: any) => ({ ...(current ?? {}), jid: resolved, display_name: current?.display_name || current?.name || newTarget || resolved, last_message_at: new Date().toISOString() }));
       setNewTarget('');
       await loadChats();
-      setTimeout(() => void loadMessages(resolved, true), 80);
+      scheduleReconcile(resolved, 60);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
@@ -182,11 +224,11 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     try {
       const result = await window.attozap.webchat.sendMedia(accountId, target, type, { path, fileName: name, ptt: type === 'audio' });
       const resolved = result.resolvedTarget ?? result.remoteJid ?? target;
-      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: type, text: name, file_name: name, status: 'sent', created_at: new Date(result.timestamp || Date.now()).toISOString(), metadata: { pendingMediaRefresh: true } });
+      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: type, text: name, file_name: name, status: 'sent', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { pendingMediaRefresh: true } });
       setSelected((current: any) => ({ ...(current ?? {}), jid: resolved, display_name: current?.display_name || current?.name || newTarget || resolved }));
       setNewTarget('');
       await loadChats();
-      setTimeout(() => void loadMessages(resolved, true), 250);
+      scheduleReconcile(resolved, 180);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
@@ -199,9 +241,9 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       const question = pollQuestion.trim();
       const result = await window.attozap.webchat.sendPoll(accountId, target, { name: question, values: options, selectableCount: 1 });
       const resolved = result.resolvedTarget ?? result.remoteJid ?? target;
-      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'poll', text: question, status: 'sent', created_at: new Date(result.timestamp || Date.now()).toISOString(), metadata: { question, options } });
+      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'poll', text: question, status: 'sent', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { question, options } });
       setPollQuestion(''); setPollOptions('Sim\nNão'); setShowPoll(false); await loadChats();
-      setTimeout(() => void loadMessages(resolved, true), 80);
+      scheduleReconcile(resolved, 60);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
@@ -219,7 +261,6 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     </div>
     {error && <div className="notice error webchat-notice">{error}<button onClick={() => setError('')}><X size={14}/></button></div>}
     {showProxy && <div className="webchat-proxy"><b>Proxy do canal</b><input value={proxy} onChange={e => setProxy(e.target.value)} placeholder="http://usuario:senha@host:porta"/><button className="button primary" onClick={() => void saveProxy()}>Salvar</button></div>}
-
     <div className="webchat-workspace">
       <aside className="webchat-list-pane">
         <div className="webchat-account"><span className="wa-avatar online"><Wifi size={16}/></span><div><b>{activeAccount?.name ?? 'Selecione um canal'}</b><small>{activeAccount ? `${String(activeAccount.provider || 'baileys').toUpperCase()}${activeAccount.phone ? ` · +${activeAccount.phone}` : ''}` : 'Nenhuma sessão selecionada'}</small></div></div>
@@ -227,7 +268,6 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
         <div className="new-chat"><input value={newTarget} onChange={e => setNewTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && void openNewTarget()} placeholder="Novo: número, PN JID ou LID"/><button className="icon-button" disabled={busy || !newTarget.trim()} onClick={() => void openNewTarget()}><MessageCircle size={16}/></button></div>
         <div className="conversation-list">{chats.map(chat => <button key={chat.jid} className={selected && sameIdentity(selected, chat) ? 'active' : ''} onClick={() => setSelected(chat)}><Avatar chat={chat}/><span className="grow"><b>{labelFor(chat)}</b><small>{chat.last_text || (chat.last_message_type && chat.last_message_type !== 'text' ? `[${chat.last_message_type}]` : chat.jid)}</small></span><time>{chat.last_message_at ? new Date(chat.last_message_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : ''}</time></button>)}{!chats.length && <div className="empty mini"><MessageCircle size={25}/><p>Nenhuma conversa observada ainda.</p></div>}</div>
       </aside>
-
       <section className="webchat-thread-pane">
         <header><Avatar chat={selected} large/><div className="grow"><b>{selected ? labelFor(selected) : 'Selecione uma conversa'}</b><small>{selected?.jid ?? 'Envie para número/JID/LID para iniciar'}</small></div></header>
         <div className="message-stream">{messages.map(message => <div key={message.id} className={`chat-bubble ${message.direction === 'out' ? 'out' : 'in'} ${message.status === 'failed' ? 'failed' : ''}`}><MessageBody message={message}/><small>{toLocalDateTime(message.created_at)}{message.status === 'failed' ? ` · ${message.error || 'falhou'}` : message.direction === 'out' ? ` · ${message.status}` : ''}</small></div>)}{selected && !messages.length && <div className="empty mini"><MessageCircle size={26}/><p>Sem mensagens registradas nesta conversa.</p></div>}<div ref={bottom}/></div>
