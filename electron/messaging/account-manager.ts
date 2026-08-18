@@ -17,10 +17,17 @@ export type AccountRecord = {
   updatedAt: string;
 };
 
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export class AccountManager extends EventEmitter {
   private readonly providers = new Map<string, MessagingProvider>();
+  private readonly ensurePromises = new Map<string, Promise<MessagingProvider>>();
 
-  constructor(private readonly db: AttozapDatabase, private readonly authRoot: string) { super(); }
+  constructor(private readonly db: AttozapDatabase, private readonly authRoot: string) {
+    super();
+  }
 
   list(): AccountRecord[] {
     const rows = this.db.prepare(`
@@ -28,11 +35,14 @@ export class AccountManager extends EventEmitter {
       FROM instances ORDER BY created_at ASC
     `).all() as Array<Record<string, string | null>>;
     return rows.map(row => ({
-      id: String(row.id), name: String(row.name), provider: String(row.provider),
+      id: String(row.id),
+      name: String(row.name),
+      provider: String(row.provider),
       status: String(row.status) as ConnectionState,
       phone: row.phone ? String(row.phone) : undefined,
       proxy: row.proxy_url ? String(row.proxy_url) : undefined,
-      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
     }));
   }
 
@@ -44,7 +54,11 @@ export class AccountManager extends EventEmitter {
     this.audit('account.create', id, { name: cleanName });
     return this.get(id)!;
   }
-  get(id: string) { return this.list().find(account => account.id === id); }
+
+  get(id: string) {
+    return this.list().find(account => account.id === id);
+  }
+
   rename(id: string, name: string) {
     const cleanName = name.trim();
     if (!cleanName) throw new Error('Informe um nome para a conta');
@@ -52,6 +66,7 @@ export class AccountManager extends EventEmitter {
     this.audit('account.rename', id, { name: cleanName });
     return this.get(id);
   }
+
   setProxy(id: string, proxy?: string) {
     const cleanProxy = proxy?.trim() || undefined;
     this.providers.get(id)?.setProxy?.(cleanProxy);
@@ -63,10 +78,14 @@ export class AccountManager extends EventEmitter {
   async connect(id: string) {
     const account = this.get(id);
     if (!account) throw new Error('Conta não encontrada');
+
     const existing = this.providers.get(id);
+    if (existing?.isConnected()) return this.get(id);
+
     const provider: MessagingProvider = existing ?? new BaileysProvider(join(this.authRoot, id), account.proxy);
     provider.setProxy?.(account.proxy);
     if (!existing) this.providers.set(id, provider);
+
     await provider.connect({
       onState: state => this.updateState(id, state, provider),
       onQr: qr => this.emit('qr', { accountId: id, qr }),
@@ -78,6 +97,49 @@ export class AccountManager extends EventEmitter {
     return this.get(id);
   }
 
+  /**
+   * Returns only after the in-memory provider is actually live. This is
+   * intentionally separate from connect(), because connect() must return while
+   * a QR session is waiting for the user to scan it.
+   */
+  async ensureConnected(id: string, timeoutMs = 20_000): Promise<MessagingProvider> {
+    const live = this.providers.get(id);
+    if (live?.isConnected()) return live;
+
+    const pending = this.ensurePromises.get(id);
+    if (pending) return pending;
+
+    const promise = this.doEnsureConnected(id, timeoutMs).finally(() => {
+      this.ensurePromises.delete(id);
+    });
+    this.ensurePromises.set(id, promise);
+    return promise;
+  }
+
+  private async doEnsureConnected(id: string, timeoutMs: number): Promise<MessagingProvider> {
+    const account = this.get(id);
+    if (!account) throw new Error('Conta não encontrada');
+
+    let provider = this.providers.get(id);
+    if (!provider?.isConnected()) {
+      const connectionAlreadyRunning = Boolean(provider) && ['connecting', 'reconnecting', 'qr'].includes(account.status);
+      if (!connectionAlreadyRunning) await this.connect(id);
+    }
+
+    const deadline = Date.now() + Math.max(2_000, timeoutMs);
+    while (Date.now() < deadline) {
+      provider = this.providers.get(id);
+      if (provider?.isConnected()) return provider;
+
+      const current = this.get(id);
+      if (!current) throw new Error('Conta removida durante a conexão');
+      await sleep(250);
+    }
+
+    const current = this.get(id);
+    throw new Error(`A conta ${current?.name ?? id} não ficou online dentro de ${Math.ceil(timeoutMs / 1000)}s`);
+  }
+
   async disconnect(id: string, logout = false) {
     const provider = this.providers.get(id);
     if (provider) await provider.disconnect(logout);
@@ -85,11 +147,13 @@ export class AccountManager extends EventEmitter {
     this.updateState(id, 'disconnected', provider);
     this.audit(logout ? 'account.logout' : 'account.disconnect', id);
   }
+
   async remove(id: string) {
     await this.disconnect(id, true).catch(() => undefined);
     this.db.prepare(`DELETE FROM instances WHERE id = ?`).run(id);
     this.audit('account.remove', id);
   }
+
   provider(id: string): MessagingProvider {
     const provider = this.providers.get(id);
     if (!provider || !provider.isConnected()) throw new Error('A conta selecionada não está conectada');
@@ -109,6 +173,7 @@ export class AccountManager extends EventEmitter {
     const cacheable = !message.remoteJid.endsWith('@broadcast') && !message.remoteJid.includes('@newsletter');
     let chatIdentity: ContactPresence | undefined;
     let participantIdentity: ContactPresence | undefined;
+
     try {
       if (!isGroup) chatIdentity = await provider.resolveIdentity(message.remoteJid, message.remoteJidAlt);
       if (isGroup && message.participant) participantIdentity = await provider.resolveIdentity(message.participant, message.participantAlt);
@@ -150,6 +215,7 @@ export class AccountManager extends EventEmitter {
           last_message_at=excluded.last_message_at
       `).run(accountId, message.remoteJid, canonical, participantIdentity?.lid ?? null, participantIdentity?.pnJid ?? null, participantIdentity?.phone ?? null, at, at);
     }
+
     this.emit('message', { accountId, message, identity: chatIdentity, participantIdentity });
   }
 
