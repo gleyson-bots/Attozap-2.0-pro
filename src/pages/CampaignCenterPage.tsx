@@ -1,201 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, Flame, Gauge, ListChecks, Pause, Play, RefreshCw, Send, Square, TimerReset, Users, Wifi } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, Flame, Gauge, ListChecks, Pause, Play, RefreshCw, Send, SkipForward, Square, TimerReset, Users, Wifi } from 'lucide-react';
 import { campaignPercent, toLocalDateTime } from '../lib';
 
-function parseOptions(campaign: any) {
-  try { return JSON.parse(String(campaign?.options_json || '{}')); }
-  catch { return {}; }
-}
-function formatCountdown(ms: number) {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
-function phaseLabel(phase?: string) {
-  const labels: Record<string,string> = {
-    preparing: 'Preparando próximo item', checking: 'Validando destinatário', sending: 'Enviando agora', waiting: 'Intervalo entre envios',
-    paused: 'Campanha pausada', completed: 'Concluída', stopped: 'Interrompida', error: 'Falha no último envio',
-  };
-  return labels[phase || ''] || 'Aguardando execução';
-}
-function warmPhaseLabel(phase?: string) {
-  const labels: Record<string,string> = { starting: 'Iniciando', waiting: 'Aguardando próximo turno', typing: 'Digitando', sending: 'Enviando', sent: 'Turno concluído', error: 'Falha', paused: 'Pausado' };
-  return labels[phase || ''] || 'Parado';
-}
-function statusLabel(status: string) {
-  const map: Record<string,string> = { running: 'Em execução', paused: 'Pausada', completed: 'Concluída', stopped: 'Parada', failed: 'Com falhas', scheduled: 'Agendada', draft: 'Rascunho', stopping: 'Parando' };
-  return map[status] || status;
-}
+function parseOptions(campaign: any) { try { return JSON.parse(String(campaign?.options_json || '{}')); } catch { return {}; } }
+function formatCountdown(ms: number) { const total=Math.max(0,Math.ceil(ms/1000)); return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`; }
+function phaseLabel(phase?: string) { const labels:Record<string,string>={preparing:'Preparando próximo item',checking:'Validando destinatário',sending:'Enviando agora',waiting:'Intervalo entre envios',paused:'Campanha pausada',completed:'Concluída',stopped:'Interrompida',error:'Falha no último envio'}; return labels[phase||'']||'Aguardando execução'; }
+function warmPhaseLabel(phase?: string) { const labels:Record<string,string>={starting:'Iniciando',waiting:'Aguardando próximo turno',typing:'Digitando',sending:'Enviando',sent:'Turno concluído',error:'Falha',paused:'Pausado'}; return labels[phase||'']||'Parado'; }
+function statusLabel(status:string) { const map:Record<string,string>={running:'Em execução',paused:'Pausada',completed:'Concluída',stopped:'Parada',failed:'Com falhas',scheduled:'Agendada',draft:'Rascunho',stopping:'Parando'}; return map[status]||status; }
 
-export function CampaignCenterPage({ campaigns, accounts, reloadCampaigns }: { campaigns: any[]; accounts: any[]; reloadCampaigns: () => Promise<void> }) {
-  const [selectedId, setSelectedId] = useState('');
-  const [runtime, setRuntime] = useState<any>(null);
-  const [recipients, setRecipients] = useState<any[]>([]);
-  const [now, setNow] = useState(Date.now());
-  const [error, setError] = useState('');
-  const [warmupProfiles, setWarmupProfiles] = useState<any[]>([]);
-  const [warmupId, setWarmupId] = useState('');
-  const [warmupRuntime, setWarmupRuntime] = useState<any>(null);
-  const [warmupBusy, setWarmupBusy] = useState(false);
-
-  const selected = useMemo(() => campaigns.find(item => item.id === selectedId) ?? campaigns.find(item => ['running','paused'].includes(item.status)) ?? campaigns[0], [campaigns, selectedId]);
-  const options = useMemo(() => parseOptions(selected), [selected]);
-  const pct = selected ? campaignPercent(selected) : 0;
-  const remaining = runtime?.nextAt ? Math.max(0, Number(runtime.nextAt) - now) : 0;
-  const account = accounts.find(item => item.id === runtime?.accountId);
-  const pending = selected ? Math.max(0, Number(selected.total || 0) - Number(selected.sent || 0) - Number(selected.failed || 0) - Number(selected.skipped || 0)) : 0;
-  const attempted = selected ? Number(selected.sent || 0) + Number(selected.failed || 0) : 0;
-  const successRate = attempted ? Math.round(Number(selected.sent || 0) / attempted * 1000) / 10 : 100;
-  const activeWarmup = warmupProfiles.find(item => item.id === warmupId);
-
-  async function refresh(id = selected?.id) {
-    if (!id) { setRuntime(null); setRecipients([]); return; }
-    try {
-      const [nextRuntime, rows] = await Promise.all([window.attozap.campaigns.runtime(id), window.attozap.campaigns.recipients(id)]);
-      setRuntime(nextRuntime); setRecipients(rows); setError('');
-    } catch (e: any) { setError(e?.message ?? String(e)); }
-  }
-
-  async function loadWarmup() {
-    try {
-      const profiles = await window.attozap.warmup.list();
-      setWarmupProfiles(profiles);
-      setWarmupId(current => current && profiles.some((item: any) => item.id === current) ? current : (profiles[0]?.id ?? ''));
-    } catch { setWarmupProfiles([]); }
-  }
-
-  async function refreshWarmup(id = warmupId) {
-    if (!id) { setWarmupRuntime(null); return; }
-    try { setWarmupRuntime(await window.attozap.warmup.runtime(id)); }
-    catch { setWarmupRuntime(null); }
-  }
-
-  useEffect(() => {
-    if (!selectedId && selected?.id) setSelectedId(selected.id);
-  }, [selected?.id, selectedId]);
-
-  useEffect(() => { void refresh(selected?.id); }, [selected?.id]);
-  useEffect(() => { void loadWarmup(); }, []);
-  useEffect(() => { void refreshWarmup(warmupId); }, [warmupId]);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
-    const warmTimer = window.setInterval(() => { if (document.visibilityState === 'visible') void refreshWarmup(); }, 1400);
-    return () => { window.clearInterval(timer); window.clearInterval(warmTimer); };
-  }, [warmupId]);
-  useEffect(() => {
-    const offRuntime = window.attozap.campaigns.onRuntime((payload: any) => {
-      if (!selected?.id || payload?.campaignId !== selected.id) return;
-      setRuntime(payload);
-    });
-    const offProgress = window.attozap.campaigns.onProgress((payload: any) => {
-      void reloadCampaigns();
-      if (payload?.id === selected?.id) void refresh(selected.id);
-    });
-    const offError = window.attozap.campaigns.onError((payload: any) => {
-      if (!selected?.id || payload?.campaignId !== selected.id) return;
-      setError(payload?.message || 'Falha durante a campanha');
-      void refresh(selected.id);
-    });
-    return () => { offRuntime?.(); offProgress?.(); offError?.(); };
-  }, [selected?.id, reloadCampaigns]);
-
-  async function control(action: 'pause'|'resume'|'stop'|'start') {
-    if (!selected?.id) return;
-    setError('');
-    try {
-      await window.attozap.campaigns[action](selected.id);
-      await reloadCampaigns();
-      await refresh(selected.id);
-    } catch (e: any) { setError(e?.message ?? String(e)); }
-  }
-
-  async function controlWarmup(action: 'start'|'stop') {
-    if (!warmupId) return;
-    setWarmupBusy(true); setError('');
-    try {
-      await window.attozap.warmup[action](warmupId);
-      await refreshWarmup(warmupId);
-    } catch (e: any) { setError(`Aquecimento: ${e?.message ?? String(e)}`); }
-    finally { setWarmupBusy(false); }
-  }
-
-  return <div className="page-stack campaign-center-page">
-    <div className="page-head"><div><span className="kicker">CAMPAIGN CENTER</span><h2>Campanhas em tempo real</h2><p>Acompanhe fila, intervalo, sessão atual, destinatário, erros e resultados sem voltar para o compositor.</p></div><button className="button ghost" onClick={() => { void reloadCampaigns(); void refresh(); void refreshWarmup(); }}><RefreshCw size={16}/> Atualizar</button></div>
-    {error && <div className="notice error">{error}</div>}
-
-    <div className="campaign-center-layout">
-      <aside className="campaign-center-list card">
-        <div className="card-head"><div><h3>Campanhas</h3><p>{campaigns.length} registradas</p></div></div>
-        <div className="campaign-center-scroll">{campaigns.map(item => {
-          const itemOptions = parseOptions(item);
-          return <button key={item.id} className={selected?.id === item.id ? 'active' : ''} onClick={() => setSelectedId(item.id)}>
-            <div><b>{item.name}</b><span>{item.target_type === 'group' ? 'Grupos' : 'Contatos'} · {itemOptions.profile || 'personalizado'}</span></div>
-            <small className={`status-chip ${item.status}`}>{statusLabel(item.status)}</small>
-            <div className="mini-progress"><i style={{ width: `${campaignPercent(item)}%` }}/></div>
-            <em>{item.sent}/{item.total}</em>
-          </button>;
-        })}{!campaigns.length && <div className="empty mini"><Send size={25}/><p>Nenhuma campanha criada.</p></div>}</div>
-      </aside>
-
-      <section className="campaign-center-main">
-        {!selected ? <div className="card empty"><Send size={34}/><h3>Nenhuma campanha selecionada</h3><p>Crie uma campanha no Contact Sender ou Group Sender.</p></div> : <>
-          {options.profile === 'extreme' && <div className="notice warning campaign-extreme-warning"><AlertTriangle size={17}/><div><b>Perfil Extremo ativo</b><span>Intervalos curtos aumentam a pressão sobre a sessão. Blocklist, validações, falhas e desconexões continuam interrompendo ou pulando itens quando necessário.</span></div></div>}
-
-          <div className="campaign-live-grid">
-            <section className="card campaign-runtime-card">
-              <div className="runtime-top"><div><span className="kicker">EXECUÇÃO</span><h3>{selected.name}</h3><p>{phaseLabel(runtime?.phase)}</p></div><span className={`status-chip ${selected.status}`}>{statusLabel(selected.status)}</span></div>
-              <div className="runtime-body">
-                <div className={`countdown-ring ${runtime?.phase === 'sending' ? 'sending' : ''}`} style={{ '--progress': `${remaining && options.maxDelayMs ? Math.max(5, Math.min(100, 100 - remaining / Number(options.maxDelayMs) * 100)) : 100}%` } as any}>
-                  <Clock3 size={24}/><b>{runtime?.phase === 'waiting' ? formatCountdown(remaining) : runtime?.phase === 'sending' ? 'AGORA' : '--:--'}</b><span>próxima ação</span>
-                </div>
-                <div className="runtime-details">
-                  <div><span><Wifi size={14}/> Conta atual</span><b>{account?.name || runtime?.accountId || '—'}</b><small>{account?.phone ? `+${account.phone}` : ''}</small></div>
-                  <div><span><Users size={14}/> Destinatário</span><b>{runtime?.target || '—'}</b><small>{runtime?.index ? `${runtime.index} de ${runtime.total || selected.total}` : 'Aguardando'}</small></div>
-                  <div><span><Gauge size={14}/> Perfil</span><b>{String(options.profile || 'personalizado').toUpperCase()}</b><small>{options.minDelayMs && options.maxDelayMs ? `${Math.round(options.minDelayMs/1000)}–${Math.round(options.maxDelayMs/1000)}s aleatórios` : 'Intervalo personalizado'}</small></div>
-                  <div><span><TimerReset size={14}/> Intervalo controlado</span><b>{runtime?.phase === 'waiting' ? 'Em cooldown' : 'Acompanhando fila'}</b><small>O intervalo não ignora bloqueios ou falhas.</small></div>
-                </div>
-              </div>
-              <div className="runtime-progress"><div><span>Progresso geral</span><b>{pct}%</b></div><div className="campaign-progress"><i style={{ width: `${pct}%` }}/></div></div>
-              <div className="runtime-controls">
-                {selected.status === 'running' && <button className="button ghost" onClick={() => void control('pause')}><Pause size={16}/> Pausar</button>}
-                {selected.status === 'paused' && <button className="button primary" onClick={() => void control('resume')}><Play size={16}/> Retomar</button>}
-                {['draft','stopped','failed'].includes(selected.status) && <button className="button primary" onClick={() => void control('start')}><Play size={16}/> Iniciar</button>}
-                {['running','paused','stopping'].includes(selected.status) && <button className="button danger-soft" onClick={() => void control('stop')}><Square size={16}/> Parar campanha</button>}
-              </div>
-            </section>
-
-            <section className="campaign-stats-grid">
-              <article className="metric-card"><div className="metric-icon"><Send size={18}/></div><span>Enviados</span><b>{Number(selected.sent || 0)}</b><small>de {selected.total}</small></article>
-              <article className="metric-card"><div className="metric-icon"><CheckCircle2 size={18}/></div><span>Sucesso</span><b>{successRate}%</b><small>sobre tentativas</small></article>
-              <article className="metric-card"><div className="metric-icon"><AlertTriangle size={18}/></div><span>Falhas</span><b>{Number(selected.failed || 0)}</b><small>erros registrados</small></article>
-              <article className="metric-card"><div className="metric-icon"><ListChecks size={18}/></div><span>Pendentes</span><b>{pending}</b><small>{Number(selected.skipped || 0)} ignorados</small></article>
-            </section>
-          </div>
-
-          <section className="card campaign-warmup-card">
-            <div className="card-head"><div><h3><Flame size={16}/> Aquecimento paralelo</h3><p>Executa um perfil de aquecimento já configurado enquanto a campanha segue sua própria fila.</p></div><span className={`status-chip ${warmupRuntime?.running ? 'running' : 'stopped'}`}>{warmupRuntime?.running ? 'Ativo' : 'Parado'}</span></div>
-            <div className="campaign-warmup-body">
-              <div className="field"><label>Perfil de aquecimento</label><select value={warmupId} onChange={e => setWarmupId(e.target.value)} disabled={Boolean(warmupRuntime?.running)}><option value="">Selecione...</option>{warmupProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name} · {profile.mode === 'pool' ? 'Pool de contas' : 'Direto / grupos'}</option>)}</select><small>O Warmup Engine mantém limites diários, janela ativa e somente destinos próprios/grupos sincronizados.</small></div>
-              <div className="warmup-live-info">
-                <div><span>Estado</span><b>{warmPhaseLabel(warmupRuntime?.phase)}</b></div>
-                <div><span>Turno</span><b>{warmupRuntime?.senderName && warmupRuntime?.recipientName ? `${warmupRuntime.senderName} → ${warmupRuntime.recipientName}` : (activeWarmup?.name || '—')}</b></div>
-                <div><span>Próximo turno</span><b>{warmupRuntime?.remainingSeconds ? formatCountdown(Number(warmupRuntime.remainingSeconds) * 1000) : '--:--'}</b></div>
-                <div><span>Último conteúdo</span><b>{warmupRuntime?.lastMediaType ? `${warmupRuntime.lastMediaType}${warmupRuntime.lastMediaName ? ` · ${warmupRuntime.lastMediaName}` : ''}` : (warmupRuntime?.lastMessage || '—')}</b></div>
-              </div>
-              <div className="runtime-controls">
-                {!warmupRuntime?.running && <button className="button ghost" disabled={warmupBusy || !warmupId} onClick={() => void controlWarmup('start')}><Flame size={16}/> Iniciar em paralelo</button>}
-                {warmupRuntime?.running && <button className="button danger-soft" disabled={warmupBusy} onClick={() => void controlWarmup('stop')}><Square size={16}/> Parar aquecimento</button>}
-              </div>
-            </div>
-          </section>
-
-          <section className="card campaign-queue-card">
-            <div className="card-head"><div><h3>Fila de destinatários</h3><p>Status individual atualizado durante a execução.</p></div><span>{recipients.length} itens</span></div>
-            <div className="campaign-recipient-table"><div className="campaign-recipient-row header"><span>Destinatário</span><span>Nome</span><span>Status</span><span>Enviado em</span><span>Detalhe</span></div>{recipients.slice(0, 300).map(row => <div className="campaign-recipient-row" key={row.id}><span>{row.target}</span><span>{row.name || '—'}</span><span><i className={`recipient-state ${row.status}`}/>{row.status}</span><span>{row.sent_at ? toLocalDateTime(row.sent_at) : '—'}</span><span title={row.error || ''}>{row.error || row.message_id || '—'}</span></div>)}</div>
-          </section>
-        </>}
-      </section>
-    </div>
-  </div>;
+export function CampaignCenterPage({ campaigns, accounts, reloadCampaigns }: { campaigns:any[]; accounts:any[]; reloadCampaigns:()=>Promise<void> }) {
+  const [selectedId,setSelectedId]=useState(''); const [runtime,setRuntime]=useState<any>(null); const [recipients,setRecipients]=useState<any[]>([]); const [now,setNow]=useState(Date.now()); const [error,setError]=useState(''); const [forceBusy,setForceBusy]=useState(false);
+  const [warmupProfiles,setWarmupProfiles]=useState<any[]>([]); const [warmupId,setWarmupId]=useState(''); const [warmupRuntime,setWarmupRuntime]=useState<any>(null); const [warmupBusy,setWarmupBusy]=useState(false);
+  const selected=useMemo(()=>campaigns.find(i=>i.id===selectedId)??campaigns.find(i=>['running','paused'].includes(i.status))??campaigns[0],[campaigns,selectedId]);
+  const options=useMemo(()=>parseOptions(selected),[selected]); const pct=selected?campaignPercent(selected):0; const remaining=runtime?.nextAt?Math.max(0,Number(runtime.nextAt)-now):0; const account=accounts.find(i=>i.id===runtime?.accountId);
+  const pending=selected?Math.max(0,Number(selected.total||0)-Number(selected.sent||0)-Number(selected.failed||0)-Number(selected.skipped||0)):0; const attempted=selected?Number(selected.sent||0)+Number(selected.failed||0):0; const successRate=attempted?Math.round(Number(selected.sent||0)/attempted*1000)/10:100; const activeWarmup=warmupProfiles.find(i=>i.id===warmupId);
+  async function refresh(id=selected?.id){ if(!id){setRuntime(null);setRecipients([]);return;} try{const [r,rows]=await Promise.all([window.attozap.campaigns.runtime(id),window.attozap.campaigns.recipients(id)]);setRuntime(r);setRecipients(rows);setError('');}catch(e:any){setError(e?.message??String(e));}}
+  async function loadWarmup(){try{const p=await window.attozap.warmup.list();setWarmupProfiles(p);setWarmupId(c=>c&&p.some((i:any)=>i.id===c)?c:(p[0]?.id??''));}catch{setWarmupProfiles([]);}}
+  async function refreshWarmup(id=warmupId){if(!id){setWarmupRuntime(null);return;}try{setWarmupRuntime(await window.attozap.warmup.runtime(id));}catch{setWarmupRuntime(null);}}
+  useEffect(()=>{if(!selectedId&&selected?.id)setSelectedId(selected.id);},[selected?.id,selectedId]); useEffect(()=>{void refresh(selected?.id);},[selected?.id]); useEffect(()=>{void loadWarmup();},[]); useEffect(()=>{void refreshWarmup(warmupId);},[warmupId]);
+  useEffect(()=>{const t=window.setInterval(()=>setNow(Date.now()),250);const w=window.setInterval(()=>{if(document.visibilityState==='visible')void refreshWarmup();},1400);return()=>{clearInterval(t);clearInterval(w);};},[warmupId]);
+  useEffect(()=>{const a=window.attozap.campaigns.onRuntime((p:any)=>{if(selected?.id&&p?.campaignId===selected.id)setRuntime(p);});const b=window.attozap.campaigns.onProgress((p:any)=>{void reloadCampaigns();if(p?.id===selected?.id)void refresh(selected.id);});const c=window.attozap.campaigns.onError((p:any)=>{if(selected?.id&&p?.campaignId===selected.id){setError(p?.message||'Falha durante a campanha');void refresh(selected.id);}});return()=>{a?.();b?.();c?.();};},[selected?.id,reloadCampaigns]);
+  async function control(action:'pause'|'resume'|'stop'|'start'){if(!selected?.id)return;setError('');try{await window.attozap.campaigns[action](selected.id);await reloadCampaigns();await refresh(selected.id);}catch(e:any){setError(e?.message??String(e));}}
+  async function forceNext(){if(!selected?.id)return;setForceBusy(true);setError('');try{setRuntime(await window.attozap.campaigns.forceNext(selected.id));}catch(e:any){setError(e?.message??String(e));}finally{setForceBusy(false);}}
+  async function controlWarmup(action:'start'|'stop'){if(!warmupId)return;setWarmupBusy(true);setError('');try{await window.attozap.warmup[action](warmupId);await refreshWarmup(warmupId);}catch(e:any){setError(`Aquecimento: ${e?.message??String(e)}`);}finally{setWarmupBusy(false);}}
+  return <div className="page-stack campaign-center-page"><div className="page-head"><div><span className="kicker">CAMPAIGN CENTER</span><h2>Campanhas em tempo real</h2><p>Fila, countdown, sessão atual, destinatário, erros, Force e resultados em uma tela dedicada.</p></div><button className="button ghost" onClick={()=>{void reloadCampaigns();void refresh();void refreshWarmup();}}><RefreshCw size={16}/> Atualizar</button></div>{error&&<div className="notice error">{error}</div>}
+  <div className="campaign-center-layout"><aside className="campaign-center-list card"><div className="card-head"><div><h3>Campanhas</h3><p>{campaigns.length} registradas</p></div></div><div className="campaign-center-scroll">{campaigns.map(item=>{const o=parseOptions(item);return <button key={item.id} className={selected?.id===item.id?'active':''} onClick={()=>setSelectedId(item.id)}><div><b>{item.name}</b><span>{item.target_type==='group'?'Grupos':'Contatos'} · {o.profile||'personalizado'}</span></div><small className={`status-chip ${item.status}`}>{statusLabel(item.status)}</small><div className="mini-progress"><i style={{width:`${campaignPercent(item)}%`}}/></div><em>{item.sent}/{item.total}</em></button>;})}</div></aside>
+  <section className="campaign-center-main">{!selected?<div className="card empty"><Send size={34}/><h3>Nenhuma campanha selecionada</h3></div>:<>{options.profile==='extreme'&&<div className="notice warning campaign-extreme-warning"><AlertTriangle size={17}/><div><b>Perfil Extremo ativo</b><span>Cadência agressiva aumenta risco de limitação/restrição. Use somente com contatos que esperam suas mensagens; Force reduz ainda mais o intervalo configurado.</span></div></div>}
+  <div className="campaign-live-grid"><section className="card campaign-runtime-card"><div className="runtime-top"><div><span className="kicker">EXECUÇÃO</span><h3>{selected.name}</h3><p>{phaseLabel(runtime?.phase)}</p></div><span className={`status-chip ${selected.status}`}>{statusLabel(selected.status)}</span></div><div className="runtime-body"><div className={`countdown-ring ${runtime?.phase==='sending'?'sending':''}`}><Clock3 size={24}/><b>{runtime?.phase==='waiting'?formatCountdown(remaining):runtime?.phase==='sending'?'AGORA':'--:--'}</b><span>próxima ação</span></div><div className="runtime-details"><div><span><Wifi size={14}/> Conta atual</span><b>{account?.name||runtime?.accountId||'—'}</b><small>{account?.phone?`+${account.phone}`:''}</small></div><div><span><Users size={14}/> Destinatário</span><b>{runtime?.target||'—'}</b><small>{runtime?.index?`${runtime.index} de ${runtime.total||selected.total}`:'Aguardando'}</small></div><div><span><Gauge size={14}/> Perfil</span><b>{String(options.profile||'personalizado').toUpperCase()}</b><small>{options.minDelayMs&&options.maxDelayMs?`${Math.round(options.minDelayMs/1000)}–${Math.round(options.maxDelayMs/1000)}s aleatórios`:'Intervalo personalizado'}</small></div><div><span><TimerReset size={14}/> Intervalo</span><b>{runtime?.phase==='waiting'?'Em cooldown':'Acompanhando fila'}</b><small>Force só atua durante o cooldown.</small></div></div></div><div className="runtime-progress"><div><span>Progresso geral</span><b>{pct}%</b></div><div className="campaign-progress"><i style={{width:`${pct}%`}}/></div></div><div className="runtime-controls">{selected.status==='running'&&<button className="button ghost" onClick={()=>void control('pause')}><Pause size={16}/> Pausar</button>}{selected.status==='paused'&&<button className="button primary" onClick={()=>void control('resume')}><Play size={16}/> Retomar</button>}{['draft','stopped','failed'].includes(selected.status)&&<button className="button primary" onClick={()=>void control('start')}><Play size={16}/> Iniciar</button>}{runtime?.phase==='waiting'&&selected.status==='running'&&<button className="button warning" disabled={forceBusy} onClick={()=>void forceNext()}><SkipForward size={16}/> Force próximo</button>}{['running','paused','stopping'].includes(selected.status)&&<button className="button danger-soft" onClick={()=>void control('stop')}><Square size={16}/> Parar</button>}</div></section>
+  <section className="campaign-stats-grid"><article className="metric-card"><Send size={18}/><span>Enviados</span><b>{Number(selected.sent||0)}</b><small>de {selected.total}</small></article><article className="metric-card"><CheckCircle2 size={18}/><span>Sucesso</span><b>{successRate}%</b><small>sobre tentativas</small></article><article className="metric-card"><AlertTriangle size={18}/><span>Falhas</span><b>{Number(selected.failed||0)}</b><small>erros registrados</small></article><article className="metric-card"><ListChecks size={18}/><span>Pendentes</span><b>{pending}</b><small>{Number(selected.skipped||0)} ignorados</small></article></section></div>
+  <section className="card campaign-warmup-card"><div className="card-head"><div><h3><Flame size={16}/> Aquecimento paralelo</h3><p>Perfil separado, com seus próprios limites e runtime.</p></div><span className={`status-chip ${warmupRuntime?.running?'running':'stopped'}`}>{warmupRuntime?.running?'Ativo':'Parado'}</span></div><div className="campaign-warmup-body"><div className="field"><label>Perfil de aquecimento</label><select value={warmupId} onChange={e=>setWarmupId(e.target.value)} disabled={Boolean(warmupRuntime?.running)}><option value="">Selecione...</option>{warmupProfiles.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div><div className="warmup-live-info"><div><span>Estado</span><b>{warmPhaseLabel(warmupRuntime?.phase)}</b></div><div><span>Turno</span><b>{warmupRuntime?.senderName&&warmupRuntime?.recipientName?`${warmupRuntime.senderName} → ${warmupRuntime.recipientName}`:(activeWarmup?.name||'—')}</b></div><div><span>Próximo turno</span><b>{warmupRuntime?.remainingSeconds?formatCountdown(Number(warmupRuntime.remainingSeconds)*1000):'--:--'}</b></div><div><span>Último conteúdo</span><b>{warmupRuntime?.lastMediaType?`${warmupRuntime.lastMediaType}${warmupRuntime.lastMediaName?` · ${warmupRuntime.lastMediaName}`:''}`:(warmupRuntime?.lastMessage||'—')}</b></div></div><div className="runtime-controls">{!warmupRuntime?.running?<button className="button ghost" disabled={warmupBusy||!warmupId} onClick={()=>void controlWarmup('start')}><Flame size={16}/> Iniciar aquecimento</button>:<button className="button danger-soft" disabled={warmupBusy} onClick={()=>void controlWarmup('stop')}><Square size={16}/> Parar aquecimento</button>}</div></div></section>
+  <section className="card campaign-queue-card"><div className="card-head"><div><h3>Fila de destinatários</h3><p>Status individual em tempo real.</p></div><span>{recipients.length} itens</span></div><div className="campaign-recipient-table"><div className="campaign-recipient-row header"><span>Destinatário</span><span>Nome</span><span>Status</span><span>Enviado em</span><span>Detalhe</span></div>{recipients.slice(0,300).map(row=><div className="campaign-recipient-row" key={row.id}><span>{row.target}</span><span>{row.name||'—'}</span><span><i className={`recipient-state ${row.status}`}/>{row.status}</span><span>{row.sent_at?toLocalDateTime(row.sent_at):'—'}</span><span title={row.error||''}>{row.error||row.message_id||'—'}</span></div>)}</div></section></>}</section></div></div>;
 }
