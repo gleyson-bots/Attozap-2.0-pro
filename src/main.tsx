@@ -15,6 +15,7 @@ import './rc3.css';
 import './rc4.css';
 import './system.css';
 import './ui-polish.css';
+import './ui-pages.css';
 
 installGlobalErrorHandlers();
 const rootElement = document.getElementById('root');
