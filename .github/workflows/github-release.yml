@@ -24,17 +24,38 @@ jobs:
       - name: Build application
         run: npm run build
 
+      - name: Verify compiled preload
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist-electron/preload.cjs')) { throw 'dist-electron/preload.cjs was not generated' }
+          if (-not (Test-Path 'dist-electron/main.js')) { throw 'dist-electron/main.js was not generated' }
+
       - name: Build WASender portable
         run: npx electron-builder --win portable --x64 --publish never
         env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
+      - name: Smoke exact portable before publishing
+        shell: pwsh
+        run: |
+          function Stop-Attozap {
+            Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'ATTOZAP*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+          $app = Get-ChildItem release -Filter 'ATTOZAP-WASender-Pro-*.exe' | Select-Object -First 1
+          if (-not $app) { throw 'WASender portable executable was not generated' }
+          Start-Process -FilePath $app.FullName -ArgumentList '--remote-debugging-port=9228' | Out-Null
+          node tools/electron-smoke.mjs http://127.0.0.1:9228 release/release-portable-smoke.png
+          $exitCode = $LASTEXITCODE
+          Stop-Attozap
+          if ($exitCode -ne 0) { exit $exitCode }
+
       - name: Prepare stable release filename
         shell: pwsh
         run: |
           $app = Get-ChildItem release -Filter 'ATTOZAP-WASender-Pro-*.exe' | Select-Object -First 1
           if (-not $app) { throw 'WASender portable executable was not generated' }
+          if (-not (Test-Path 'release/release-portable-smoke.png')) { throw 'Portable smoke did not pass' }
           Copy-Item $app.FullName 'release/ATTOZAP-WASender-Pro-x64.exe' -Force
           $hash = (Get-FileHash 'release/ATTOZAP-WASender-Pro-x64.exe' -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path 'release/SHA256SUMS.txt' -Value "$hash  ATTOZAP-WASender-Pro-x64.exe"
@@ -74,7 +95,7 @@ jobs:
             gh release create $env:TAG 'release/ATTOZAP-WASender-Pro-x64.exe' 'release/SHA256SUMS.txt' --repo $env:RELEASE_REPO --title "ATTOZAP WASender Pro $env:TAG" --notes "Versão pública do ATTOZAP WASender Pro para Windows. Código-fonte e ferramentas privadas não fazem parte deste repositório."
           }
 
-      - name: Verify public latest download asset
+      - name: Verify public release asset
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
