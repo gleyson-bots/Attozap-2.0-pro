@@ -26,7 +26,8 @@ export function registerMessageStatusTracking(input: { window: BrowserWindow; db
         db.prepare(`
           UPDATE campaigns
           SET failed=failed+1,
-              sent=CASE WHEN ?=1 THEN MAX(0,sent-1) ELSE sent END
+              sent=CASE WHEN ?=1 THEN MAX(0,sent-1) ELSE sent END,
+              status=CASE WHEN status='completed' THEN 'failed' ELSE status END
           WHERE id=?
         `).run(wasCountedAsSent ? 1 : 0, recipient.campaign_id);
       }
