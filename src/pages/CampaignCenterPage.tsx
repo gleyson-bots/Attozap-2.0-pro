@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, Gauge, ListChecks, Pause, Play, RefreshCw, Send, Square, TimerReset, Users, Wifi } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, Flame, Gauge, ListChecks, Pause, Play, RefreshCw, Send, Square, TimerReset, Users, Wifi } from 'lucide-react';
 import { campaignPercent, toLocalDateTime } from '../lib';
 
 function parseOptions(campaign: any) {
@@ -19,6 +19,10 @@ function phaseLabel(phase?: string) {
   };
   return labels[phase || ''] || 'Aguardando execução';
 }
+function warmPhaseLabel(phase?: string) {
+  const labels: Record<string,string> = { starting: 'Iniciando', waiting: 'Aguardando próximo turno', typing: 'Digitando', sending: 'Enviando', sent: 'Turno concluído', error: 'Falha', paused: 'Pausado' };
+  return labels[phase || ''] || 'Parado';
+}
 function statusLabel(status: string) {
   const map: Record<string,string> = { running: 'Em execução', paused: 'Pausada', completed: 'Concluída', stopped: 'Parada', failed: 'Com falhas', scheduled: 'Agendada', draft: 'Rascunho', stopping: 'Parando' };
   return map[status] || status;
@@ -30,6 +34,10 @@ export function CampaignCenterPage({ campaigns, accounts, reloadCampaigns }: { c
   const [recipients, setRecipients] = useState<any[]>([]);
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState('');
+  const [warmupProfiles, setWarmupProfiles] = useState<any[]>([]);
+  const [warmupId, setWarmupId] = useState('');
+  const [warmupRuntime, setWarmupRuntime] = useState<any>(null);
+  const [warmupBusy, setWarmupBusy] = useState(false);
 
   const selected = useMemo(() => campaigns.find(item => item.id === selectedId) ?? campaigns.find(item => ['running','paused'].includes(item.status)) ?? campaigns[0], [campaigns, selectedId]);
   const options = useMemo(() => parseOptions(selected), [selected]);
@@ -39,6 +47,7 @@ export function CampaignCenterPage({ campaigns, accounts, reloadCampaigns }: { c
   const pending = selected ? Math.max(0, Number(selected.total || 0) - Number(selected.sent || 0) - Number(selected.failed || 0) - Number(selected.skipped || 0)) : 0;
   const attempted = selected ? Number(selected.sent || 0) + Number(selected.failed || 0) : 0;
   const successRate = attempted ? Math.round(Number(selected.sent || 0) / attempted * 1000) / 10 : 100;
+  const activeWarmup = warmupProfiles.find(item => item.id === warmupId);
 
   async function refresh(id = selected?.id) {
     if (!id) { setRuntime(null); setRecipients([]); return; }
@@ -48,15 +57,32 @@ export function CampaignCenterPage({ campaigns, accounts, reloadCampaigns }: { c
     } catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
+  async function loadWarmup() {
+    try {
+      const profiles = await window.attozap.warmup.list();
+      setWarmupProfiles(profiles);
+      setWarmupId(current => current && profiles.some((item: any) => item.id === current) ? current : (profiles[0]?.id ?? ''));
+    } catch { setWarmupProfiles([]); }
+  }
+
+  async function refreshWarmup(id = warmupId) {
+    if (!id) { setWarmupRuntime(null); return; }
+    try { setWarmupRuntime(await window.attozap.warmup.runtime(id)); }
+    catch { setWarmupRuntime(null); }
+  }
+
   useEffect(() => {
     if (!selectedId && selected?.id) setSelectedId(selected.id);
   }, [selected?.id, selectedId]);
 
   useEffect(() => { void refresh(selected?.id); }, [selected?.id]);
+  useEffect(() => { void loadWarmup(); }, []);
+  useEffect(() => { void refreshWarmup(warmupId); }, [warmupId]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(timer);
-  }, []);
+    const warmTimer = window.setInterval(() => { if (document.visibilityState === 'visible') void refreshWarmup(); }, 1400);
+    return () => { window.clearInterval(timer); window.clearInterval(warmTimer); };
+  }, [warmupId]);
   useEffect(() => {
     const offRuntime = window.attozap.campaigns.onRuntime((payload: any) => {
       if (!selected?.id || payload?.campaignId !== selected.id) return;
@@ -84,8 +110,18 @@ export function CampaignCenterPage({ campaigns, accounts, reloadCampaigns }: { c
     } catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
+  async function controlWarmup(action: 'start'|'stop') {
+    if (!warmupId) return;
+    setWarmupBusy(true); setError('');
+    try {
+      await window.attozap.warmup[action](warmupId);
+      await refreshWarmup(warmupId);
+    } catch (e: any) { setError(`Aquecimento: ${e?.message ?? String(e)}`); }
+    finally { setWarmupBusy(false); }
+  }
+
   return <div className="page-stack campaign-center-page">
-    <div className="page-head"><div><span className="kicker">CAMPAIGN CENTER</span><h2>Campanhas em tempo real</h2><p>Acompanhe fila, intervalo, sessão atual, destinatário, erros e resultados sem voltar para o compositor.</p></div><button className="button ghost" onClick={() => { void reloadCampaigns(); void refresh(); }}><RefreshCw size={16}/> Atualizar</button></div>
+    <div className="page-head"><div><span className="kicker">CAMPAIGN CENTER</span><h2>Campanhas em tempo real</h2><p>Acompanhe fila, intervalo, sessão atual, destinatário, erros e resultados sem voltar para o compositor.</p></div><button className="button ghost" onClick={() => { void reloadCampaigns(); void refresh(); void refreshWarmup(); }}><RefreshCw size={16}/> Atualizar</button></div>
     {error && <div className="notice error">{error}</div>}
 
     <div className="campaign-center-layout">
@@ -136,6 +172,23 @@ export function CampaignCenterPage({ campaigns, accounts, reloadCampaigns }: { c
               <article className="metric-card"><div className="metric-icon"><ListChecks size={18}/></div><span>Pendentes</span><b>{pending}</b><small>{Number(selected.skipped || 0)} ignorados</small></article>
             </section>
           </div>
+
+          <section className="card campaign-warmup-card">
+            <div className="card-head"><div><h3><Flame size={16}/> Aquecimento paralelo</h3><p>Executa um perfil de aquecimento já configurado enquanto a campanha segue sua própria fila.</p></div><span className={`status-chip ${warmupRuntime?.running ? 'running' : 'stopped'}`}>{warmupRuntime?.running ? 'Ativo' : 'Parado'}</span></div>
+            <div className="campaign-warmup-body">
+              <div className="field"><label>Perfil de aquecimento</label><select value={warmupId} onChange={e => setWarmupId(e.target.value)} disabled={Boolean(warmupRuntime?.running)}><option value="">Selecione...</option>{warmupProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name} · {profile.mode === 'pool' ? 'Pool de contas' : 'Direto / grupos'}</option>)}</select><small>O Warmup Engine mantém limites diários, janela ativa e somente destinos próprios/grupos sincronizados.</small></div>
+              <div className="warmup-live-info">
+                <div><span>Estado</span><b>{warmPhaseLabel(warmupRuntime?.phase)}</b></div>
+                <div><span>Turno</span><b>{warmupRuntime?.senderName && warmupRuntime?.recipientName ? `${warmupRuntime.senderName} → ${warmupRuntime.recipientName}` : (activeWarmup?.name || '—')}</b></div>
+                <div><span>Próximo turno</span><b>{warmupRuntime?.remainingSeconds ? formatCountdown(Number(warmupRuntime.remainingSeconds) * 1000) : '--:--'}</b></div>
+                <div><span>Último conteúdo</span><b>{warmupRuntime?.lastMediaType ? `${warmupRuntime.lastMediaType}${warmupRuntime.lastMediaName ? ` · ${warmupRuntime.lastMediaName}` : ''}` : (warmupRuntime?.lastMessage || '—')}</b></div>
+              </div>
+              <div className="runtime-controls">
+                {!warmupRuntime?.running && <button className="button ghost" disabled={warmupBusy || !warmupId} onClick={() => void controlWarmup('start')}><Flame size={16}/> Iniciar em paralelo</button>}
+                {warmupRuntime?.running && <button className="button danger-soft" disabled={warmupBusy} onClick={() => void controlWarmup('stop')}><Square size={16}/> Parar aquecimento</button>}
+              </div>
+            </div>
+          </section>
 
           <section className="card campaign-queue-card">
             <div className="card-head"><div><h3>Fila de destinatários</h3><p>Status individual atualizado durante a execução.</p></div><span>{recipients.length} itens</span></div>
