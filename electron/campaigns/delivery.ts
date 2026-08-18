@@ -23,9 +23,11 @@ export function recomputeCampaign(db: AttozapDatabase, campaignId: string) {
   db.prepare(`UPDATE campaigns SET sent=?,failed=?,skipped=? WHERE id=?`).run(sent, failed, skipped, campaignId);
 
   const campaign = db.prepare(`SELECT status FROM campaigns WHERE id=? LIMIT 1`).get(campaignId) as { status?: string } | undefined;
-  if (campaign?.status === 'awaiting_ack' && unresolved === 0) {
+  if (campaign?.status && ['awaiting_ack', 'completed', 'failed'].includes(campaign.status) && unresolved === 0) {
     const finalStatus = failed > 0 ? 'failed' : 'completed';
-    db.prepare(`UPDATE campaigns SET status=?,finished_at=CURRENT_TIMESTAMP WHERE id=?`).run(finalStatus, campaignId);
+    if (campaign.status !== finalStatus) {
+      db.prepare(`UPDATE campaigns SET status=?,finished_at=CURRENT_TIMESTAMP WHERE id=?`).run(finalStatus, campaignId);
+    }
   }
   return { total: Number(counts?.total ?? 0), sent, failed, skipped, unresolved };
 }
