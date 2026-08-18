@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from '../messaging/account-manager.js';
-import type { ContactCardInput, LocationInput, MessagingProvider, PollInput, SendMediaInput } from '../messaging/provider.js';
+import type { ContactCardInput, LocationInput, MessageResult, MessagingProvider, PollInput, SendMediaInput } from '../messaging/provider.js';
 import { getCachedMessageStatus } from '../messaging/status.js';
 import {
   finalizeRecipientSubmission,
@@ -141,7 +141,11 @@ export class CampaignEngine extends EventEmitter {
   }
 
   create(input: CreateCampaignInput) {
-    if (!input.recipients.length) throw new Error('A campanha precisa de pelo menos um destinatário');
+    const recipients = input.recipients
+      .map(recipient => ({ ...recipient, target: recipient.target.trim() }))
+      .filter(recipient => Boolean(recipient.target));
+    if (!recipients.length) throw new Error('A campanha precisa de pelo menos um destinatário');
+
     const id = randomUUID();
     const targetType = input.targetType ?? 'contact';
     const parts = input.parts ?? [];
@@ -161,17 +165,14 @@ export class CampaignEngine extends EventEmitter {
       this.db.prepare(`
         INSERT INTO campaigns (id, account_id, name, target_type, message_template, attachments_json, options_json, total)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, accountIds[0], input.name.trim() || 'Campanha sem nome', targetType, messages[0] ?? '', JSON.stringify(parts), JSON.stringify(options), input.recipients.length);
+      `).run(id, accountIds[0], input.name.trim() || 'Campanha sem nome', targetType, messages[0] ?? '', JSON.stringify(parts), JSON.stringify(options), recipients.length);
       const insertRecipient = this.db.prepare(`
         INSERT INTO campaign_recipients (campaign_id, target, name, variables_json) VALUES (?, ?, ?, ?)
       `);
-      for (const recipient of input.recipients) {
-        const target = recipient.target.trim();
-        if (target) insertRecipient.run(id, target, recipient.name ?? null, JSON.stringify(recipient.variables ?? {}));
-      }
+      for (const recipient of recipients) insertRecipient.run(id, recipient.target, recipient.name ?? null, JSON.stringify(recipient.variables ?? {}));
     });
     tx();
-    this.audit('campaign.create', id, { total: input.recipients.length, targetType, accountIds, messageMode: options.messageMode, messages: messages.length, profile: options.profile });
+    this.audit('campaign.create', id, { total: recipients.length, targetType, accountIds, messageMode: options.messageMode, messages: messages.length, profile: options.profile });
     return this.get(id);
   }
 
@@ -257,7 +258,7 @@ export class CampaignEngine extends EventEmitter {
         const selectedAccountId = accountIds[providerIndex];
         this.setRuntime(id, { phase: 'checking', index: rowIndex + 1, target: originalTarget, accountId: selectedAccountId, lastError: undefined });
 
-        const listState = targetType === 'contact' ? this.contactListState(originalTarget) : { blocked: false, friendly: false };
+        const listState = targetType === 'contact' ? this.contactListState(selectedAccountId, originalTarget) : { blocked: false, friendly: false };
         if ((options.skipBlocked !== false && listState.blocked) || (options.friendlyOnly && !listState.friendly)) {
           markCampaignRecipient(this.db, row.id, 'skipped', options.friendlyOnly ? 'Fora da friendly list' : 'Blocklist');
           this.emitProgress(id);
@@ -393,7 +394,7 @@ export class CampaignEngine extends EventEmitter {
 
   private emitRuntime(id: string) { this.emit('runtime', this.runtimeState(id)); }
 
-  private async sendPart(provider: MessagingProvider, target: string, part: CampaignPart, recipient: CampaignRecipient) {
+  private async sendPart(provider: MessagingProvider, target: string, part: CampaignPart, recipient: CampaignRecipient): Promise<MessageResult> {
     const render = (value?: string) => value ? renderTemplate(value, recipient) : value;
     switch (part.type) {
       case 'image': return provider.sendImage(target, { ...part.input, caption: render(part.input.caption) });
@@ -405,16 +406,21 @@ export class CampaignEngine extends EventEmitter {
       case 'contact': return provider.sendContact(target, { ...part.input, displayName: render(part.input.displayName) ?? part.input.displayName });
       case 'poll': return provider.sendPoll(target, { ...part.input, name: render(part.input.name) ?? part.input.name, values: part.input.values.map(value => render(value) ?? value) });
     }
+    throw new Error('Tipo de conteúdo não suportado');
   }
 
-  private contactListState(target: string) {
+  private contactListState(accountId: string, target: string) {
     let phone = isJid(target) ? undefined : digits(target);
     if (!phone && isJid(target)) {
-      const identity = this.db.prepare(`SELECT phone FROM wa_identities WHERE canonical_jid=? OR lid=? OR pn_jid=? ORDER BY last_seen_at DESC LIMIT 1`).get(target, target, target) as { phone?: string | null } | undefined;
+      const identity = this.db.prepare(`
+        SELECT phone FROM wa_identities
+        WHERE account_id=? AND (canonical_jid=? OR lid=? OR pn_jid=?)
+        ORDER BY last_seen_at DESC LIMIT 1
+      `).get(accountId, target, target, target) as { phone?: string | null } | undefined;
       phone = identity?.phone ?? undefined;
     }
     if (!phone) return { blocked: false, friendly: false };
-    const row = this.db.prepare(`SELECT is_blocked, is_friendly FROM contacts WHERE phone=?`).get(phone) as any;
+    const row = this.db.prepare(`SELECT is_blocked,is_friendly FROM contacts WHERE phone=?`).get(phone) as any;
     return { blocked: Boolean(row?.is_blocked), friendly: Boolean(row?.is_friendly) };
   }
 
