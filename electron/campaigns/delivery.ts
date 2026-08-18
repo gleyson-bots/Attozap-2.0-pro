@@ -95,6 +95,22 @@ export function recordCampaignDelivery(db: AttozapDatabase, input: {
   db.prepare(`UPDATE campaign_recipients SET message_id=? WHERE id=?`).run(input.messageId, input.recipientId);
 }
 
+export function recordCampaignDeliveryFailure(db: AttozapDatabase, input: {
+  campaignId: string;
+  recipientId: number;
+  accountId: string;
+  error: string;
+  messageType?: string;
+}) {
+  const messageId = `local-failure-${crypto.randomUUID()}`;
+  db.prepare(`
+    INSERT INTO campaign_deliveries
+      (campaign_id,recipient_id,account_id,message_id,message_type,status,error,updated_at)
+    VALUES (?,?,?,?,?,'failed',?,CURRENT_TIMESTAMP)
+  `).run(input.campaignId, input.recipientId, input.accountId, messageId, input.messageType ?? 'error', input.error);
+  return messageId;
+}
+
 export function finalizeRecipientSubmission(db: AttozapDatabase, recipientId: number) {
   const row = db.prepare(`SELECT status FROM campaign_recipients WHERE id=? LIMIT 1`).get(recipientId) as { status?: string } | undefined;
   if (row?.status !== 'sending') return;
