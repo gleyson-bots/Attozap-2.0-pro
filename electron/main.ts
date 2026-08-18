@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from './database.js';
 import { applyRc3Migrations } from './rc3-migrations.js';
+import { applyDeliveryMigrations } from './delivery-migrations.js';
 import { AccountManager } from './messaging/account-manager.js';
 import { ChatService } from './messaging/chat-service.js';
 import { CampaignEngine } from './campaigns/engine.js';
@@ -72,8 +73,13 @@ app.whenReady().then(async () => {
 
   const dbPath = join(userData, 'attozap.sqlite3');
   const db = openDatabase(dbPath);
-  try { applyRc3Migrations(db); }
-  catch (error) { console.error('[startup:migrations]', error); }
+  try {
+    applyRc3Migrations(db);
+    applyDeliveryMigrations(db);
+  } catch (error) {
+    console.error('[startup:migrations]', error);
+    throw error;
+  }
 
   const accounts = new AccountManager(db, join(userData, 'sessions'));
   const chat = new ChatService(db, accounts);
