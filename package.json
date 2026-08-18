@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "ipc:check": "node tools/check-ipc-contract.mjs",
-    "build": "npm run ipc:check && tsc -b && vite build && tsc -p electron/tsconfig.json",
+    "delivery:check": "node tools/check-delivery-contract.mjs",
+    "build": "npm run ipc:check && npm run delivery:check && tsc -b && vite build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
     "desktop": "electron .",
     "typecheck": "tsc --noEmit",
