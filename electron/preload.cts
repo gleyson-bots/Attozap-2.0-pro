@@ -37,5 +37,5 @@ contextBridge.exposeInMainWorld('attozap', {
   diagnostics: { reportRendererError: (payload: any) => invoke('diagnostics:renderer-error', payload), resetUi: () => invoke('diagnostics:reset-ui'), logPath: () => invoke('diagnostics:log-path') },
   identities: { list: (accountId?: string, search = '') => invoke('identities:list', accountId, search), stats: () => invoke('identities:stats') },
   audit: { list: () => invoke('audit:list') },
-  messages: { onIncoming: (callback: Listener) => on('messages:incoming', callback), onStatus: (callback: Listener) => on('messages:status', callback) },
+  messages: { onIncoming: (callback: Listener) => on('messages:incoming', callback), onStatus: (callback: Listener) => on('messages:status', callback), onContact: (callback: Listener) => on('messages:contact', callback) },
 });
