@@ -10,6 +10,7 @@ export function registerChatIpc(chat: ChatService, license: LicenseService) {
 
   ipcMain.handle('webchat:list', (_event, accountId: string, search = '') => chat.listChats(accountId, search));
   ipcMain.handle('webchat:messages', (_event, accountId: string, remoteJid: string, limit = 250) => chat.listMessages(accountId, remoteJid, limit));
+  ipcMain.handle('webchat:message-status', (_event, accountId: string, messageId: string) => chat.messageStatus(accountId, messageId));
   ipcMain.handle('webchat:resolve', (_event, accountId: string, target: string) => { requireLicense(); return chat.resolveTarget(accountId, target); });
   ipcMain.handle('webchat:send-text', (_event, accountId: string, target: string, text: string) => { requireLicense(); return chat.sendText(accountId, target, text); });
   ipcMain.handle('webchat:send-media', (_event, accountId: string, target: string, type: 'image'|'video'|'document'|'audio'|'sticker', input: any) => {
