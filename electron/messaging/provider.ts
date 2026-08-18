@@ -124,6 +124,7 @@ export interface MessagingProvider {
   connect(events?: ProviderEvents): Promise<void>;
   disconnect(logout?: boolean): Promise<void>;
   setProxy?(proxyUrl?: string): void;
+  sendPresence?(remoteJid: string, state: 'composing' | 'paused'): Promise<void>;
   sendText(remoteJid: string, text: string): Promise<MessageResult>;
   sendImage(remoteJid: string, input: SendMediaInput): Promise<MessageResult>;
   sendVideo(remoteJid: string, input: SendMediaInput): Promise<MessageResult>;
