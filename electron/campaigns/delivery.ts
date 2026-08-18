@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import type { MessageDeliveryStatus } from '../messaging/provider.js';
 import { getCachedMessageStatus, isConfirmedDelivery, mergeDeliveryStatus, type StoredDeliveryStatus } from '../messaging/status.js';
@@ -45,18 +46,12 @@ function aggregateRecipientStatus(rows: Array<{ status?: string; error?: string 
 export function reconcileCampaignRecipient(db: AttozapDatabase, recipientId: number) {
   const recipient = db.prepare(`SELECT campaign_id,status FROM campaign_recipients WHERE id=? LIMIT 1`).get(recipientId) as { campaign_id?: string; status?: string } | undefined;
   if (!recipient?.campaign_id || recipient.status === 'skipped') return undefined;
-  const deliveries = db.prepare(`
-    SELECT status,error FROM campaign_deliveries WHERE recipient_id=? ORDER BY id ASC
-  `).all(recipientId) as Array<{ status?: string; error?: string | null }>;
+  const deliveries = db.prepare(`SELECT status,error FROM campaign_deliveries WHERE recipient_id=? ORDER BY id ASC`).all(recipientId) as Array<{ status?: string; error?: string | null }>;
   if (!deliveries.length) return recomputeCampaign(db, recipient.campaign_id);
 
   const aggregate = aggregateRecipientStatus(deliveries);
   const sentAtSql = isConfirmedDelivery(aggregate.status) ? `COALESCE(sent_at,CURRENT_TIMESTAMP)` : `sent_at`;
-  db.prepare(`
-    UPDATE campaign_recipients
-    SET status=?,error=?,sent_at=${sentAtSql}
-    WHERE id=?
-  `).run(aggregate.status, aggregate.error ?? null, recipientId);
+  db.prepare(`UPDATE campaign_recipients SET status=?,error=?,sent_at=${sentAtSql} WHERE id=?`).run(aggregate.status, aggregate.error ?? null, recipientId);
   return recomputeCampaign(db, recipient.campaign_id);
 }
 
@@ -102,7 +97,7 @@ export function recordCampaignDeliveryFailure(db: AttozapDatabase, input: {
   error: string;
   messageType?: string;
 }) {
-  const messageId = `local-failure-${crypto.randomUUID()}`;
+  const messageId = `local-failure-${randomUUID()}`;
   db.prepare(`
     INSERT INTO campaign_deliveries
       (campaign_id,recipient_id,account_id,message_id,message_type,status,error,updated_at)
