@@ -12,7 +12,8 @@ export function registerWarmupIpc(warmup: WarmupEngine, license: LicenseService)
   ipcMain.handle('warmup:create', (_event, payload: WarmupProfileInput) => { requireLicense(); return warmup.create(payload); });
   ipcMain.handle('warmup:update', (_event, id: string, payload: Partial<WarmupProfileInput>) => { requireLicense(); return warmup.update(id, payload); });
   ipcMain.handle('warmup:remove', (_event, id: string) => warmup.remove(id));
-  ipcMain.handle('warmup:start', (_event, id: string) => { requireLicense(); return warmup.start(id); });
+  ipcMain.handle('warmup:start', async (_event, id: string) => { requireLicense(); return warmup.start(id); });
   ipcMain.handle('warmup:stop', (_event, id: string) => warmup.stop(id));
   ipcMain.handle('warmup:logs', (_event, id?: string, limit = 500) => warmup.logs(id, limit));
+  ipcMain.handle('warmup:runtime', (_event, id?: string) => warmup.runtimeStatus(id));
 }
