@@ -8,6 +8,7 @@ const handlerFiles = [
   'electron/desktop-ipc.ts',
   'electron/chat-ipc.ts',
   'electron/warmup-ipc.ts',
+  'electron/campaign-monitor-ipc.ts',
   'electron/browser-hub-ipc.ts',
   'electron/recruiting-ipc.ts',
   'electron/system-ipc.ts',
