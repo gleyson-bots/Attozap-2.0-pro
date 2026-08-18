@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Activity, BarChart3, Bot, BriefcaseBusiness, CalendarClock, ChevronRight, ContactRound, FileSearch, FileText, Fingerprint, Flame, Gauge, Group,
-  HeartPulse, KeyRound, LayoutDashboard, Menu, MessageCircle, MessageSquareText, Moon, PanelLeftClose, PanelLeftOpen, Search, Send, Settings,
+  HeartPulse, KeyRound, LayoutDashboard, ListChecks, Menu, MessageCircle, MessageSquareText, Moon, PanelLeftClose, PanelLeftOpen, Search, Send, Settings,
   Sun, Users, Wifi, Wrench, X,
 } from 'lucide-react';
 import attoLogo from './assets/attozap-logo.svg';
 import { AccountsPage } from './pages/AccountsPage';
 import { SenderPage } from './pages/SenderPage';
+import { CampaignCenterPage } from './pages/CampaignCenterPage';
 import { NumberFilterPage } from './pages/ToolsPages';
 import { ContactsPage } from './pages/ContactsPage';
 import { ContactGrabberPage } from './pages/ContactGrabberPage';
@@ -27,14 +28,14 @@ import { IdentityCenterPage } from './pages/IdentityCenterPage';
 import { campaignPercent, toLocalDateTime } from './lib';
 
 type UiMode = 'basic'|'advanced';
-type View = 'dashboard'|'sender'|'groupSender'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'recruiting'|'health'|'identities'|'license'|'settings';
+type View = 'dashboard'|'sender'|'groupSender'|'campaignCenter'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'recruiting'|'health'|'identities'|'license'|'settings';
 type NavItem = { id: View; label: string; icon: any; advanced?: boolean };
 
 const sections: Array<{ label: string; items: NavItem[] }> = [
   { label: 'INÍCIO', items: [{ id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard }] },
   { label: 'ENVIOS', items: [
     { id: 'sender', label: 'Contact Sender', icon: Send }, { id: 'groupSender', label: 'Group Sender', icon: Group },
-    { id: 'scheduler', label: 'Agendamentos', icon: CalendarClock }, { id: 'templates', label: 'Templates', icon: FileText }, { id: 'pollReport', label: 'Poll Report', icon: BarChart3, advanced: true },
+    { id: 'campaignCenter', label: 'Campaign Center', icon: ListChecks }, { id: 'scheduler', label: 'Agendamentos', icon: CalendarClock }, { id: 'templates', label: 'Templates', icon: FileText }, { id: 'pollReport', label: 'Poll Report', icon: BarChart3, advanced: true },
   ] },
   { label: 'WHATSAPP', items: [
     { id: 'accounts', label: 'Contas', icon: Wifi }, { id: 'webchat', label: 'WebChat', icon: MessageCircle },
@@ -95,9 +96,6 @@ export default function App() {
     if (mode === 'basic' && current?.advanced) setView('dashboard');
   }
 
-  // This is intentionally not a hook. The app returns the StartupGate before this
-  // section while the license/tutorial gate is active, so using useMemo here would
-  // change the number of hooks between renders and trigger React error #310.
   const visibleSections = sections
     .map(section => ({ ...section, items: section.items.filter(item => uiMode === 'advanced' || !item.advanced) }))
     .filter(section => section.items.length);
@@ -124,6 +122,7 @@ export default function App() {
         {view === 'dashboard' && <Dashboard accounts={accounts} campaigns={campaigns} go={setView} uiMode={uiMode}/>} 
         {view === 'sender' && <SenderPage mode="contact" accounts={accounts} campaigns={campaigns} reloadCampaigns={reloadCampaigns}/>} 
         {view === 'groupSender' && <SenderPage mode="group" accounts={accounts} campaigns={campaigns} reloadCampaigns={reloadCampaigns}/>} 
+        {view === 'campaignCenter' && <CampaignCenterPage campaigns={campaigns} accounts={accounts} reloadCampaigns={reloadCampaigns}/>} 
         {view === 'scheduler' && <SchedulerPage campaigns={campaigns}/>} {view === 'templates' && <TemplatesPage/>} {view === 'pollReport' && <PollReportPage accounts={accounts}/>} 
         {view === 'accounts' && <AccountsPage accounts={accounts} reload={reloadAccounts}/>} {view === 'webchat' && <WebChatPage accounts={accounts} reloadAccounts={reloadAccounts}/>} 
         {view === 'contacts' && <ContactsPage/>} {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>} 
@@ -143,10 +142,10 @@ function Dashboard({ accounts, campaigns, go, uiMode }: { accounts: any[]; campa
   const active = campaigns.filter(campaign => ['running', 'paused', 'scheduled'].includes(campaign.status));
   const rate = totalSent + totalFailed ? Math.round(totalSent / (totalSent + totalFailed) * 1000) / 10 : 100;
   return <div className="page-stack">
-    <section className="dashboard-hero"><div><span className="kicker">WASENDER DESKTOP</span><h2>Envie, converse e organize sem complicação.</h2><p>Sender, WebChat, grupos, filtros e automações em uma interface desktop local.</p><div className="hero-actions"><button className="button primary big" onClick={() => go('sender')}><Send size={18}/> Novo envio</button><button className="button ghost big" onClick={() => go('webchat')}><MessageCircle size={18}/> Abrir WebChat</button><button className="button ghost big" onClick={() => go('health')}><HeartPulse size={18}/> Health Center</button></div></div><div className="hero-visual"><img src={attoLogo} alt="ATTOZAP Bot"/><span>{online ? 'Motor conectado' : 'Aguardando conexão'}</span><b>{online} / {accounts.length}</b><small>contas online</small></div></section>
+    <section className="dashboard-hero"><div><span className="kicker">WASENDER DESKTOP</span><h2>Envie, converse e organize sem complicação.</h2><p>Sender, WebChat, grupos, filtros e automações em uma interface desktop local.</p><div className="hero-actions"><button className="button primary big" onClick={() => go('sender')}><Send size={18}/> Novo envio</button><button className="button ghost big" onClick={() => go('webchat')}><MessageCircle size={18}/> Abrir WebChat</button><button className="button ghost big" onClick={() => go('campaignCenter')}><ListChecks size={18}/> Campaign Center</button></div></div><div className="hero-visual"><img src={attoLogo} alt="ATTOZAP Bot"/><span>{online ? 'Motor conectado' : 'Aguardando conexão'}</span><b>{online} / {accounts.length}</b><small>contas online</small></div></section>
     <section className="metric-grid"><Metric icon={Wifi} label="Contas online" value={`${online}/${accounts.length}`} sub="Sessões persistentes"/><Metric icon={Send} label="Enviadas" value={totalSent.toLocaleString('pt-BR')} sub="Todas as campanhas"/><Metric icon={Gauge} label="Taxa de sucesso" value={`${rate}%`} sub={`${totalFailed} falhas registradas`}/><Metric icon={Activity} label="Em andamento" value={String(active.length)} sub="Rodando, pausadas ou agendadas"/></section>
-    <div className="dashboard-grid"><section className="card"><div className="card-head"><div><h3>Campanhas recentes</h3><p>Últimos envios criados</p></div><button className="text-button" onClick={() => go('sender')}>Abrir sender →</button></div><div className="dash-campaigns">{campaigns.slice(0, 6).map(campaign => <div key={campaign.id}><div className="grow"><b>{campaign.name}</b><span>{campaign.sent}/{campaign.total} enviados · {toLocalDateTime(campaign.created_at)}</span></div><div className="mini-progress"><i style={{ width: `${campaignPercent(campaign)}%` }}/></div><span className={`status-chip ${campaign.status}`}>{campaign.status}</span></div>)}{!campaigns.length && <Empty text="Crie sua primeira campanha no Contact Sender."/>}</div></section><section className="card"><div className="card-head"><div><h3>Contas</h3><p>Status atual das sessões</p></div><button className="text-button" onClick={() => go('accounts')}>Gerenciar →</button></div><div className="dash-accounts">{accounts.map(account => <div key={account.id}><span className={`wa-avatar ${account.status === 'connected' ? 'online' : ''}`}><Wifi size={15}/></span><div className="grow"><b>{account.name}</b><small>{account.phone ? `+${account.phone}` : 'Sem número vinculado'}</small></div><span className={`status-chip ${account.status}`}>{account.status}</span></div>)}{!accounts.length && <Empty text="Adicione uma conta para começar."/>}</div></section></div>
-    <section className="quick-tools"><button onClick={() => go('webchat')}><MessageCircle size={19}/><span><b>WebChat</b><small>Conversa direta + mídia</small></span></button><button onClick={() => go('groups')}><Users size={19}/><span><b>Group Tools</b><small>Membros e convites</small></span></button><button onClick={() => go('warmup')}><Flame size={19}/><span><b>Aquecimento</b><small>Cadência controlada</small></span></button><button onClick={() => go('autoReply')}><Bot size={19}/><span><b>Auto Reply</b><small>Respostas automáticas</small></span></button><button onClick={() => go('health')}><HeartPulse size={19}/><span><b>Health Center</b><small>Banco, sockets e backups</small></span></button>{uiMode === 'advanced' && <><button onClick={() => go('extractors')}><Wrench size={19}/><span><b>Google Maps</b><small>Empresas e contatos</small></span></button><button onClick={() => go('numberFilter')}><FileSearch size={19}/><span><b>Number Filter</b><small>Validar números</small></span></button><button onClick={() => go('identities')}><Fingerprint size={19}/><span><b>JID / LID</b><small>Identidades resolvidas</small></span></button></>}</section>
+    <div className="dashboard-grid"><section className="card"><div className="card-head"><div><h3>Campanhas recentes</h3><p>Últimos envios criados</p></div><button className="text-button" onClick={() => go('campaignCenter')}>Acompanhar →</button></div><div className="dash-campaigns">{campaigns.slice(0, 6).map(campaign => <div key={campaign.id}><div className="grow"><b>{campaign.name}</b><span>{campaign.sent}/{campaign.total} enviados · {toLocalDateTime(campaign.created_at)}</span></div><div className="mini-progress"><i style={{ width: `${campaignPercent(campaign)}%` }}/></div><span className={`status-chip ${campaign.status}`}>{campaign.status}</span></div>)}{!campaigns.length && <Empty text="Crie sua primeira campanha no Contact Sender."/>}</div></section><section className="card"><div className="card-head"><div><h3>Contas</h3><p>Status atual das sessões</p></div><button className="text-button" onClick={() => go('accounts')}>Gerenciar →</button></div><div className="dash-accounts">{accounts.map(account => <div key={account.id}><span className={`wa-avatar ${account.status === 'connected' ? 'online' : ''}`}><Wifi size={15}/></span><div className="grow"><b>{account.name}</b><small>{account.phone ? `+${account.phone}` : 'Sem número vinculado'}</small></div><span className={`status-chip ${account.status}`}>{account.status}</span></div>)}{!accounts.length && <Empty text="Adicione uma conta para começar."/>}</div></section></div>
+    <section className="quick-tools"><button onClick={() => go('webchat')}><MessageCircle size={19}/><span><b>WebChat</b><small>Conversa direta + mídia</small></span></button><button onClick={() => go('campaignCenter')}><ListChecks size={19}/><span><b>Campaign Center</b><small>Stats e countdown em tempo real</small></span></button><button onClick={() => go('groups')}><Users size={19}/><span><b>Group Tools</b><small>Membros e convites</small></span></button><button onClick={() => go('warmup')}><Flame size={19}/><span><b>Aquecimento</b><small>Cadência controlada</small></span></button><button onClick={() => go('autoReply')}><Bot size={19}/><span><b>Auto Reply</b><small>Respostas automáticas</small></span></button><button onClick={() => go('health')}><HeartPulse size={19}/><span><b>Health Center</b><small>Banco, sockets e backups</small></span></button>{uiMode === 'advanced' && <><button onClick={() => go('extractors')}><Wrench size={19}/><span><b>Google Maps</b><small>Empresas e contatos</small></span></button><button onClick={() => go('numberFilter')}><FileSearch size={19}/><span><b>Number Filter</b><small>Validar números</small></span></button><button onClick={() => go('identities')}><Fingerprint size={19}/><span><b>JID / LID</b><small>Identidades resolvidas</small></span></button></>}</section>
   </div>;
 }
 function Metric({ icon: Icon, label, value, sub }: { icon: any; label: string; value: string; sub: string }) { return <article className="metric-card"><div className="metric-icon"><Icon size={19}/></div><span>{label}</span><b>{value}</b><small>{sub}</small></article>; }
