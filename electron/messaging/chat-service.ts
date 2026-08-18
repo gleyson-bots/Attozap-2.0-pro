@@ -226,26 +226,36 @@ export class ChatService {
   }
 
   private log(id: string, accountId: string, remoteJid: string, type: string, text: string, status: StoredDeliveryStatus, error?: string, mediaPath?: string, fileName?: string, mimetype?: string, metadata?: unknown) {
-    const existing = this.db.prepare(`SELECT status,created_at,error FROM message_log WHERE account_id=? AND id=? LIMIT 1`).get(accountId, id) as { status?: string; created_at?: string; error?: string | null } | undefined;
-    const cached = getCachedMessageStatus(this.db, accountId, id);
-    let finalStatus: StoredDeliveryStatus = status;
-    let finalError = error;
-
-    if (status === 'pending' && cached) {
-      finalStatus = cached.status;
-      finalError = cached.status === 'failed' ? (cached.error ?? error) : undefined;
-    }
+    const existing = this.db.prepare(`
+      SELECT status,created_at,error FROM message_log
+      WHERE account_id=? AND id=? LIMIT 1
+    `).get(accountId, id) as { status?: string; created_at?: string; error?: string | null } | undefined;
+    const cached = status === 'pending' ? getCachedMessageStatus(this.db, accountId, id) : undefined;
+    let finalStatus: StoredDeliveryStatus = cached?.status ?? status;
+    let finalError = finalStatus === 'failed' ? (cached?.error ?? error ?? 'WhatsApp rejeitou a mensagem') : undefined;
     if (existing?.status && status === 'pending') {
       finalStatus = mergeDeliveryStatus(existing.status, finalStatus);
       if (finalStatus === 'failed') finalError = finalError ?? existing.error ?? 'WhatsApp rejeitou a mensagem';
     }
+    const errorValue = finalStatus === 'failed' ? finalError ?? 'WhatsApp rejeitou a mensagem' : null;
+    const metadataJson = JSON.stringify(metadata ?? {});
 
-    const createdAt = existing?.created_at ?? new Date().toISOString();
+    if (existing) {
+      this.db.prepare(`
+        UPDATE message_log SET
+          remote_jid=?, direction='out', message_type=?, text=COALESCE(?,text), status=?, error=?,
+          media_path=COALESCE(media_path,?), file_name=COALESCE(file_name,?), mimetype=COALESCE(mimetype,?),
+          metadata_json=CASE WHEN metadata_json IS NULL OR metadata_json='{}' THEN ? ELSE metadata_json END
+        WHERE account_id=? AND id=?
+      `).run(remoteJid, type, text || null, finalStatus, errorValue, mediaPath ?? null, fileName ?? null, mimetype ?? null, metadataJson, accountId, id);
+      return;
+    }
+
     this.db.prepare(`
-      INSERT OR REPLACE INTO message_log
+      INSERT OR IGNORE INTO message_log
         (id, account_id, remote_jid, direction, message_type, text, status, error, media_path, file_name, mimetype, metadata_json, created_at)
       VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, accountId, remoteJid, type, text || null, finalStatus, finalStatus === 'failed' ? (finalError ?? 'WhatsApp rejeitou a mensagem') : null, mediaPath ?? null, fileName ?? null, mimetype ?? null, JSON.stringify(metadata ?? {}), createdAt);
+    `).run(id, accountId, remoteJid, type, text || null, finalStatus, errorValue, mediaPath ?? null, fileName ?? null, mimetype ?? null, metadataJson, new Date().toISOString());
   }
 
   private async touchChat(accountId: string, remoteJid: string) {
@@ -256,11 +266,14 @@ export class ChatService {
     const existing = this.db.prepare(`SELECT jid FROM chat_cache WHERE account_id=? AND (jid=? OR lid=? OR pn_jid=?) LIMIT 1`).get(accountId, canonical, canonical, canonical) as { jid?: string } | undefined;
     const now = new Date().toISOString();
     if (existing?.jid) {
-      this.db.prepare(`UPDATE chat_cache SET message_count=message_count+1,last_message_at=?,profile_url=COALESCE(?,profile_url),lid=COALESCE(?,lid),pn_jid=COALESCE(?,pn_jid),phone=COALESCE(?,phone) WHERE account_id=? AND jid=?`).run(now, profileUrl ?? null, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, accountId, existing.jid);
+      this.db.prepare(`
+        UPDATE chat_cache SET last_message_at=?,profile_url=COALESCE(?,profile_url),lid=COALESCE(?,lid),pn_jid=COALESCE(?,pn_jid),phone=COALESCE(?,phone)
+        WHERE account_id=? AND jid=?
+      `).run(now, profileUrl ?? null, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, accountId, existing.jid);
     } else {
       this.db.prepare(`
         INSERT INTO chat_cache (account_id,jid,lid,pn_jid,phone,name,is_group,message_count,first_message_at,last_message_at,profile_url)
-        VALUES (?,?,?,?,?,NULL,?,1,?,?,?)
+        VALUES (?,?,?,?,?,NULL,?,0,?,?,?)
       `).run(accountId, canonical, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, canonical.endsWith('@g.us') ? 1 : 0, now, now, profileUrl ?? null);
     }
   }
