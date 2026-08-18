@@ -112,10 +112,14 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     try {
       const data = await window.attozap.webchat.list(accountId, search);
       setChats(data);
-      if (selected) {
-        const fresh = data.find((item: any) => sameIdentity(item, selected));
-        if (fresh) setSelected(fresh);
-      }
+      // Resolve against the latest selected state rather than the value captured when
+      // this async request started. This prevents a refresh from restoring the old
+      // conversation after a new-target send has already selected another identity.
+      setSelected(current => {
+        if (!current) return current;
+        const fresh = data.find((item: any) => sameIdentity(item, current));
+        return fresh ?? current;
+      });
       setError('');
     } catch (e: any) { setError(e?.message ?? String(e)); }
   }
@@ -163,7 +167,8 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     });
     const offStatus = window.attozap.messages.onStatus((payload: any) => {
       if (payload?.accountId !== accountId || !payload?.id) return;
-      setMessages(current => orderMessages(current.map(message => message.id === payload.id ? { ...message, status: payload.status } : message)));
+      setMessages(current => orderMessages(current.map(message => message.id === payload.id ? { ...message, status: payload.status, error: payload.status === 'failed' ? (payload.error || message.error) : undefined } : message)));
+      if (payload.status === 'failed') setError(payload.error || 'O WhatsApp rejeitou a mensagem.');
     });
     const offProfile = window.attozap.messages.onProfile?.((payload: any) => {
       if (payload?.accountId !== accountId) return;
