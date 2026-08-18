@@ -1,30 +1,43 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, FileAudio, FileText, Image, MapPin, Pause, Play, Plus, Send, ShieldCheck, Square, Sticker, TestTube2, Trash2, Users, Video } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileAudio, FileText, Gauge, Image, MapPin, Pause, Play, Plus, Send, ShieldCheck, Square, Sticker, TestTube2, Trash2, Users, Video } from 'lucide-react';
 import { campaignPercent, parseRecipients } from '../lib';
 
 type Mode = 'contact' | 'group';
 type MessageMode = 'all' | 'rotate';
+type CadenceProfile = 'light'|'moderate'|'extreme'|'custom';
+
+const cadenceProfiles: Record<CadenceProfile, { label: string; description: string; min: number; max: number; switchAfter: number }> = {
+  light: { label: 'Leve', description: 'Cadência espaçada para operações pequenas.', min: 45_000, max: 90_000, switchAfter: 10 },
+  moderate: { label: 'Moderado', description: 'Equilíbrio entre velocidade e intervalo.', min: 20_000, max: 45_000, switchAfter: 8 },
+  extreme: { label: 'Extremo', description: 'Cadência curta com aviso e proteções mantidas.', min: 8_000, max: 18_000, switchAfter: 5 },
+  custom: { label: 'Personalizado', description: 'Defina manualmente os intervalos.', min: 20_000, max: 45_000, switchAfter: 8 },
+};
 
 function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
 function previewTemplate(template: string, recipient: any) {
-  const values: Record<string,string> = { name: recipient?.name ?? '', phone: recipient?.variables?.phone ?? '', jid: recipient?.target ?? '', ...(recipient?.variables ?? {}) };
+  const hour = new Date().getHours();
+  const saudacao = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
+  const firstName = String(recipient?.name ?? '').trim().split(/\s+/)[0] || '';
+  const values: Record<string,string> = { name: recipient?.name ?? '', primeiro_nome: firstName, saudacao, phone: recipient?.variables?.phone ?? '', jid: recipient?.target ?? '', ...(recipient?.variables ?? {}) };
   return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m,key) => values[key] ?? '').replace(/\{([\w.-]+)\}/g, (_m,key) => values[key] ?? '');
 }
+function seconds(ms: number) { return Math.max(0, Math.round(ms / 1000)); }
 
 export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mode: Mode; accounts: any[]; campaigns: any[]; reloadCampaigns: () => Promise<void> }) {
   const connected = accounts.filter(account => account.status === 'connected');
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [name, setName] = useState(mode === 'group' ? 'Envio para grupos' : 'Nova campanha');
-  const [messages, setMessages] = useState<string[]>(['Olá {name}!']);
+  const [messages, setMessages] = useState<string[]>(['Olá {primeiro_nome}!']);
   const [messageMode, setMessageMode] = useState<MessageMode>('all');
+  const [profile, setProfile] = useState<CadenceProfile>('moderate');
   const [rawRecipients, setRawRecipients] = useState('');
   const [groups, setGroups] = useState<any[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [parts, setParts] = useState<any[]>([]);
   const [fileType, setFileType] = useState<'image'|'video'|'document'|'audio'|'sticker'>('image');
-  const [minDelay, setMinDelay] = useState(1500);
-  const [maxDelay, setMaxDelay] = useState(3000);
-  const [switchAfter, setSwitchAfter] = useState(10);
+  const [minDelay, setMinDelay] = useState(cadenceProfiles.moderate.min);
+  const [maxDelay, setMaxDelay] = useState(cadenceProfiles.moderate.max);
+  const [switchAfter, setSwitchAfter] = useState(cadenceProfiles.moderate.switchAfter);
   const [filterBefore, setFilterBefore] = useState(false);
   const [friendlyOnly, setFriendlyOnly] = useState(false);
   const [error, setError] = useState('');
@@ -41,6 +54,12 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
       return valid.length ? valid : connected[0]?.id ? [connected[0].id] : [];
     });
   }, [accounts]);
+
+  useEffect(() => {
+    if (profile === 'custom') return;
+    const preset = cadenceProfiles[profile];
+    setMinDelay(preset.min); setMaxDelay(preset.max); setSwitchAfter(preset.switchAfter);
+  }, [profile]);
 
   useEffect(() => {
     const off = window.attozap.campaigns.onProgress(() => void reloadCampaigns());
@@ -66,17 +85,9 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
 
   const nonEmptyMessages = messages.map(value => value.trim()).filter(Boolean);
 
-  function toggleAccount(id: string, checked: boolean) {
-    setSelectedAccountIds(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id));
-  }
-
-  function updateMessage(index: number, value: string) {
-    setMessages(current => current.map((item, i) => i === index ? value : item));
-  }
-
-  function addVariable(index: number, variable: string) {
-    updateMessage(index, `${messages[index]} ${variable}`);
-  }
+  function toggleAccount(id: string, checked: boolean) { setSelectedAccountIds(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id)); }
+  function updateMessage(index: number, value: string) { setMessages(current => current.map((item, i) => i === index ? value : item)); }
+  function addVariable(index: number, variable: string) { updateMessage(index, `${messages[index]} ${variable}`); }
 
   async function addFile() {
     const paths = await window.attozap.files.pick({ multiple: true });
@@ -102,33 +113,41 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
     if (!accountId) { setError('Conecte e selecione pelo menos uma conta do WhatsApp.'); return; }
     if (!recipients.length) { setError(mode === 'contact' ? 'Cole pelo menos um número.' : 'Selecione pelo menos um grupo.'); return; }
     if (!nonEmptyMessages.length && !parts.length) { setError('Adicione uma mensagem ou anexo.'); return; }
+    if (maxDelay < minDelay) { setError('O delay máximo precisa ser maior ou igual ao mínimo.'); return; }
     setCreating(true); setError(''); setTestStatus('');
     try {
       const campaign = await window.attozap.campaigns.create({
         accountId, accountIds: selectedAccountIds, name, targetType: mode, messageTemplates: nonEmptyMessages, messageMode, recipients, parts,
-        options: { minDelayMs: minDelay, maxDelayMs: maxDelay, switchAccountAfterRecipients: selectedAccountIds.length > 1 ? switchAfter : 0, filterBeforeSend: mode === 'contact' && filterBefore, skipBlocked: true, friendlyOnly: mode === 'contact' && friendlyOnly },
+        options: { profile, minDelayMs: minDelay, maxDelayMs: maxDelay, switchAccountAfterRecipients: selectedAccountIds.length > 1 ? switchAfter : 0, filterBeforeSend: mode === 'contact' && filterBefore, skipBlocked: true, friendlyOnly: mode === 'contact' && friendlyOnly },
       });
       await reloadCampaigns();
       await window.attozap.campaigns.start(campaign.id);
-      setTestStatus(`Campanha ${campaign.name} aceita pela fila. Falhas por destinatário aparecerão aqui e no histórico do WebChat.`);
+      setTestStatus(`Campanha ${campaign.name} aceita pela fila. Acompanhe contagem regressiva e status no Campaign Center.`);
       setTimeout(() => void reloadCampaigns(), 500);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setCreating(false); }
   }
 
-  const relevantCampaigns = campaigns.filter(item => item.target_type === mode).slice(0, 20);
+  const relevantCampaigns = campaigns.filter(item => item.target_type === mode).slice(0, 12);
 
   return <div className="page-stack">
-    <div className="page-head"><div><span className="kicker">{mode === 'contact' ? 'CONTACT SENDER' : 'GROUP SENDER'}</span><h2>{mode === 'contact' ? 'Envio para contatos' : 'Envio para grupos'}</h2><p>Campanhas com múltiplas mensagens, contas, fila, anexos e resolução JID/LID.</p></div><span className="safety-pill"><ShieldCheck size={15}/> Blocklist sempre respeitada</span></div>
+    <div className="page-head"><div><span className="kicker">{mode === 'contact' ? 'CONTACT SENDER' : 'GROUP SENDER'}</span><h2>{mode === 'contact' ? 'Envio para contatos' : 'Envio para grupos'}</h2><p>Campanhas com perfis de cadência, múltiplas mensagens, contas, mídia, documentos e resolução JID/LID.</p></div><span className="safety-pill"><ShieldCheck size={15}/> Blocklist sempre respeitada</span></div>
     {error && <div className="notice error">{error}</div>}
     {testStatus && <div className="notice success"><CheckCircle2 size={15}/> {testStatus}</div>}
+    {profile === 'extreme' && <div className="notice warning"><AlertTriangle size={16}/><div><b>Perfil Extremo</b><span>Usa intervalos menores. Erros, blocklist, contas desconectadas e limites continuam sendo respeitados. Use apenas em destinatários que esperam seu contato.</span></div></div>}
+
+    <section className="card cadence-card">
+      <div className="section-title"><div><span><Gauge size={16}/></span><div><h3>Perfil de cadência</h3><p>Todos os perfis usam tempo aleatório dentro da faixa escolhida.</p></div></div></div>
+      <div className="cadence-profiles">{(Object.keys(cadenceProfiles) as CadenceProfile[]).map(key => { const item = cadenceProfiles[key]; return <button key={key} className={profile === key ? 'active' : ''} onClick={() => setProfile(key)}><b>{item.label}</b><span>{key === 'custom' ? 'Manual' : `${seconds(item.min)}–${seconds(item.max)}s`}</span><small>{item.description}</small></button>; })}</div>
+      <div className="delay-box"><div className="field"><label>Random time mínimo (s)</label><input type="number" min="1" value={seconds(minDelay)} disabled={profile !== 'custom'} onChange={e => setMinDelay(Math.max(1000, Number(e.target.value) * 1000))}/></div><div className="field"><label>Random time máximo (s)</label><input type="number" min="1" value={seconds(maxDelay)} disabled={profile !== 'custom'} onChange={e => setMaxDelay(Math.max(1000, Number(e.target.value) * 1000))}/></div></div>
+    </section>
 
     <div className="sender-layout">
       <section className="card composer-card">
-        <div className="section-title"><div><span>01</span><div><h3>Mensagens</h3><p>Envie todas ou rotacione uma mensagem por destinatário</p></div></div></div>
-        <div className="form-grid two"><div className="field"><label>Nome da campanha</label><input value={name} onChange={e => setName(e.target.value)}/></div><div className="field"><label>Modo com múltiplas mensagens</label><select value={messageMode} onChange={e => setMessageMode(e.target.value as MessageMode)}><option value="all">Enviar todas para cada destinatário</option><option value="rotate">Rotacionar aleatoriamente</option></select></div></div>
-        <div className="message-variants">{messages.map((message, index) => <div className="message-variant" key={index}><div className="message-variant-head"><b>Mensagem {index + 1}</b>{messages.length > 1 && <button className="icon-button danger" onClick={() => setMessages(current => current.filter((_, i) => i !== index))}><Trash2 size={14}/></button>}</div><textarea className="message-box" value={message} onChange={e => updateMessage(index, e.target.value)} placeholder="Digite a mensagem..."/><div className="variable-row"><span>Variáveis:</span><button onClick={() => addVariable(index, '{name}')}>{'{name}'}</button><button onClick={() => addVariable(index, '{phone}')}>{'{phone}'}</button><small>Também aceita {'{{campo}}'} das colunas importadas.</small></div></div>)}<button className="button ghost" onClick={() => setMessages(current => [...current, ''])}><Plus size={15}/> Adicionar outra mensagem</button></div>
-        <div className="attachment-builder"><div className="field compact"><label>Tipo de anexo</label><select value={fileType} onChange={e => setFileType(e.target.value as any)}><option value="image">Imagem</option><option value="video">Vídeo</option><option value="document">Documento</option><option value="audio">Áudio / PTT</option><option value="sticker">Sticker</option></select></div><button className="button ghost" onClick={() => void addFile()}><Plus size={16}/> Adicionar arquivo</button></div>
+        <div className="section-title"><div><span>01</span><div><h3>Mensagens & mídia</h3><p>Envie todas as mensagens ou use variações rotativas por destinatário.</p></div></div></div>
+        <div className="form-grid two"><div className="field"><label>Nome da campanha</label><input value={name} onChange={e => setName(e.target.value)}/></div><div className="field"><label>Variações de mensagem</label><select value={messageMode} onChange={e => setMessageMode(e.target.value as MessageMode)}><option value="all">Enviar todas para cada destinatário</option><option value="rotate">Escolher uma variação por destinatário</option></select></div></div>
+        <div className="message-variants">{messages.map((message, index) => <div className="message-variant" key={index}><div className="message-variant-head"><b>Mensagem {index + 1}</b>{messages.length > 1 && <button className="icon-button danger" onClick={() => setMessages(current => current.filter((_, i) => i !== index))}><Trash2 size={14}/></button>}</div><textarea className="message-box" value={message} onChange={e => updateMessage(index, e.target.value)} placeholder="Digite a mensagem..."/><div className="variable-row"><span>Variáveis:</span><button onClick={() => addVariable(index, '{name}')}>{'{name}'}</button><button onClick={() => addVariable(index, '{primeiro_nome}')}>{'{primeiro_nome}'}</button><button onClick={() => addVariable(index, '{saudacao}')}>{'{saudacao}'}</button><button onClick={() => addVariable(index, '{phone}')}>{'{phone}'}</button><small>Também aceita {'{{campo}}'} das colunas importadas.</small></div></div>)}<button className="button ghost" onClick={() => setMessages(current => [...current, ''])}><Plus size={15}/> Adicionar outra variação</button></div>
+        <div className="attachment-builder"><div className="field compact"><label>Tipo de mídia/anexo</label><select value={fileType} onChange={e => setFileType(e.target.value as any)}><option value="image">Imagem</option><option value="video">Vídeo</option><option value="document">Documento</option><option value="audio">Áudio / PTT</option><option value="sticker">Sticker</option></select></div><button className="button ghost" onClick={() => void addFile()}><Plus size={16}/> Adicionar arquivos</button></div>
         {!!parts.length && <div className="parts-list">{parts.map((part, index) => <div key={`${part.input?.path}-${index}`}><span className="part-icon">{part.type === 'image' ? <Image size={15}/> : part.type === 'video' ? <Video size={15}/> : part.type === 'audio' ? <FileAudio size={15}/> : part.type === 'sticker' ? <Sticker size={15}/> : <FileText size={15}/>}</span><span>{fileName(part.input.path)}</span><small>{part.type}</small><button onClick={() => setParts(current => current.filter((_, i) => i !== index))}>×</button></div>)}</div>}
         <details className="advanced"><summary>Adicionar localização, contato ou enquete</summary><AdvancedParts onAdd={part => setParts(current => [...current, part])}/></details>
       </section>
@@ -138,13 +157,12 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
         <div className="field"><label>Contas conectadas</label><div className="group-picker account-picker">{connected.map(account => <label key={account.id}><input type="checkbox" checked={selectedAccountIds.includes(account.id)} onChange={e => toggleAccount(account.id, e.target.checked)}/><span><b>{account.name}</b><small>{account.phone ? `+${account.phone}` : 'Conectada'}</small></span></label>)}{!connected.length && <div className="empty mini"><Users size={22}/><p>Conecte uma conta primeiro.</p></div>}</div></div>
         {selectedAccountIds.length > 1 && <div className="field"><label>Trocar de conta a cada X destinatários</label><input type="number" min="1" value={switchAfter} onChange={e => setSwitchAfter(Math.max(1, Number(e.target.value)))}/><small>As contas selecionadas são usadas em sequência.</small></div>}
         {mode === 'contact' ? <><div className="field"><label>Números / contatos</label><textarea className="recipients-box" value={rawRecipients} onChange={e => setRawRecipients(e.target.value)} placeholder={'5511999999999;Maria;cidade=São Paulo\n5511888888888;João;cidade=Campinas'}/><small>Formato: número;nome;campo=valor. Também aceita PN JID e LID.</small></div><label className="check-row"><input type="checkbox" checked={filterBefore} onChange={e => setFilterBefore(e.target.checked)}/><span><b>Filtrar números antes de enviar</b><small>Consulta todos os números antes da campanha.</small></span></label><label className="check-row"><input type="checkbox" checked={friendlyOnly} onChange={e => setFriendlyOnly(e.target.checked)}/><span><b>Somente Friendly List</b><small>Ignora contatos que não estejam marcados como amigáveis.</small></span></label></> : <div className="group-picker">{groups.length === 0 ? <div className="empty mini"><Users size={24}/><p>Sincronize os grupos na ferramenta de grupos.</p></div> : groups.map(group => { const id = group.group_id ?? group.id; return <label key={id}><input type="checkbox" checked={selectedGroups.includes(id)} onChange={e => setSelectedGroups(current => e.target.checked ? [...current, id] : current.filter(value => value !== id))}/><span><b>{group.subject}</b><small>{group.member_count ?? group.size ?? 0} membros</small></span></label>; })}</div>}
-        <div className="delay-box"><div className="field"><label>Delay mínimo (ms)</label><input type="number" min="500" value={minDelay} onChange={e => setMinDelay(Number(e.target.value))}/></div><div className="field"><label>Delay máximo (ms)</label><input type="number" min="500" value={maxDelay} onChange={e => setMaxDelay(Number(e.target.value))}/></div></div>
         <div className="sender-actions"><button className="button ghost big" disabled={testing || creating || !accountId || !recipients.length || !nonEmptyMessages.length} onClick={() => void testFirstRecipient()}><TestTube2 size={17}/>{testing ? 'Testando...' : 'Testar 1º destinatário'}</button><button className="button primary big" disabled={creating || !selectedAccountIds.length} onClick={() => void createAndStart()}><Send size={18}/>{creating ? 'Preparando...' : `Iniciar envio para ${recipients.length}`}</button></div>
         {!connected.length && <small className="warning-text">Conecte uma conta antes de iniciar uma campanha.</small>}
       </section>
     </div>
 
-    <section className="card campaigns-card"><div className="card-head"><div><h3>Campanhas recentes</h3><p>Acompanhe o andamento e controle a fila.</p></div></div><div className="campaign-list">{!relevantCampaigns.length && <div className="empty mini"><Send size={24}/><p>Nenhuma campanha criada ainda.</p></div>}{relevantCampaigns.map(campaign => <CampaignRow key={campaign.id} campaign={campaign} reload={reloadCampaigns}/>)}</div></section>
+    <section className="card campaigns-card"><div className="card-head"><div><h3>Campanhas recentes</h3><p>Resumo rápido. Para acompanhamento detalhado use o Campaign Center.</p></div></div><div className="campaign-list">{!relevantCampaigns.length && <div className="empty mini"><Send size={24}/><p>Nenhuma campanha criada ainda.</p></div>}{relevantCampaigns.map(campaign => <CampaignRow key={campaign.id} campaign={campaign} reload={reloadCampaigns}/>)}</div></section>
   </div>;
 }
 
