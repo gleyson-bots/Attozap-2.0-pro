@@ -3,6 +3,8 @@ name: Windows Portable Release
 on:
   push:
     branches: ["feat/foundation-v2", "main"]
+  pull_request:
+    branches: ["main"]
   workflow_dispatch:
 
 concurrency:
@@ -17,10 +19,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
       - name: Build application
         run: npm run build
+
+      - name: Verify compiled preload
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist-electron/preload.cjs')) { throw 'dist-electron/preload.cjs was not generated' }
+          if (-not (Test-Path 'dist-electron/main.js')) { throw 'dist-electron/main.js was not generated' }
+
       - name: Signing mode
         shell: pwsh
         env:
@@ -31,14 +42,20 @@ jobs:
           } else {
             Write-Warning "WIN_CSC_LINK is not configured. Build will be unsigned and may trigger Microsoft Defender SmartScreen."
           }
+
       - name: Build WASender portable
         run: npx electron-builder --win portable --x64 --publish never
         env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-      - name: Smoke test packaged renderer, actions and legacy-data reboot
+
+      - name: Smoke test unpacked renderer, actions and legacy-data reboot
         shell: pwsh
         run: |
+          function Stop-Attozap {
+            Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'ATTOZAP*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
           $exe = Join-Path $PWD 'release\win-unpacked\ATTOZAP WASender Pro.exe'
           if (-not (Test-Path $exe)) { throw "Unpacked Electron executable not found: $exe" }
 
@@ -51,7 +68,7 @@ jobs:
           } else {
             $interactionExit = $rendererExit
           }
-          taskkill /F /T /PID $proc.Id 2>$null | Out-Null
+          Stop-Attozap
           if ($rendererExit -ne 0) { exit $rendererExit }
           if ($interactionExit -ne 0) { exit $interactionExit }
 
@@ -65,9 +82,24 @@ jobs:
           } else {
             $migrationExit = $rebootRendererExit
           }
-          taskkill /F /T /PID $proc2.Id 2>$null | Out-Null
+          Stop-Attozap
           if ($rebootRendererExit -ne 0) { exit $rebootRendererExit }
           if ($migrationExit -ne 0) { exit $migrationExit }
+
+      - name: Smoke test exact WASender portable artifact
+        shell: pwsh
+        run: |
+          function Stop-Attozap {
+            Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'ATTOZAP*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+          $portable = Get-ChildItem release -Filter 'ATTOZAP-WASender-Pro-*.exe' | Select-Object -First 1
+          if (-not $portable) { throw 'WASender portable executable was not generated' }
+          Start-Process -FilePath $portable.FullName -ArgumentList '--remote-debugging-port=9225' | Out-Null
+          node tools/electron-smoke.mjs http://127.0.0.1:9225 release/portable-smoke.png
+          $exitCode = $LASTEXITCODE
+          Stop-Attozap
+          if ($exitCode -ne 0) { exit $exitCode }
+
       - name: Verify WASender output
         shell: pwsh
         env:
@@ -75,13 +107,16 @@ jobs:
         run: |
           $app = Get-ChildItem release -Filter 'ATTOZAP-WASender-Pro-*.exe' | Select-Object -First 1
           if (-not $app) { throw 'WASender portable executable was not generated' }
-          if (-not (Test-Path 'release/smoke.png')) { throw 'Packaged renderer smoke screenshot was not generated' }
-          if (-not (Test-Path 'release/migration-smoke.png')) { throw 'Migration reboot smoke screenshot was not generated' }
+          foreach ($shot in @('release/smoke.png','release/migration-smoke.png','release/portable-smoke.png')) {
+            if (-not (Test-Path $shot)) { throw "Smoke screenshot missing: $shot" }
+          }
           $signature = Get-AuthenticodeSignature $app.FullName
-          Write-Host "APP=$($app.FullName) SIZE=$($app.Length) SIGNATURE=$($signature.Status) PUBLISHER=$($signature.SignerCertificate.Subject)"
+          $hash = (Get-FileHash $app.FullName -Algorithm SHA256).Hash.ToLower()
+          Write-Host "APP=$($app.FullName) SIZE=$($app.Length) SHA256=$hash SIGNATURE=$($signature.Status) PUBLISHER=$($signature.SignerCertificate.Subject)"
           if ($env:SIGNING_EXPECTED -eq 'true' -and $signature.Status -ne 'Valid') {
             throw "Signing credentials were configured but the WASender signature is not valid: $($signature.Status)"
           }
+
       - name: Upload WASender portable
         uses: actions/upload-artifact@v4
         with:
@@ -89,18 +124,35 @@ jobs:
           path: release/ATTOZAP-WASender-Pro-*.exe
           if-no-files-found: error
           retention-days: 30
-      - name: Upload packaged UI smoke screenshots
+
+      - name: Upload WASender smoke screenshots
         uses: actions/upload-artifact@v4
         with:
           name: ATTOZAP-packaged-ui-smoke
           path: release/*smoke.png
           if-no-files-found: error
           retention-days: 30
+
       - name: Build KeyGen portable
         run: npx electron-builder --config keygen-builder.yml --win portable --x64 --publish never
         env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Smoke test exact KeyGen portable artifact
+        shell: pwsh
+        run: |
+          function Stop-Attozap {
+            Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'ATTOZAP*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+          $keygen = Get-ChildItem release-keygen -Filter 'ATTOZAP-KeyGen-*.exe' | Select-Object -First 1
+          if (-not $keygen) { throw 'KeyGen portable executable was not generated' }
+          Start-Process -FilePath $keygen.FullName -ArgumentList '--remote-debugging-port=9230' | Out-Null
+          node tools/keygen-smoke.mjs http://127.0.0.1:9230 release-keygen/keygen-smoke.png
+          $exitCode = $LASTEXITCODE
+          Stop-Attozap
+          if ($exitCode -ne 0) { exit $exitCode }
+
       - name: Verify KeyGen output
         shell: pwsh
         env:
@@ -108,15 +160,26 @@ jobs:
         run: |
           $keygen = Get-ChildItem release-keygen -Filter 'ATTOZAP-KeyGen-*.exe' | Select-Object -First 1
           if (-not $keygen) { throw 'KeyGen portable executable was not generated' }
+          if (-not (Test-Path 'release-keygen/keygen-smoke.png')) { throw 'KeyGen smoke screenshot was not generated' }
           $signature = Get-AuthenticodeSignature $keygen.FullName
-          Write-Host "KEYGEN=$($keygen.FullName) SIZE=$($keygen.Length) SIGNATURE=$($signature.Status) PUBLISHER=$($signature.SignerCertificate.Subject)"
+          $hash = (Get-FileHash $keygen.FullName -Algorithm SHA256).Hash.ToLower()
+          Write-Host "KEYGEN=$($keygen.FullName) SIZE=$($keygen.Length) SHA256=$hash SIGNATURE=$($signature.Status) PUBLISHER=$($signature.SignerCertificate.Subject)"
           if ($env:SIGNING_EXPECTED -eq 'true' -and $signature.Status -ne 'Valid') {
             throw "Signing credentials were configured but the KeyGen signature is not valid: $($signature.Status)"
           }
+
       - name: Upload KeyGen portable
         uses: actions/upload-artifact@v4
         with:
           name: ATTOZAP-KeyGen-portable
           path: release-keygen/ATTOZAP-KeyGen-*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload KeyGen smoke screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATTOZAP-KeyGen-smoke
+          path: release-keygen/keygen-smoke.png
           if-no-files-found: error
           retention-days: 30
