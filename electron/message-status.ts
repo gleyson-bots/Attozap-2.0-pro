@@ -19,4 +19,8 @@ export function registerMessageStatusTracking(input: { window: BrowserWindow; db
 
     if (!window.isDestroyed()) window.webContents.send('messages:status', payload);
   });
+
+  accounts.on('contact', payload => {
+    if (!window.isDestroyed()) window.webContents.send('messages:contact', payload);
+  });
 }
