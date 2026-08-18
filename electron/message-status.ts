@@ -32,7 +32,13 @@ export function registerMessageStatusTracking(input: { window: BrowserWindow; db
       }
     }
 
-    if (!window.isDestroyed()) window.webContents.send('messages:status', payload);
+    if (!window.isDestroyed()) {
+      window.webContents.send('messages:status', payload);
+      if (recipient?.campaign_id) {
+        const campaign = db.prepare(`SELECT * FROM campaigns WHERE id=? LIMIT 1`).get(recipient.campaign_id);
+        if (campaign) window.webContents.send('campaigns:progress', campaign);
+      }
+    }
   });
 
   accounts.on('contact', payload => {
