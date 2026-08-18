@@ -133,6 +133,7 @@ function extensionFor(type: IncomingMessageType, mimetype?: string, fileName?: s
 function deliveryStatus(raw: unknown): MessageDeliveryStatus | undefined {
   const value = Number(raw);
   if (!Number.isFinite(value)) return undefined;
+  if (value === 0) return 'failed';
   if (value >= 5) return 'played';
   if (value >= 4) return 'read';
   if (value >= 3) return 'delivered';
@@ -208,7 +209,14 @@ export class BaileysProvider implements MessagingProvider {
         if (key.id) {
           const rawStatus = Number((update as any).status);
           const status = deliveryStatus(rawStatus);
-          if (status) this.events.onMessageStatus?.({ id: key.id, remoteJid: key.remoteJid ?? undefined, participant: key.participant ?? undefined, status, rawStatus, timestamp: Date.now() });
+          if (status) {
+            const rawFailureCode = status === 'failed' ? (update as any).messageStubParameters?.[0] : undefined;
+            const failureCode = typeof rawFailureCode === 'undefined' || rawFailureCode === null ? '' : String(rawFailureCode).trim();
+            const error = status === 'failed'
+              ? failureCode ? `WhatsApp rejeitou a mensagem (código ${failureCode})` : 'WhatsApp rejeitou a mensagem'
+              : undefined;
+            this.events.onMessageStatus?.({ id: key.id, remoteJid: key.remoteJid ?? undefined, participant: key.participant ?? undefined, status, rawStatus, timestamp: Date.now(), error });
+          }
         }
         if (!key.id || !update.pollUpdates?.length) continue;
         const creation = this.pollCreations.get(key.id);
@@ -307,6 +315,16 @@ export class BaileysProvider implements MessagingProvider {
   }
   private requireSocket() { if (!this.socket || !this.connected) throw new Error('A conta do WhatsApp não está conectada'); return this.socket; }
 
+  private async outboundJid(remoteJid: string) {
+    const normalized = userJid(remoteJid);
+    if (normalized.endsWith('@g.us') || normalized.endsWith('@broadcast') || normalized.includes('@newsletter') || isLidUser(normalized)) return normalized;
+    if (!isPnUser(normalized)) return normalized;
+    const socket = this.requireSocket();
+    const mappedLid = await socket.signalRepository.lidMapping.getLIDForPN(normalized).catch(() => undefined);
+    const lid = normalizeJid(mappedLid);
+    return lid && isLidUser(lid) ? lid : normalized;
+  }
+
   async resolveIdentity(jid: string, alternateJid?: string): Promise<ContactPresence> {
     const socket = this.requireSocket();
     const normalized = normalizeJid(jid) ?? jid;
@@ -332,25 +350,48 @@ export class BaileysProvider implements MessagingProvider {
   }
 
   async sendPresence(remoteJid: string, state: 'composing' | 'paused') {
-    const jid = userJid(remoteJid);
+    const jid = await this.outboundJid(remoteJid);
     await this.requireSocket().sendPresenceUpdate(state, jid);
   }
 
-  async sendText(remoteJid: string, text: string) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { text })); }
-  async sendImage(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { image: { url: input.path }, caption: input.caption })); }
-  async sendVideo(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { video: { url: input.path }, caption: input.caption, mimetype: input.mimetype })); }
-  async sendDocument(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { document: { url: input.path }, caption: input.caption, fileName: input.fileName, mimetype: input.mimetype ?? 'application/octet-stream' })); }
-  async sendAudio(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { audio: { url: input.path }, mimetype: input.mimetype ?? 'audio/mpeg', ptt: input.ptt ?? false })); }
-  async sendSticker(remoteJid: string, input: SendMediaInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { sticker: { url: input.path } })); }
-  async sendLocation(remoteJid: string, input: LocationInput) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { location: { degreesLatitude: input.latitude, degreesLongitude: input.longitude, name: input.name, address: input.address } })); }
+  async sendText(remoteJid: string, text: string) {
+    const jid = await this.outboundJid(remoteJid);
+    return receipt(await this.requireSocket().sendMessage(jid, { text }));
+  }
+  async sendImage(remoteJid: string, input: SendMediaInput) {
+    const jid = await this.outboundJid(remoteJid);
+    return receipt(await this.requireSocket().sendMessage(jid, { image: { url: input.path }, caption: input.caption }));
+  }
+  async sendVideo(remoteJid: string, input: SendMediaInput) {
+    const jid = await this.outboundJid(remoteJid);
+    return receipt(await this.requireSocket().sendMessage(jid, { video: { url: input.path }, caption: input.caption, mimetype: input.mimetype }));
+  }
+  async sendDocument(remoteJid: string, input: SendMediaInput) {
+    const jid = await this.outboundJid(remoteJid);
+    return receipt(await this.requireSocket().sendMessage(jid, { document: { url: input.path }, caption: input.caption, fileName: input.fileName, mimetype: input.mimetype ?? 'application/octet-stream' }));
+  }
+  async sendAudio(remoteJid: string, input: SendMediaInput) {
+    const jid = await this.outboundJid(remoteJid);
+    return receipt(await this.requireSocket().sendMessage(jid, { audio: { url: input.path }, mimetype: input.mimetype ?? 'audio/mpeg', ptt: input.ptt ?? false }));
+  }
+  async sendSticker(remoteJid: string, input: SendMediaInput) {
+    const jid = await this.outboundJid(remoteJid);
+    return receipt(await this.requireSocket().sendMessage(jid, { sticker: { url: input.path } }));
+  }
+  async sendLocation(remoteJid: string, input: LocationInput) {
+    const jid = await this.outboundJid(remoteJid);
+    return receipt(await this.requireSocket().sendMessage(jid, { location: { degreesLatitude: input.latitude, degreesLongitude: input.longitude, name: input.name, address: input.address } }));
+  }
   async sendContact(remoteJid: string, input: ContactCardInput) {
+    const jid = await this.outboundJid(remoteJid);
     const phone = digits(input.phone);
     const vcard = ['BEGIN:VCARD', 'VERSION:3.0', `FN:${input.displayName}`, input.organization ? `ORG:${input.organization}` : undefined, `TEL;type=CELL;type=VOICE;waid=${phone}:+${phone}`, 'END:VCARD'].filter(Boolean).join('\n');
-    return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { contacts: { displayName: input.displayName, contacts: [{ displayName: input.displayName, vcard }] } }));
+    return receipt(await this.requireSocket().sendMessage(jid, { contacts: { displayName: input.displayName, contacts: [{ displayName: input.displayName, vcard }] } }));
   }
   async sendPoll(remoteJid: string, input: PollInput) {
-    const result = await this.requireSocket().sendMessage(userJid(remoteJid), { poll: { name: input.name, values: input.values, selectableCount: input.selectableCount ?? 1 } });
-    if (result?.key.id && result.message) this.pollCreations.set(result.key.id, { remoteJid: result.key.remoteJid ?? userJid(remoteJid), question: input.name, message: result.message });
+    const jid = await this.outboundJid(remoteJid);
+    const result = await this.requireSocket().sendMessage(jid, { poll: { name: input.name, values: input.values, selectableCount: input.selectableCount ?? 1 } });
+    if (result?.key.id && result.message) this.pollCreations.set(result.key.id, { remoteJid: result.key.remoteJid ?? jid, question: input.name, message: result.message });
     return receipt(result);
   }
 
