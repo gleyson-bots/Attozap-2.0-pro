@@ -14,6 +14,7 @@ import './warmup-monitor.css';
 import './rc3.css';
 import './rc4.css';
 import './system.css';
+import './ui-polish.css';
 
 installGlobalErrorHandlers();
 const rootElement = document.getElementById('root');
