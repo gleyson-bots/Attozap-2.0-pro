@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from '../messaging/account-manager.js';
 import type { ContactCardInput, LocationInput, MessageResult, MessagingProvider, PollInput, SendMediaInput } from '../messaging/provider.js';
-import { getCachedMessageStatus } from '../messaging/status.js';
+import { getCachedMessageStatus, mergeDeliveryStatus, type StoredDeliveryStatus } from '../messaging/status.js';
 import {
   finalizeRecipientSubmission,
   finishCampaignExecution,
@@ -426,14 +426,33 @@ export class CampaignEngine extends EventEmitter {
 
   private emitProgress(campaignId: string) { this.emit('progress', this.get(campaignId)); }
 
-  private logMessage(id: string, accountId: string, remoteJid: string, direction: 'in'|'out', type: string, text: string, status: 'pending'|'failed', error?: string) {
+  private logMessage(id: string, accountId: string, remoteJid: string, direction: 'in'|'out', type: string, text: string, status: StoredDeliveryStatus, error?: string) {
+    const existing = this.db.prepare(`
+      SELECT status,error,created_at FROM message_log
+      WHERE id=? AND account_id=? LIMIT 1
+    `).get(id, accountId) as { status?: string; error?: string | null; created_at?: string } | undefined;
     const cached = status === 'pending' ? getCachedMessageStatus(this.db, accountId, id) : undefined;
-    const finalStatus = cached?.status ?? status;
-    const finalError = finalStatus === 'failed' ? (cached?.error ?? error ?? 'WhatsApp rejeitou a mensagem') : null;
+    let finalStatus: StoredDeliveryStatus = cached?.status ?? status;
+    let finalError = finalStatus === 'failed' ? (cached?.error ?? error ?? 'WhatsApp rejeitou a mensagem') : undefined;
+
+    if (existing?.status && status === 'pending') {
+      finalStatus = mergeDeliveryStatus(existing.status, finalStatus);
+      if (finalStatus === 'failed') finalError = finalError ?? existing.error ?? 'WhatsApp rejeitou a mensagem';
+    }
+
+    if (existing) {
+      this.db.prepare(`
+        UPDATE message_log SET
+          remote_jid=?, direction=?, message_type=?, text=COALESCE(?,text), status=?, error=?
+        WHERE id=? AND account_id=?
+      `).run(remoteJid, direction, type, text || null, finalStatus, finalStatus === 'failed' ? finalError ?? 'WhatsApp rejeitou a mensagem' : null, id, accountId);
+      return;
+    }
+
     this.db.prepare(`
-      INSERT OR REPLACE INTO message_log (id, account_id, remote_jid, direction, message_type, text, status, error, created_at)
+      INSERT OR IGNORE INTO message_log (id, account_id, remote_jid, direction, message_type, text, status, error, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, accountId, remoteJid, direction, type, text || null, finalStatus, finalError, new Date().toISOString());
+    `).run(id, accountId, remoteJid, direction, type, text || null, finalStatus, finalStatus === 'failed' ? finalError ?? 'WhatsApp rejeitou a mensagem' : null, new Date().toISOString());
   }
 
   private audit(action: string, entityId: string, metadata?: unknown) {
