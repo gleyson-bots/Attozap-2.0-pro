@@ -197,7 +197,10 @@ export class BaileysProvider implements MessagingProvider {
       for (const message of messages) void this.emitIncoming(message);
     });
     socket.ev.on('contacts.update', updates => {
-      for (const item of updates) if (item.id && typeof item.imgUrl !== 'undefined') this.pictureCache.delete(item.id);
+      for (const item of updates) void this.emitContact(item as any);
+    });
+    socket.ev.on('contacts.upsert', contacts => {
+      for (const item of contacts) void this.emitContact(item as any);
     });
 
     socket.ev.on('messages.update', updates => {
@@ -249,6 +252,17 @@ export class BaileysProvider implements MessagingProvider {
         }
       }
     });
+  }
+
+  private async emitContact(item: any) {
+    const rawJid = String(item?.id ?? '').trim();
+    if (!rawJid || rawJid.endsWith('@g.us') || rawJid.endsWith('@broadcast') || rawJid.includes('@newsletter')) return;
+    const jid = normalizeJid(rawJid) ?? rawJid;
+    const alternateJid = normalizeJid(item?.lid ?? item?.phoneNumber ?? item?.pnJid);
+    if (typeof item?.imgUrl !== 'undefined') this.pictureCache.delete(jid);
+    const pushName = String(item?.notify ?? item?.name ?? item?.verifiedName ?? '').trim() || undefined;
+    const profilePictureUrl = await this.profilePictureUrl(jid).catch(() => undefined);
+    this.events.onContact?.({ jid, alternateJid, pushName, profilePictureUrl });
   }
 
   private async emitIncoming(message: WAMessage) {
@@ -315,6 +329,11 @@ export class BaileysProvider implements MessagingProvider {
     const url = await this.requireSocket().profilePictureUrl(normalized, 'preview').catch(() => undefined);
     this.pictureCache.set(normalized, { url, expires: Date.now() + 60 * 60 * 1000 });
     return url;
+  }
+
+  async sendPresence(remoteJid: string, state: 'composing' | 'paused') {
+    const jid = userJid(remoteJid);
+    await this.requireSocket().sendPresenceUpdate(state, jid);
   }
 
   async sendText(remoteJid: string, text: string) { return receipt(await this.requireSocket().sendMessage(userJid(remoteJid), { text })); }
