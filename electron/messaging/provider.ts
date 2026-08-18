@@ -16,6 +16,13 @@ export type MessageStatusEvent = {
   timestamp?: number;
 };
 
+export type ContactProfileEvent = {
+  jid: string;
+  alternateJid?: string;
+  pushName?: string;
+  profilePictureUrl?: string;
+};
+
 export type PollVoteAggregate = {
   name: string;
   voters: string[];
@@ -33,6 +40,7 @@ export type ProviderEvents = {
   onQr?: (qr: string) => void;
   onError?: (error: Error) => void;
   onMessage?: (message: IncomingMessage) => void;
+  onContact?: (event: ContactProfileEvent) => void;
   onMessageStatus?: (event: MessageStatusEvent) => void;
   onPollUpdate?: (event: PollUpdateEvent) => void;
 };
