@@ -5,6 +5,7 @@ import { AppErrorBoundary, GlobalFeedback, installGlobalErrorHandlers } from './
 import './styles.css';
 import './license.css';
 import './sender.css';
+import './campaign-center.css';
 import './group-tools.css';
 import './feedback.css';
 import './final-ui.css';
