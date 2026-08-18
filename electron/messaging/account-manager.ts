@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import { BaileysProvider } from './baileys-provider.js';
 import { phoneFromPnJid } from './identity.js';
-import type { ConnectionState, ContactPresence, IncomingMessage, MessagingProvider } from './provider.js';
+import type { ConnectionState, ContactPresence, ContactProfileEvent, IncomingMessage, MessagingProvider } from './provider.js';
 
 export type AccountRecord = {
   id: string;
@@ -91,6 +91,7 @@ export class AccountManager extends EventEmitter {
       onQr: qr => this.emit('qr', { accountId: id, qr }),
       onError: error => this.emit('error', { accountId: id, message: error.message }),
       onMessage: message => void this.onMessage(id, message, provider),
+      onContact: event => void this.onContact(id, event, provider),
       onMessageStatus: event => this.emit('message-status', { accountId: id, ...event }),
       onPollUpdate: event => this.emit('poll-update', { accountId: id, ...event }),
     });
@@ -165,6 +166,33 @@ export class AccountManager extends EventEmitter {
     const phone = phoneFromPnJid(self);
     this.db.prepare(`UPDATE instances SET status = ?, phone = COALESCE(?, phone), updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(status, phone ?? null, id);
     this.emit('state', { accountId: id, status, phone, jid: self });
+  }
+
+  private async onContact(accountId: string, event: ContactProfileEvent, provider: MessagingProvider) {
+    try {
+      const identity = await provider.resolveIdentity(event.jid, event.alternateJid).catch(() => ({ input: event.jid, jid: event.jid, exists: true } as ContactPresence));
+      this.persistIdentity(accountId, identity, event.pushName, 'contacts.sync');
+      const canonical = identity.jid ?? event.jid;
+      const existing = this.db.prepare(`
+        SELECT jid FROM chat_cache
+        WHERE account_id=? AND (jid=? OR (? IS NOT NULL AND lid=?) OR (? IS NOT NULL AND pn_jid=?))
+        LIMIT 1
+      `).get(accountId, canonical, identity.lid ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.pnJid ?? null) as { jid?: string } | undefined;
+      if (existing?.jid) {
+        this.db.prepare(`
+          UPDATE chat_cache SET
+            name=COALESCE(?,name),
+            profile_url=COALESCE(?,profile_url),
+            lid=COALESCE(?,lid),
+            pn_jid=COALESCE(?,pn_jid),
+            phone=COALESCE(?,phone)
+          WHERE account_id=? AND jid=?
+        `).run(event.pushName?.trim() || null, event.profilePictureUrl ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.phone ?? null, accountId, existing.jid);
+      }
+      this.emit('contact', { accountId, jid: canonical, pushName: event.pushName, profilePictureUrl: event.profilePictureUrl, identity });
+    } catch (error) {
+      this.emit('error', { accountId, message: `Falha ao atualizar perfil: ${error instanceof Error ? error.message : String(error)}` });
+    }
   }
 
   private async onMessage(accountId: string, message: IncomingMessage, provider: MessagingProvider) {
