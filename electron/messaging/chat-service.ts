@@ -56,16 +56,16 @@ export class ChatService {
     const term = `%${search.trim()}%`;
     return this.db.prepare(`
       SELECT c.*,
-        COALESCE(g.subject, c.name, i.push_name) AS display_name,
-        (SELECT text FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid) ORDER BY m.created_at DESC LIMIT 1) AS last_text,
-        (SELECT message_type FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid) ORDER BY m.created_at DESC LIMIT 1) AS last_message_type,
-        (SELECT direction FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid) ORDER BY m.created_at DESC LIMIT 1) AS last_direction,
-        (SELECT status FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid) ORDER BY m.created_at DESC LIMIT 1) AS last_status
+        COALESCE(g.subject, i.push_name, c.name) AS display_name,
+        (SELECT text FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid) ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_text,
+        (SELECT message_type FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid) ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_message_type,
+        (SELECT direction FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid) ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_direction,
+        (SELECT status FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid) ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_status
       FROM chat_cache c
       LEFT JOIN group_cache g ON g.account_id=c.account_id AND g.group_id=c.jid
       LEFT JOIN wa_identities i ON i.account_id=c.account_id AND (i.canonical_jid=c.jid OR i.lid=c.jid OR i.pn_jid=c.jid)
-      WHERE c.account_id=? AND (?='' OR COALESCE(g.subject,c.name,i.push_name,'') LIKE ? OR c.jid LIKE ? OR COALESCE(c.phone,'') LIKE ?)
-      ORDER BY c.last_message_at DESC
+      WHERE c.account_id=? AND (?='' OR COALESCE(g.subject,i.push_name,c.name,'') LIKE ? OR c.jid LIKE ? OR COALESCE(c.phone,'') LIKE ?)
+      ORDER BY c.last_message_at DESC, c.jid ASC
       LIMIT 500
     `).all(accountId, search.trim(), term, term, term);
   }
@@ -80,10 +80,10 @@ export class ChatService {
     const placeholders = aliases.map(() => '?').join(',');
     const rows = this.db.prepare(`
       SELECT * FROM (
-        SELECT * FROM message_log
+        SELECT rowid AS _seq, * FROM message_log
         WHERE account_id=? AND remote_jid IN (${placeholders})
-        ORDER BY created_at DESC LIMIT ?
-      ) ORDER BY created_at ASC
+        ORDER BY created_at DESC, rowid DESC LIMIT ?
+      ) ORDER BY created_at ASC, _seq ASC
     `).all(accountId, ...aliases, safeLimit) as any[];
     return rows.map(row => ({
       ...row,
@@ -175,11 +175,12 @@ export class ChatService {
   }
 
   private log(id: string, accountId: string, remoteJid: string, type: string, text: string, status: string, error?: string, mediaPath?: string, fileName?: string, mimetype?: string, metadata?: unknown) {
+    const createdAt = new Date().toISOString();
     this.db.prepare(`
       INSERT OR REPLACE INTO message_log
         (id, account_id, remote_jid, direction, message_type, text, status, error, media_path, file_name, mimetype, metadata_json, created_at)
-      VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `).run(id, accountId, remoteJid, type, text || null, status, error ?? null, mediaPath ?? null, fileName ?? null, mimetype ?? null, JSON.stringify(metadata ?? {}));
+      VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, accountId, remoteJid, type, text || null, status, error ?? null, mediaPath ?? null, fileName ?? null, mimetype ?? null, JSON.stringify(metadata ?? {}), createdAt);
   }
 
   private async touchChat(accountId: string, remoteJid: string) {
@@ -188,13 +189,14 @@ export class ChatService {
     const identity = canonical.endsWith('@g.us') ? undefined : await provider.resolveIdentity(canonical).catch(() => undefined);
     const profileUrl = await provider.profilePictureUrl(canonical).catch(() => undefined);
     const existing = this.db.prepare(`SELECT jid FROM chat_cache WHERE account_id=? AND (jid=? OR lid=? OR pn_jid=?) LIMIT 1`).get(accountId, canonical, canonical, canonical) as { jid?: string } | undefined;
+    const now = new Date().toISOString();
     if (existing?.jid) {
-      this.db.prepare(`UPDATE chat_cache SET message_count=message_count+1,last_message_at=CURRENT_TIMESTAMP,profile_url=COALESCE(?,profile_url),lid=COALESCE(?,lid),pn_jid=COALESCE(?,pn_jid),phone=COALESCE(?,phone) WHERE account_id=? AND jid=?`).run(profileUrl ?? null, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, accountId, existing.jid);
+      this.db.prepare(`UPDATE chat_cache SET message_count=message_count+1,last_message_at=?,profile_url=COALESCE(?,profile_url),lid=COALESCE(?,lid),pn_jid=COALESCE(?,pn_jid),phone=COALESCE(?,phone) WHERE account_id=? AND jid=?`).run(now, profileUrl ?? null, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, accountId, existing.jid);
     } else {
       this.db.prepare(`
         INSERT INTO chat_cache (account_id,jid,lid,pn_jid,phone,name,is_group,message_count,first_message_at,last_message_at,profile_url)
-        VALUES (?,?,?,?,?,NULL,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)
-      `).run(accountId, canonical, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, canonical.endsWith('@g.us') ? 1 : 0, profileUrl ?? null);
+        VALUES (?,?,?,?,?,NULL,?,1,?,?,?)
+      `).run(accountId, canonical, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, canonical.endsWith('@g.us') ? 1 : 0, now, now, profileUrl ?? null);
     }
   }
 }
