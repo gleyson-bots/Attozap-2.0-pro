@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from './account-manager.js';
 import type { MessagingProvider, PollInput, SendMediaInput } from './provider.js';
+import { getCachedMessageStatus, mergeDeliveryStatus, type StoredDeliveryStatus } from './status.js';
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
 function isJid(value: string) { return value.includes('@'); }
@@ -17,10 +18,13 @@ export class ChatService {
         const isGroup = message.remoteJid.endsWith('@g.us');
         const canonicalRemote = isGroup ? message.remoteJid : payload?.identity?.jid ?? message.remoteJid;
         const canonicalParticipant = payload?.participantIdentity?.jid ?? message.participant ?? null;
+        const cached = message.fromMe ? getCachedMessageStatus(this.db, payload.accountId, message.id) : undefined;
+        const incomingStatus = message.fromMe ? (cached?.status ?? 'pending') : 'received';
+        const incomingError = message.fromMe && incomingStatus === 'failed' ? (cached?.error ?? 'WhatsApp rejeitou a mensagem') : null;
         this.db.prepare(`
           INSERT OR IGNORE INTO message_log
-            (id, account_id, remote_jid, participant_jid, direction, message_type, text, status, media_path, file_name, mimetype, metadata_json, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, account_id, remote_jid, participant_jid, direction, message_type, text, status, error, media_path, file_name, mimetype, metadata_json, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           message.id,
           payload.accountId,
@@ -29,7 +33,8 @@ export class ChatService {
           message.fromMe ? 'out' : 'in',
           message.messageType ?? 'text',
           message.text || null,
-          message.fromMe ? 'pending' : 'received',
+          incomingStatus,
+          incomingError,
           message.mediaPath ?? null,
           message.fileName ?? null,
           message.mimetype ?? null,
@@ -130,14 +135,19 @@ export class ChatService {
     }));
   }
 
+  messageStatus(accountId: string, messageId: string) {
+    const row = this.db.prepare(`SELECT id,status,error,created_at FROM message_log WHERE account_id=? AND id=? LIMIT 1`).get(accountId, messageId) as { id?: string; status?: string; error?: string | null; created_at?: string } | undefined;
+    if (row) return row;
+    const cached = getCachedMessageStatus(this.db, accountId, messageId);
+    return cached ? { id: messageId, status: cached.status, error: cached.error ?? null, created_at: cached.updated_at } : undefined;
+  }
+
   private async resolveTargetWithProvider(provider: MessagingProvider, target: string) {
     const clean = target.trim();
     if (!clean) throw new Error('Informe o destinatário');
     if (clean.endsWith('@g.us')) return clean;
     if (isJid(clean)) {
       const resolved = await provider.resolveIdentity(clean).catch(() => undefined);
-      // For 1:1 messages prefer a mapped LID. Baileys rc13 can accept a PN send
-      // and reject it asynchronously with 463 when that PN already has a LID mapping.
       return resolved?.lid ?? resolved?.pnJid ?? resolved?.jid ?? clean;
     }
     const phone = digits(clean);
@@ -215,16 +225,27 @@ export class ChatService {
     catch { return jid; }
   }
 
-  private log(id: string, accountId: string, remoteJid: string, type: string, text: string, status: string, error?: string, mediaPath?: string, fileName?: string, mimetype?: string, metadata?: unknown) {
-    const existing = this.db.prepare(`SELECT status,created_at FROM message_log WHERE account_id=? AND id=? LIMIT 1`).get(accountId, id) as { status?: string; created_at?: string } | undefined;
-    const keepExistingStatus = status === 'pending' && existing?.status && !['pending', 'failed'].includes(existing.status);
-    const finalStatus = keepExistingStatus ? existing!.status! : status;
+  private log(id: string, accountId: string, remoteJid: string, type: string, text: string, status: StoredDeliveryStatus, error?: string, mediaPath?: string, fileName?: string, mimetype?: string, metadata?: unknown) {
+    const existing = this.db.prepare(`SELECT status,created_at,error FROM message_log WHERE account_id=? AND id=? LIMIT 1`).get(accountId, id) as { status?: string; created_at?: string; error?: string | null } | undefined;
+    const cached = getCachedMessageStatus(this.db, accountId, id);
+    let finalStatus: StoredDeliveryStatus = status;
+    let finalError = error;
+
+    if (status === 'pending' && cached) {
+      finalStatus = cached.status;
+      finalError = cached.status === 'failed' ? (cached.error ?? error) : undefined;
+    }
+    if (existing?.status && status === 'pending') {
+      finalStatus = mergeDeliveryStatus(existing.status, finalStatus);
+      if (finalStatus === 'failed') finalError = finalError ?? existing.error ?? 'WhatsApp rejeitou a mensagem';
+    }
+
     const createdAt = existing?.created_at ?? new Date().toISOString();
     this.db.prepare(`
       INSERT OR REPLACE INTO message_log
         (id, account_id, remote_jid, direction, message_type, text, status, error, media_path, file_name, mimetype, metadata_json, created_at)
       VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, accountId, remoteJid, type, text || null, finalStatus, error ?? null, mediaPath ?? null, fileName ?? null, mimetype ?? null, JSON.stringify(metadata ?? {}), createdAt);
+    `).run(id, accountId, remoteJid, type, text || null, finalStatus, finalStatus === 'failed' ? (finalError ?? 'WhatsApp rejeitou a mensagem') : null, mediaPath ?? null, fileName ?? null, mimetype ?? null, JSON.stringify(metadata ?? {}), createdAt);
   }
 
   private async touchChat(accountId: string, remoteJid: string) {
