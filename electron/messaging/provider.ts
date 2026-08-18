@@ -6,7 +6,7 @@ export type MessageResult = {
   timestamp: number;
 };
 
-export type MessageDeliveryStatus = 'sent' | 'delivered' | 'read' | 'played';
+export type MessageDeliveryStatus = 'failed' | 'sent' | 'delivered' | 'read' | 'played';
 export type MessageStatusEvent = {
   id: string;
   remoteJid?: string;
@@ -14,6 +14,7 @@ export type MessageStatusEvent = {
   status: MessageDeliveryStatus;
   rawStatus?: number;
   timestamp?: number;
+  error?: string;
 };
 
 export type ContactProfileEvent = {
