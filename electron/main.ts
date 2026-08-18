@@ -15,6 +15,7 @@ import { registerExtractorIpc } from './extractor-ipc.js';
 import { registerDesktopIpc } from './desktop-ipc.js';
 import { registerChatIpc } from './chat-ipc.js';
 import { registerWarmupIpc } from './warmup-ipc.js';
+import { registerCampaignMonitorIpc } from './campaign-monitor-ipc.js';
 import { registerBrowserHubIpc } from './browser-hub-ipc.js';
 import { registerRecruitingIpc } from './recruiting-ipc.js';
 import { applyPendingRestore, registerSystemIpc } from './system-ipc.js';
@@ -94,6 +95,7 @@ app.whenReady().then(async () => {
   safeRegister('desktop-ipc', () => registerDesktopIpc(mainWindow!));
   safeRegister('chat-ipc', () => registerChatIpc(chat, license));
   safeRegister('warmup-ipc', () => registerWarmupIpc(warmupEngine!, license));
+  safeRegister('campaign-monitor-ipc', () => registerCampaignMonitorIpc(mainWindow!, campaigns));
   safeRegister('browser-hub-ipc', () => registerBrowserHubIpc(mainWindow!));
   safeRegister('recruiting-ipc', () => registerRecruitingIpc(mainWindow!, db));
   safeRegister('system-ipc', () => registerSystemIpc({ window: mainWindow!, db, accounts, userData, dbPath }));
