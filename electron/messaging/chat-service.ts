@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from './account-manager.js';
-import type { PollInput, SendMediaInput } from './provider.js';
+import type { MessagingProvider, PollInput, SendMediaInput } from './provider.js';
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
 function isJid(value: string) { return value.includes('@'); }
@@ -39,6 +39,17 @@ export class ChatService {
         console.error('[webchat:incoming:persist]', error);
       }
     });
+  }
+
+  async ensureAccountLive(accountId: string): Promise<MessagingProvider> {
+    return this.accounts.ensureConnected(accountId);
+  }
+
+  async sendPresence(accountId: string, target: string, state: 'composing' | 'paused') {
+    const provider = await this.ensureAccountLive(accountId);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    await provider.sendPresence?.(remoteJid, state);
+    return remoteJid;
   }
 
   listChats(accountId: string, search = '') {
@@ -81,8 +92,7 @@ export class ChatService {
     }));
   }
 
-  async resolveTarget(accountId: string, target: string) {
-    const provider = this.accounts.provider(accountId);
+  private async resolveTargetWithProvider(provider: MessagingProvider, target: string) {
     const clean = target.trim();
     if (!clean) throw new Error('Informe o destinatário');
     if (isJid(clean)) {
@@ -96,12 +106,18 @@ export class ChatService {
     return resolved.jid ?? resolved.pnJid ?? `${phone}@s.whatsapp.net`;
   }
 
+  async resolveTarget(accountId: string, target: string) {
+    const provider = await this.ensureAccountLive(accountId);
+    return this.resolveTargetWithProvider(provider, target);
+  }
+
   async sendText(accountId: string, target: string, text: string) {
     const cleanText = text.trim();
     if (!cleanText) throw new Error('Digite uma mensagem');
-    const remoteJid = await this.resolveTarget(accountId, target);
+    const provider = await this.ensureAccountLive(accountId);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target);
     try {
-      const result = await this.accounts.provider(accountId).sendText(remoteJid, cleanText);
+      const result = await provider.sendText(remoteJid, cleanText);
       const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
       this.log(result.id, accountId, canonical, 'text', cleanText, 'sent');
       await this.touchChat(accountId, canonical);
@@ -114,8 +130,8 @@ export class ChatService {
   }
 
   async sendMedia(accountId: string, target: string, type: 'image'|'video'|'document'|'audio'|'sticker', input: SendMediaInput) {
-    const remoteJid = await this.resolveTarget(accountId, target);
-    const provider = this.accounts.provider(accountId);
+    const provider = await this.ensureAccountLive(accountId);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target);
     try {
       const result = type === 'image' ? await provider.sendImage(remoteJid, input)
         : type === 'video' ? await provider.sendVideo(remoteJid, input)
@@ -134,12 +150,13 @@ export class ChatService {
   }
 
   async sendPoll(accountId: string, target: string, input: PollInput) {
-    const remoteJid = await this.resolveTarget(accountId, target);
+    const provider = await this.ensureAccountLive(accountId);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target);
     const question = input.name.trim();
     const values = [...new Set(input.values.map(item => item.trim()).filter(Boolean))].slice(0, 12);
     if (!question || values.length < 2) throw new Error('A enquete precisa de pergunta e pelo menos duas opções');
     try {
-      const result = await this.accounts.provider(accountId).sendPoll(remoteJid, { name: question, values, selectableCount: Math.max(1, Math.min(values.length, input.selectableCount ?? 1)) });
+      const result = await provider.sendPoll(remoteJid, { name: question, values, selectableCount: Math.max(1, Math.min(values.length, input.selectableCount ?? 1)) });
       const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
       this.log(result.id, accountId, canonical, 'poll', question, 'sent', undefined, undefined, undefined, undefined, { question, options: values, selectableCount: input.selectableCount ?? 1 });
       await this.touchChat(accountId, canonical);
@@ -153,7 +170,7 @@ export class ChatService {
 
   private async canonicalJid(accountId: string, jid: string) {
     if (jid.endsWith('@g.us')) return jid;
-    try { return (await this.accounts.provider(accountId).resolveIdentity(jid)).jid || jid; }
+    try { return (await this.ensureAccountLive(accountId)).resolveIdentity(jid).then(identity => identity.jid || jid); }
     catch { return jid; }
   }
 
@@ -166,7 +183,7 @@ export class ChatService {
   }
 
   private async touchChat(accountId: string, remoteJid: string) {
-    const provider = this.accounts.provider(accountId);
+    const provider = await this.ensureAccountLive(accountId);
     const canonical = await this.canonicalJid(accountId, remoteJid);
     const identity = canonical.endsWith('@g.us') ? undefined : await provider.resolveIdentity(canonical).catch(() => undefined);
     const profileUrl = await provider.profilePictureUrl(canonical).catch(() => undefined);
