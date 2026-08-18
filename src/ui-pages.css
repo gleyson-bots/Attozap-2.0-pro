@@ -1,0 +1,31 @@
+/* RC12 page-specific polish — imported after ui-polish.css */
+
+/* Tabs / segmented controls */
+.member-mode{min-height:46px;display:flex;align-items:center;gap:7px;padding:5px 0;border-bottom:0;flex-wrap:wrap}
+.member-mode>button{height:34px;padding:0 11px;border-radius:9px;font-size:10px;font-weight:700;color:var(--muted);background:var(--surface-2)}
+.member-mode>button:hover{color:var(--text);background:var(--hover)}
+.member-mode>button.active{color:var(--accent-2);border-color:color-mix(in srgb,var(--accent) 42%,var(--line));background:color-mix(in srgb,var(--accent) 11%,var(--surface))}
+.member-mode label{font-size:9.5px;margin-left:auto;gap:7px}.member-mode input{width:64px;height:34px}.member-mode label button{height:34px;padding:0 9px;font-size:9.5px;border-radius:8px}
+
+/* Warmup monitor */
+.warmup-live{padding:18px 20px;grid-template-columns:minmax(280px,1fr) auto;gap:18px;border-radius:16px}
+.warmup-live-main{gap:15px}.warmup-live-icon{width:52px;height:52px;border-radius:15px}.warmup-live-main h3{font-size:18px}.warmup-live-main p{font-size:10.5px}.warmup-live-stats{gap:10px;flex-wrap:wrap;justify-content:flex-end}.warmup-live-stats>div{min-width:124px;padding:11px 13px}.warmup-live-stats span{font-size:9px}.warmup-live-stats b{font-size:16px}.warmup-current{padding:12px 14px;border-radius:11px}.warmup-current b{font-size:9.5px}.warmup-current span{font-size:10.5px}.warmup-media-box{padding:15px;border-radius:14px}.warmup-media-list{gap:9px}.warmup-media-list>div{padding:10px;border-radius:11px}.warmup-media-list b{font-size:10px}.warmup-media-list small{font-size:8.5px}.empty-inline{font-size:10px!important}.warmup-target-picker>button b,.warmup-target-picker b{font-size:10.5px}.warmup-target-picker>button small,.warmup-target-picker small{font-size:9px}
+
+/* Group tools / bulk tools */
+.bulk-verify-grid{grid-template-columns:minmax(300px,.8fr) minmax(0,1.2fr);gap:16px;padding:18px}.bulk-verify-grid textarea{min-height:260px}.bulk-results{height:330px;border-radius:11px;padding:7px}.bulk-results>div:not(.empty){min-height:56px;padding:8px}.bulk-results b{font-size:10px}.bulk-results small{font-size:9px}.bulk-results code{font-size:8.5px}.member-list.active-capable>span{min-height:38px;padding:7px 9px}.member-list.active-capable>span b{font-size:9.5px}.member-list.active-capable>span small{font-size:8.5px}.verified-group{padding:12px;border-radius:11px}.verified-group b{font-size:10.5px}.verified-group span,.verified-group p{font-size:9px}
+
+/* Google Maps / extraction */
+.maps-browser-card,.maps-search-card,.maps-results{min-width:0}.maps-search-card{padding:18px;gap:16px}.maps-search-card>.card-head{margin:-18px -18px 0}.maps-easy-mode{padding:20px;gap:20px}.maps-easy-mode b{font-size:13px}.maps-easy-mode span{font-size:10.5px;line-height:1.6}.api-key-row{gap:10px}.api-status{height:42px}.api-status b{font-size:10.5px}.maps-table{max-width:100%;overflow:auto}.maps-table-head,.maps-row{grid-template-columns:minmax(220px,1.55fr) minmax(180px,1.1fr) minmax(100px,.6fr) minmax(150px,.8fr);gap:14px;padding:12px 16px}.maps-table-head{font-size:9px}.maps-row{min-height:64px}.maps-row b{font-size:11px}.maps-row span,.maps-row small{font-size:9.5px;line-height:1.4}.maps-row .head-actions{justify-content:flex-start}.extractor-results{display:flex;flex-direction:column;gap:16px}.extractor-results>.card{overflow:hidden}.extractor-results>.card>.notice{margin:14px}.extractor-results>.card>.tools-grid{padding:16px}.extractor-results>.card>.tools-grid>div{min-width:0}.extractor-results .member-list{height:auto;max-height:280px;overflow:auto;grid-template-columns:1fr}
+
+/* Recruiting */
+.portal-grid{grid-template-columns:repeat(5,minmax(150px,1fr));gap:12px;padding:16px}.portal-grid>button{min-height:116px;padding:15px;border-radius:14px}.portal-grid>button>b{font-size:12px}.portal-grid>button>small{font-size:9.5px}.portal-grid>button>svg:first-child{color:var(--accent-2)}
+
+/* Tables and long identifiers */
+.result-table,.contacts-table{min-width:0}.result-row>*,.contacts-row>*,.identity-row>*,.campaign-recipient-row>*{min-width:0;overflow-wrap:anywhere}.contacts-row small,.maps-row small{overflow-wrap:anywhere}.identity-table,.campaign-recipient-table,.maps-table{scrollbar-gutter:stable}
+
+/* Better empty states */
+.empty.mini{border-radius:12px}.card .empty.mini{margin:4px 0}.empty svg{opacity:.8}
+
+@media(max-width:1200px){.portal-grid{grid-template-columns:repeat(3,minmax(150px,1fr))}.warmup-live{grid-template-columns:1fr}.warmup-live-stats{justify-content:flex-start}.warmup-live-stats>div{flex:1}.maps-table-head,.maps-row{grid-template-columns:minmax(210px,1.4fr) minmax(180px,1fr) 100px}}
+@media(max-width:900px){.bulk-verify-grid{grid-template-columns:1fr}.maps-easy-mode{align-items:flex-start;flex-direction:column}.portal-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}.maps-table-head,.maps-row{grid-template-columns:minmax(200px,1.4fr) minmax(180px,1fr) 90px}.maps-table-head>span:last-child,.maps-row>div:last-child{display:none}}
+@media(max-width:600px){.portal-grid{grid-template-columns:1fr}.maps-table-head{display:none}.maps-row{grid-template-columns:1fr;gap:6px}.maps-row>div:last-child{display:flex}.warmup-live-stats{display:grid;grid-template-columns:1fr 1fr;width:100%}.warmup-live-stats>div{min-width:0}.warmup-media-list{grid-template-columns:1fr}}
