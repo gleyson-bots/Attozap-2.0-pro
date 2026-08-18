@@ -29,7 +29,7 @@ export class ChatService {
           message.fromMe ? 'out' : 'in',
           message.messageType ?? 'text',
           message.text || null,
-          message.fromMe ? 'sent' : 'received',
+          message.fromMe ? 'pending' : 'received',
           message.mediaPath ?? null,
           message.fileName ?? null,
           message.mimetype ?? null,
@@ -136,15 +136,15 @@ export class ChatService {
     if (clean.endsWith('@g.us')) return clean;
     if (isJid(clean)) {
       const resolved = await provider.resolveIdentity(clean).catch(() => undefined);
-      // PN is the preferred wire address for direct outbound sends when the
-      // provider already knows the PN<->LID mapping. LID remains an identity alias.
-      return resolved?.pnJid ?? resolved?.jid ?? clean;
+      // For 1:1 messages prefer a mapped LID. Baileys rc13 can accept a PN send
+      // and reject it asynchronously with 463 when that PN already has a LID mapping.
+      return resolved?.lid ?? resolved?.pnJid ?? resolved?.jid ?? clean;
     }
     const phone = digits(clean);
     if (!phone) throw new Error('Destinatário inválido');
     const [resolved] = await provider.checkNumbers([phone]);
     if (!resolved?.exists) throw new Error(`O número ${phone} não foi localizado no WhatsApp`);
-    return resolved.pnJid ?? resolved.jid ?? `${phone}@s.whatsapp.net`;
+    return resolved.lid ?? resolved.pnJid ?? resolved.jid ?? `${phone}@s.whatsapp.net`;
   }
 
   async resolveTarget(accountId: string, target: string) {
