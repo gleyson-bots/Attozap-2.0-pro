@@ -322,6 +322,20 @@ export class CampaignEngine extends EventEmitter {
       this.audit(`campaign.${finalStatus}`, id);
       this.emitProgress(id);
       this.emitRuntime(id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      state.phase = 'error';
+      state.lastError = message;
+      state.nextAt = null;
+      this.db.prepare(`
+        UPDATE campaigns SET status='failed',finished_at=CURRENT_TIMESTAMP
+        WHERE id=? AND status NOT IN ('stopped','completed')
+      `).run(id);
+      this.audit('campaign.failed', id, { message });
+      this.emit('error', { campaignId: id, message });
+      this.emitProgress(id);
+      this.emitRuntime(id);
+      throw error;
     } finally {
       setTimeout(() => this.runtime.delete(id), 1_500);
     }
