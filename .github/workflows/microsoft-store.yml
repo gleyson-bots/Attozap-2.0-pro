@@ -1,8 +1,6 @@
 name: Microsoft Store Package
 
 on:
-  push:
-    branches: ["feat/foundation-v2", "main"]
   workflow_dispatch:
 
 concurrency:
