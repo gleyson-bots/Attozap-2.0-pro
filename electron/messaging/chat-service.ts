@@ -8,6 +8,7 @@ import { getCachedMessageStatus, mergeDeliveryStatus, type StoredDeliveryStatus 
 function digits(value: string) { return value.replace(/\D/g, ''); }
 function isJid(value: string) { return value.includes('@'); }
 function at(value: unknown) { const parsed = Date.parse(String(value ?? '')); return Number.isFinite(parsed) ? parsed : 0; }
+function jsonObject(value: unknown) { try { const parsed = JSON.parse(String(value ?? '{}')); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } }
 
 export class ChatService {
   constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager) {
@@ -18,29 +19,65 @@ export class ChatService {
         const isGroup = message.remoteJid.endsWith('@g.us');
         const canonicalRemote = isGroup ? message.remoteJid : payload?.identity?.jid ?? message.remoteJid;
         const canonicalParticipant = payload?.participantIdentity?.jid ?? message.participant ?? null;
+        const existing = this.db.prepare(`
+          SELECT status,error,metadata_json,created_at FROM message_log
+          WHERE account_id=? AND id=? LIMIT 1
+        `).get(payload.accountId, message.id) as { status?: string; error?: string | null; metadata_json?: string | null; created_at?: string } | undefined;
         const cached = message.fromMe ? getCachedMessageStatus(this.db, payload.accountId, message.id) : undefined;
-        const incomingStatus = message.fromMe ? (cached?.status ?? 'pending') : 'received';
-        const incomingError = message.fromMe && incomingStatus === 'failed' ? (cached?.error ?? 'WhatsApp rejeitou a mensagem') : null;
-        this.db.prepare(`
-          INSERT OR IGNORE INTO message_log
-            (id, account_id, remote_jid, participant_jid, direction, message_type, text, status, error, media_path, file_name, mimetype, metadata_json, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          message.id,
-          payload.accountId,
-          canonicalRemote,
-          canonicalParticipant,
-          message.fromMe ? 'out' : 'in',
-          message.messageType ?? 'text',
-          message.text || null,
-          incomingStatus,
-          incomingError,
-          message.mediaPath ?? null,
-          message.fileName ?? null,
-          message.mimetype ?? null,
-          JSON.stringify({ ...(message.metadata ?? {}), rawRemoteJid: message.remoteJid, remoteJidAlt: message.remoteJidAlt ?? null }),
-          new Date(message.timestamp || Date.now()).toISOString(),
-        );
+        let incomingStatus: string = message.fromMe ? (cached?.status ?? 'pending') : 'received';
+        let incomingError: string | null = message.fromMe && incomingStatus === 'failed' ? (cached?.error ?? 'WhatsApp rejeitou a mensagem') : null;
+        if (message.fromMe && existing?.status) {
+          incomingStatus = mergeDeliveryStatus(existing.status, incomingStatus as StoredDeliveryStatus);
+          if (incomingStatus === 'failed') incomingError = incomingError ?? existing.error ?? 'WhatsApp rejeitou a mensagem';
+        }
+        const observedMetadata = { ...(message.metadata ?? {}), rawRemoteJid: message.remoteJid, remoteJidAlt: message.remoteJidAlt ?? null };
+        const metadataJson = JSON.stringify({ ...jsonObject(existing?.metadata_json), ...observedMetadata });
+
+        if (existing) {
+          this.db.prepare(`
+            UPDATE message_log SET
+              remote_jid=?, participant_jid=COALESCE(?,participant_jid), direction=?, message_type=?,
+              text=COALESCE(?,text), status=?, error=?,
+              media_path=COALESCE(?,media_path), file_name=COALESCE(?,file_name), mimetype=COALESCE(?,mimetype),
+              metadata_json=?
+            WHERE account_id=? AND id=?
+          `).run(
+            canonicalRemote,
+            canonicalParticipant,
+            message.fromMe ? 'out' : 'in',
+            message.messageType ?? 'text',
+            message.text || null,
+            incomingStatus,
+            incomingError,
+            message.mediaPath ?? null,
+            message.fileName ?? null,
+            message.mimetype ?? null,
+            metadataJson,
+            payload.accountId,
+            message.id,
+          );
+        } else {
+          this.db.prepare(`
+            INSERT OR IGNORE INTO message_log
+              (id, account_id, remote_jid, participant_jid, direction, message_type, text, status, error, media_path, file_name, mimetype, metadata_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            message.id,
+            payload.accountId,
+            canonicalRemote,
+            canonicalParticipant,
+            message.fromMe ? 'out' : 'in',
+            message.messageType ?? 'text',
+            message.text || null,
+            incomingStatus,
+            incomingError,
+            message.mediaPath ?? null,
+            message.fileName ?? null,
+            message.mimetype ?? null,
+            metadataJson,
+            new Date(message.timestamp || Date.now()).toISOString(),
+          );
+        }
       } catch (error) {
         console.error('[webchat:incoming:persist]', error);
       }
