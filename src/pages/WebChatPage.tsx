@@ -6,6 +6,29 @@ function labelFor(chat: any) { return chat?.display_name || chat?.name || (chat?
 function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
 function aliases(chat: any) { return new Set([chat?.jid, chat?.lid, chat?.pn_jid].filter(Boolean)); }
 function sameIdentity(a: any, b: any) { const aa = aliases(a); return [...aliases(b)].some(value => aa.has(value)); }
+function messageTime(message: any) { const parsed = Date.parse(String(message?.created_at ?? '')); return Number.isFinite(parsed) ? parsed : 0; }
+function orderMessages(rows: any[]) {
+  const byId = new Map<string, any>();
+  for (const row of rows) {
+    const key = String(row?.id ?? `${row?.remote_jid}-${row?.created_at}-${row?.direction}`);
+    const previous = byId.get(key);
+    byId.set(key, previous ? { ...previous, ...row, metadata: { ...(previous.metadata ?? {}), ...(row.metadata ?? {}) } } : row);
+  }
+  return [...byId.values()].sort((a, b) => {
+    const time = messageTime(a) - messageTime(b);
+    if (time !== 0) return time;
+    const seq = Number(a?._seq ?? 0) - Number(b?._seq ?? 0);
+    if (seq !== 0) return seq;
+    return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+  });
+}
+function payloadMatchesSelected(payload: any, selected: any) {
+  if (!selected) return false;
+  const wanted = aliases(selected);
+  const message = payload?.message ?? {};
+  const identity = payload?.identity ?? {};
+  return [message.remoteJid, message.remoteJidAlt, identity.jid, identity.lid, identity.pnJid].filter(Boolean).some(value => wanted.has(value));
+}
 function Avatar({ chat, large = false }: { chat: any; large?: boolean }) {
   const label = String(labelFor(chat)).slice(0, 1).toUpperCase();
   return <span className={`conversation-avatar ${large ? 'large' : ''}`}>{chat?.profile_url ? <img src={chat.profile_url} alt=""/> : label}</span>;
@@ -44,6 +67,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const bottom = useRef<HTMLDivElement | null>(null);
+  const lastAutoScroll = useRef(0);
 
   useEffect(() => {
     const available = connected.find(account => account.id === accountId);
@@ -51,6 +75,13 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     const current = accounts.find(account => account.id === accountId);
     setProxy(current?.proxy ?? '');
   }, [accounts, accountId]);
+
+  function scrollToBottom(force = false) {
+    const now = Date.now();
+    if (!force && now - lastAutoScroll.current < 120) return;
+    lastAutoScroll.current = now;
+    setTimeout(() => bottom.current?.scrollIntoView({ block: 'end', behavior: force ? 'smooth' : 'auto' }), 20);
+  }
 
   async function loadChats() {
     if (!accountId) { setChats([]); return; }
@@ -65,33 +96,47 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     } catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
-  async function loadMessages(jid = selected?.jid) {
+  async function loadMessages(jid = selected?.jid, autoScroll = true) {
     if (!accountId || !jid) { setMessages([]); return; }
     try {
-      setMessages(await window.attozap.webchat.messages(accountId, jid, 500));
-      setTimeout(() => bottom.current?.scrollIntoView({ block: 'end' }), 25);
+      const rows = await window.attozap.webchat.messages(accountId, jid, 500);
+      setMessages(current => orderMessages([...current.filter(item => item?.metadata?.optimistic), ...rows]));
+      if (autoScroll) scrollToBottom();
     } catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
   function appendOptimistic(message: any) {
-    setMessages(current => current.some(item => item.id === message.id) ? current : [...current, message]);
-    setTimeout(() => bottom.current?.scrollIntoView({ block: 'end' }), 25);
+    setMessages(current => orderMessages([...current, { ...message, metadata: { ...(message.metadata ?? {}), optimistic: true } }]));
+    scrollToBottom(true);
   }
 
   useEffect(() => { void loadChats(); }, [accountId, search]);
-  useEffect(() => { void loadMessages(); }, [accountId, selected?.jid]);
+  useEffect(() => { setMessages([]); void loadMessages(selected?.jid, true); }, [accountId, selected?.jid]);
+
   useEffect(() => {
     const offIncoming = window.attozap.messages.onIncoming((payload: any) => {
       if (payload?.accountId !== accountId) return;
       void loadChats();
-      if (selected?.jid) void loadMessages(selected.jid);
+      if (selected?.jid && payloadMatchesSelected(payload, selected)) void loadMessages(selected.jid, true);
     });
     const offStatus = window.attozap.messages.onStatus((payload: any) => {
       if (payload?.accountId !== accountId || !payload?.id) return;
-      setMessages(current => current.map(message => message.id === payload.id ? { ...message, status: payload.status } : message));
+      setMessages(current => orderMessages(current.map(message => message.id === payload.id ? { ...message, status: payload.status } : message)));
     });
     return () => { offIncoming?.(); offStatus?.(); };
-  }, [accountId, selected?.jid]);
+  }, [accountId, selected?.jid, selected?.lid, selected?.pn_jid]);
+
+  // Local reconciliation catches messages produced by Auto Reply, campaigns or another
+  // renderer action even when the transient event was emitted before this page subscribed.
+  useEffect(() => {
+    if (!accountId) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      void loadChats();
+      if (selected?.jid) void loadMessages(selected.jid, false);
+    }, 1400);
+    return () => window.clearInterval(timer);
+  }, [accountId, selected?.jid, search]);
 
   const activeAccount = useMemo(() => accounts.find(account => account.id === accountId), [accounts, accountId]);
   const target = selected?.jid || newTarget.trim();
@@ -119,6 +164,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       setSelected((current: any) => ({ ...(current ?? {}), jid: resolved, display_name: current?.display_name || current?.name || newTarget || resolved, last_message_at: new Date().toISOString() }));
       setNewTarget('');
       await loadChats();
+      setTimeout(() => void loadMessages(resolved, true), 80);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
@@ -140,7 +186,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       setSelected((current: any) => ({ ...(current ?? {}), jid: resolved, display_name: current?.display_name || current?.name || newTarget || resolved }));
       setNewTarget('');
       await loadChats();
-      setTimeout(() => void loadMessages(resolved), 350);
+      setTimeout(() => void loadMessages(resolved, true), 250);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
@@ -155,6 +201,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       const resolved = result.resolvedTarget ?? result.remoteJid ?? target;
       appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'poll', text: question, status: 'sent', created_at: new Date(result.timestamp || Date.now()).toISOString(), metadata: { question, options } });
       setPollQuestion(''); setPollOptions('Sim\nNão'); setShowPoll(false); await loadChats();
+      setTimeout(() => void loadMessages(resolved, true), 80);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
