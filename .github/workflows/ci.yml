@@ -1,10 +1,13 @@
 name: CI
 
 on:
+  push:
+    branches: ["feat/foundation-v2"]
   workflow_dispatch:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[ci]') || contains(github.event.head_commit.message, '[release]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
