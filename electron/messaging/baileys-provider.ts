@@ -338,21 +338,48 @@ export class BaileysProvider implements MessagingProvider {
     const info = messageInfo(message);
     const text = messageText(message);
     if (info.type === 'unknown' && !text) return;
-    let mediaPath: string | undefined;
-    if (['image', 'video', 'document', 'audio', 'sticker'].includes(info.type)) {
-      try { mediaPath = await this.downloadIncoming(message, info.type, info.mimetype, info.fileName); }
-      catch (error) { this.events.onError?.(new Error(`Falha ao baixar mídia ${message.key.id ?? ''}: ${error instanceof Error ? error.message : String(error)}`)); }
-    }
-    const profilePictureUrl = await this.profilePictureUrl(remoteJid).catch(() => undefined);
+
+    const id = message.key.id ?? randomUUID();
+    const hasMedia = ['image', 'video', 'document', 'audio', 'sticker'].includes(info.type);
+    const baseMetadata = {
+      ...(info.metadata ?? {}),
+      ...(hasMedia ? { mediaPending: true } : {}),
+    };
     const incoming: IncomingMessage = {
-      id: message.key.id ?? randomUUID(), remoteJid, remoteJidAlt: message.key.remoteJidAlt ?? undefined,
+      id, remoteJid, remoteJidAlt: message.key.remoteJidAlt ?? undefined,
       participant: message.key.participant ?? undefined, participantAlt: message.key.participantAlt ?? undefined,
       addressingMode: message.key.addressingMode ?? undefined, pushName: message.pushName ?? undefined,
-      profilePictureUrl, text, messageType: info.type, mediaPath, fileName: info.fileName,
-      mimetype: info.mimetype, metadata: info.metadata, fromMe: Boolean(message.key.fromMe),
+      text, messageType: info.type, fileName: info.fileName, mimetype: info.mimetype,
+      metadata: baseMetadata, fromMe: Boolean(message.key.fromMe),
       timestamp: Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)) * 1000,
     };
+
+    // Emit the lightweight event first. Downloads and profile lookups are deliberately
+    // out of the critical path so the WebChat can render text/sticker placeholders
+    // immediately instead of waiting on WhatsApp media servers.
     this.events.onMessage?.(incoming);
+
+    let mediaPath: string | undefined;
+    let mediaError: string | undefined;
+    if (hasMedia) {
+      try { mediaPath = await this.downloadIncoming(message, info.type, info.mimetype, info.fileName); }
+      catch (error) {
+        mediaError = error instanceof Error ? error.message : String(error);
+        this.events.onError?.(new Error(`Falha ao baixar mídia ${id}: ${mediaError}`));
+      }
+    }
+    if (!mediaPath && !mediaError) return;
+
+    this.events.onMessage?.({
+      ...incoming,
+      mediaPath,
+      metadata: {
+        ...baseMetadata,
+        mediaPending: false,
+        ...(mediaPath ? { mediaReady: true } : {}),
+        ...(mediaError ? { mediaError } : {}),
+      },
+    });
   }
 
   private async downloadIncoming(message: WAMessage, type: IncomingMessageType, mimetype?: string, fileName?: string) {

@@ -75,16 +75,19 @@ function MessageBody({ message, onOpenMedia }: { message: any; onOpenMedia: (med
   const type = message.message_type || 'text';
   const url = message.media_url;
   const metadata = message.metadata || {};
-  const mediaName = message.file_name || (type === 'video' ? 'Vídeo' : 'Imagem');
+  const mediaName = message.file_name || (type === 'video' ? 'Vídeo' : type === 'sticker' ? 'Figurinha.webp' : 'Imagem');
+  const pendingMedia = !url && ['image', 'video', 'audio', 'document', 'sticker'].includes(type);
+  const pendingLabel = type === 'sticker' ? 'A carregar figurinha…' : type === 'audio' ? 'A preparar áudio…' : type === 'video' ? 'A preparar vídeo…' : type === 'document' ? 'A preparar documento…' : 'A carregar imagem…';
   return <>
+    {pendingMedia && <div className="chat-media-pending" role="status" aria-live="polite"><span>{pendingLabel}</span></div>}
     {type === 'image' && url && <div className="chat-media-preview chat-image-preview"><button type="button" className="chat-media-trigger" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName })} title="Abrir imagem em ecrã inteiro"><img className="chat-image" src={url} alt={message.text || 'Imagem'}/></button><button type="button" className="chat-media-expand" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName })} title="Ampliar imagem" aria-label="Ampliar imagem"><Maximize2 size={15}/></button></div>}
-    {type === 'sticker' && url && <img className="chat-sticker" src={url} alt="Figurinha"/>}
+    {type === 'sticker' && url && <button type="button" className="chat-media-trigger chat-sticker-trigger" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName || 'Figurinha.webp' })} title="Ampliar figurinha"><img className="chat-sticker" src={url} alt="Figurinha"/></button>}
     {type === 'video' && url && <div className="chat-media-preview chat-video-preview"><video className="chat-video" src={url} controls preload="metadata"/><button type="button" className="chat-media-expand" onClick={() => onOpenMedia({ url, type: 'video', name: mediaName })} title="Abrir vídeo em ecrã inteiro" aria-label="Abrir vídeo em ecrã inteiro"><Maximize2 size={15}/></button></div>}
     {type === 'audio' && url && <audio className="chat-audio" src={url} controls preload="metadata"/>}
     {type === 'document' && <div className="chat-document"><File size={22}/><div><b>{message.file_name || 'Documento'}</b><small>{message.mimetype || 'arquivo'}</small></div>{url && <a href={url} target="_blank" rel="noreferrer">Abrir</a>}</div>}
     {type === 'poll' && <div className="chat-poll"><div><Vote size={18}/><b>{metadata.question || message.text || 'Enquete'}</b></div>{(metadata.options || []).map((option: string) => <span key={option}>{option}</span>)}</div>}
     {message.text && type !== 'poll' && <div className="chat-text">{message.text}</div>}
-    {!message.text && !url && !['document','poll'].includes(type) && <div className="chat-text muted">[{type}]</div>}
+    {!message.text && !url && !pendingMedia && !['document','poll'].includes(type) && <div className="chat-text muted">{metadata.mediaError ? 'Não foi possível carregar esta mídia.' : `[${type}]`}</div>}
   </>;
 }
 
@@ -118,6 +121,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const messageLoadGeneration = useRef(0);
   const localSequence = useRef(0);
   const reconcileTimer = useRef<number | null>(null);
+  const chatRefreshTimer = useRef<number | null>(null);
   const resolveGeneration = useRef(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
@@ -258,13 +262,22 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     reconcileTimer.current = window.setTimeout(() => { reconcileTimer.current = null; void loadMessages(jid, true); }, delay);
   }
 
+  function scheduleChatsRefresh(delay = 120) {
+    if (chatRefreshTimer.current) window.clearTimeout(chatRefreshTimer.current);
+    chatRefreshTimer.current = window.setTimeout(() => { chatRefreshTimer.current = null; void loadChats(); }, delay);
+  }
+
   function appendOptimistic(message: any) {
     const sequence = ++localSequence.current;
-    setMessages(current => orderMessages([...current, {
-      ...message,
-      _local_seq: sequence,
-      metadata: { ...(message.metadata ?? {}), optimistic: true },
-    }]));
+    setMessages(current => {
+      const persisted = current.find(item => item?.id === message.id && !item?.metadata?.optimistic);
+      if (persisted) return current;
+      return orderMessages([...current.filter(item => item?.id !== message.id), {
+        ...message,
+        _local_seq: sequence,
+        metadata: { ...(message.metadata ?? {}), optimistic: true },
+      }]);
+    });
     scrollToBottom(true);
   }
 
@@ -306,8 +319,15 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   useEffect(() => {
     const offIncoming = window.attozap.messages.onIncoming((payload: any) => {
       if (payload?.accountId !== accountId) return;
-      void loadChats();
-      if (selected?.jid && payloadMatchesSelected(payload, selected)) scheduleReconcile(selected.jid, 35);
+      const row = payload?.persisted;
+      const rowMatches = row?.remote_jid && selected ? aliases(selected).has(row.remote_jid) : false;
+      if (row?.id && (!selected || payloadMatchesSelected(payload, selected) || rowMatches)) {
+        setMessages(current => orderMessages([...current.filter(item => item?.id !== row.id), row]));
+        scrollToBottom(true);
+      }
+      // A lista é atualizada em segundo plano; nunca bloqueia a thread ou o compositor.
+      scheduleChatsRefresh();
+      if (selected?.jid && payloadMatchesSelected(payload, selected) && !row) scheduleReconcile(selected.jid, 80);
     });
     const offStatus = window.attozap.messages.onStatus((payload: any) => {
       if (payload?.accountId !== accountId || !payload?.id) return;
@@ -321,7 +341,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     });
     const offProfile = window.attozap.messages.onProfile?.((payload: any) => {
       if (payload?.accountId !== accountId) return;
-      void loadChats();
+      scheduleChatsRefresh();
       if (!selected) return;
       const identity = payload?.identity ?? {};
       const probe = { jid: payload?.jid ?? identity.jid, lid: identity.lid, pn_jid: identity.pnJid };
@@ -330,7 +350,9 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     return () => {
       offIncoming?.(); offStatus?.(); offProfile?.();
       if (reconcileTimer.current) window.clearTimeout(reconcileTimer.current);
+      if (chatRefreshTimer.current) window.clearTimeout(chatRefreshTimer.current);
       reconcileTimer.current = null;
+      chatRefreshTimer.current = null;
     };
   }, [accountId, selected?.jid, selected?.lid, selected?.pn_jid]);
 
@@ -380,7 +402,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
         ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested, last_message_at: new Date().toISOString() }
         : { ...(current ?? {}), jid: resolved, last_message_at: new Date().toISOString() });
       setNewTarget('');
-      await loadChats();
+      void loadChats();
       scheduleReconcile(resolved, 60);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
@@ -407,7 +429,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: type, text: name, file_name: name, status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { pendingMediaRefresh: true, transportJid: result.transportJid } });
       setSelected((current: any) => requested ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested } : { ...(current ?? {}), jid: resolved });
       setNewTarget('');
-      await loadChats();
+      void loadChats();
       scheduleReconcile(resolved, 180);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
@@ -444,7 +466,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
           appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'audio', text: 'Mensagem de voz', file_name: 'mensagem-de-voz.webm', status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { ptt: true, transportJid: result.transportJid } });
           setSelected((current: any) => requested ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested } : { ...(current ?? {}), jid: resolved });
           setNewTarget('');
-          await loadChats();
+          void loadChats();
           scheduleReconcile(resolved, 180);
         })().catch((e: any) => setError(e?.message ?? String(e))).finally(() => setBusy(false));
       };

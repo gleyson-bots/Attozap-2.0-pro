@@ -225,8 +225,14 @@ export class AccountManager extends EventEmitter {
     const at = new Date(message.timestamp).toISOString();
     const isGroup = message.remoteJid.endsWith('@g.us');
     const cacheable = !message.remoteJid.endsWith('@broadcast') && !message.remoteJid.includes('@newsletter');
+    const mediaUpdate = message.metadata?.mediaPending === false;
+    const identityUpdate = message.metadata?.identityUpdate === true;
     let chatIdentity: ContactPresence | undefined;
     let participantIdentity: ContactPresence | undefined;
+
+    // O renderer recebe e persiste a mensagem antes de qualquer consulta de identidade.
+    // Isto evita que onWhatsApp/PN-LID e a rede bloqueiem a chegada da mensagem.
+    this.emit('message', { accountId, message });
 
     try {
       if (!isGroup) chatIdentity = await provider.resolveIdentity(message.remoteJid, message.remoteJidAlt);
@@ -235,26 +241,39 @@ export class AccountManager extends EventEmitter {
 
     if (chatIdentity) this.persistIdentity(accountId, chatIdentity, message.pushName, 'message.remote');
     if (participantIdentity) this.persistIdentity(accountId, participantIdentity, message.pushName, 'message.participant');
+    if (chatIdentity || participantIdentity) {
+      this.emit('message', {
+        accountId,
+        message: { ...message, metadata: { ...(message.metadata ?? {}), identityUpdate: true } },
+        identity: chatIdentity,
+        participantIdentity,
+      });
+    }
 
     if (cacheable) {
       const canonicalJid = isGroup ? message.remoteJid : chatIdentity?.jid ?? message.remoteJid;
       const directName = isGroup ? null : message.pushName?.trim() || null;
-      this.db.prepare(`
-        INSERT INTO chat_cache (account_id, jid, lid, pn_jid, phone, name, profile_url, is_group, message_count, first_message_at, last_message_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-        ON CONFLICT(account_id,jid) DO UPDATE SET
-          lid=COALESCE(excluded.lid, chat_cache.lid),
-          pn_jid=COALESCE(excluded.pn_jid, chat_cache.pn_jid),
-          phone=COALESCE(excluded.phone, chat_cache.phone),
-          name=COALESCE(excluded.name, chat_cache.name),
-          profile_url=COALESCE(excluded.profile_url, chat_cache.profile_url),
-          is_group=excluded.is_group,
-          message_count=chat_cache.message_count+1,
-          last_message_at=excluded.last_message_at
-      `).run(accountId, canonicalJid, chatIdentity?.lid ?? null, chatIdentity?.pnJid ?? null, chatIdentity?.phone ?? null, directName, message.profilePictureUrl ?? null, isGroup ? 1 : 0, at, at);
+      const aliases = [...new Set([message.remoteJid, message.remoteJidAlt, canonicalJid, chatIdentity?.lid, chatIdentity?.pnJid].filter(Boolean) as string[])];
+      const placeholders = aliases.map(() => '?').join(',');
+      const existing = this.db.prepare(`SELECT jid FROM chat_cache WHERE account_id=? AND (jid IN (${placeholders}) OR lid IN (${placeholders}) OR pn_jid IN (${placeholders})) LIMIT 1`).get(accountId, ...aliases, ...aliases, ...aliases) as { jid?: string } | undefined;
+      const cacheJid = existing?.jid ?? canonicalJid;
+      if (existing?.jid) {
+        this.db.prepare(`
+          UPDATE chat_cache SET
+            lid=COALESCE(?,lid), pn_jid=COALESCE(?,pn_jid), phone=COALESCE(?,phone),
+            name=COALESCE(?,name), profile_url=COALESCE(?,profile_url), is_group=?,
+            message_count=message_count+?, last_message_at=?
+          WHERE account_id=? AND jid=?
+        `).run(chatIdentity?.lid ?? null, chatIdentity?.pnJid ?? null, chatIdentity?.phone ?? null, directName, message.profilePictureUrl ?? null, isGroup ? 1 : 0, mediaUpdate || identityUpdate ? 0 : 1, at, accountId, cacheJid);
+      } else {
+        this.db.prepare(`
+          INSERT INTO chat_cache (account_id, jid, lid, pn_jid, phone, name, profile_url, is_group, message_count, first_message_at, last_message_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(accountId, cacheJid, chatIdentity?.lid ?? null, chatIdentity?.pnJid ?? null, chatIdentity?.phone ?? null, directName, message.profilePictureUrl ?? null, isGroup ? 1 : 0, mediaUpdate || identityUpdate ? 0 : 1, at, at);
+      }
     }
 
-    if (!message.fromMe && isGroup && message.participant) {
+    if (!message.fromMe && !mediaUpdate && !identityUpdate && isGroup && message.participant) {
       const canonical = participantIdentity?.jid ?? message.participant;
       this.db.prepare(`
         INSERT INTO group_activity (
@@ -270,7 +289,17 @@ export class AccountManager extends EventEmitter {
       `).run(accountId, message.remoteJid, canonical, participantIdentity?.lid ?? null, participantIdentity?.pnJid ?? null, participantIdentity?.phone ?? null, at, at);
     }
 
-    this.emit('message', { accountId, message, identity: chatIdentity, participantIdentity });
+    this.emit('contact', { accountId, jid: chatIdentity?.jid ?? message.remoteJid, pushName: message.pushName, profilePictureUrl: message.profilePictureUrl, identity: chatIdentity });
+
+    // Perfil nunca deve atrasar a mensagem. A atualização é enviada à UI apenas
+    // quando o WhatsApp devolver a foto, mantendo o WebChat responsivo.
+    if (!isGroup && chatIdentity?.jid && !message.profilePictureUrl) {
+      void provider.profilePictureUrl(chatIdentity.jid).then(profilePictureUrl => {
+        if (!profilePictureUrl) return;
+        this.db.prepare(`UPDATE chat_cache SET profile_url=COALESCE(?,profile_url) WHERE account_id=? AND (jid=? OR lid=? OR pn_jid=?)`).run(profilePictureUrl, accountId, chatIdentity?.jid ?? null, chatIdentity?.lid ?? null, chatIdentity?.pnJid ?? null);
+        this.emit('contact', { accountId, jid: chatIdentity?.jid, pushName: message.pushName, profilePictureUrl, identity: chatIdentity });
+      }).catch(() => undefined);
+    }
   }
 
   private persistIdentity(accountId: string, identity: ContactPresence, pushName: string | undefined, source: string) {

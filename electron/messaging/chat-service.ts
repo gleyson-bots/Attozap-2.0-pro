@@ -131,7 +131,7 @@ export class ChatService {
 
   async sendPresence(accountId: string, target: string, state: 'composing' | 'paused') {
     const provider = await this.ensureAccountLive(accountId);
-    const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target, accountId);
     await provider.sendPresence?.(remoteJid, state);
     return remoteJid;
   }
@@ -260,6 +260,16 @@ export class ChatService {
     return cached ? { id: messageId, status: cached.status, error: cached.error ?? null, created_at: cached.updated_at } : undefined;
   }
 
+  messageRow(accountId: string, messageId: string) {
+    const row = this.db.prepare(`SELECT * FROM message_log WHERE account_id=? AND id=? LIMIT 1`).get(accountId, messageId) as any;
+    if (!row) return undefined;
+    return {
+      ...row,
+      media_url: row.media_path ? pathToFileURL(String(row.media_path)).href : undefined,
+      metadata: jsonObject(row.metadata_json),
+    };
+  }
+
   private async resolveContactWithProvider(provider: MessagingProvider, target: string): Promise<ContactPresence> {
     const clean = target.trim();
     if (!clean) throw new Error('Informe o destinatário');
@@ -292,7 +302,22 @@ export class ChatService {
     return { ...resolved, input: phone, exists: true, phone: resolved.phone ?? phone };
   }
 
-  private async resolveTargetWithProvider(provider: MessagingProvider, target: string) {
+  private cachedTarget(accountId: string, target: string): string | undefined {
+    const clean = target.trim();
+    if (!isJid(clean) || clean.endsWith('@broadcast') || clean.endsWith('@newsletter')) return undefined;
+    const row = this.db.prepare(`
+      SELECT COALESCE(i.lid, c.lid, i.pn_jid, c.pn_jid, i.canonical_jid, c.jid) AS target
+      FROM chat_cache c
+      LEFT JOIN wa_identities i ON i.account_id=c.account_id AND (i.canonical_jid=c.jid OR i.lid=c.jid OR i.pn_jid=c.jid)
+      WHERE c.account_id=? AND (c.jid=? OR c.lid=? OR c.pn_jid=? OR i.canonical_jid=? OR i.lid=? OR i.pn_jid=?)
+      LIMIT 1
+    `).get(accountId, clean, clean, clean, clean, clean, clean) as { target?: string } | undefined;
+    return row?.target ? String(row.target) : undefined;
+  }
+
+  private async resolveTargetWithProvider(provider: MessagingProvider, target: string, accountId?: string) {
+    const cached = accountId ? this.cachedTarget(accountId, target) : undefined;
+    if (cached) return cached;
     const resolved = await this.resolveContactWithProvider(provider, target);
     return resolved?.lid ?? resolved?.pnJid ?? resolved?.jid ?? (() => { throw new Error('O WhatsApp não devolveu um JID/LID válido'); })();
   }
@@ -313,13 +338,13 @@ export class ChatService {
     const cleanText = text.trim();
     if (!cleanText) throw new Error('Digite uma mensagem');
     const provider = await this.ensureAccountLive(accountId);
-    const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target, accountId);
     this.license.reserve('outbound');
     try {
       const result = await provider.sendText(remoteJid, cleanText);
-      const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
+      const canonical = result.remoteJid || remoteJid;
       this.log(result.id, accountId, canonical, 'text', cleanText, 'pending', undefined, undefined, undefined, undefined, { transportJid: remoteJid });
-      await this.touchChat(accountId, canonical);
+      void this.touchChat(accountId, canonical).catch(error => console.warn('[webchat:touch-chat]', error instanceof Error ? error.message : String(error)));
       return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -330,7 +355,7 @@ export class ChatService {
 
   async sendMedia(accountId: string, target: string, type: 'image'|'video'|'document'|'audio'|'sticker', input: SendMediaInput) {
     const provider = await this.ensureAccountLive(accountId);
-    const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target, accountId);
     this.license.reserve('outbound');
     const outboundInput: SendMediaInput = type === 'audio' ? { ...input, caption: undefined } : input;
     try {
@@ -339,9 +364,9 @@ export class ChatService {
         : type === 'document' ? await provider.sendDocument(remoteJid, outboundInput)
         : type === 'audio' ? await provider.sendAudio(remoteJid, outboundInput)
         : await provider.sendSticker(remoteJid, outboundInput);
-      const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
+      const canonical = result.remoteJid || remoteJid;
       this.log(result.id, accountId, canonical, type, type === 'audio' ? (outboundInput.fileName ?? '') : (outboundInput.caption ?? outboundInput.fileName ?? ''), 'pending', undefined, outboundInput.path, outboundInput.fileName, outboundInput.mimetype, { ptt: outboundInput.ptt ?? false, transportJid: remoteJid });
-      await this.touchChat(accountId, canonical);
+      void this.touchChat(accountId, canonical).catch(error => console.warn('[webchat:touch-chat]', error instanceof Error ? error.message : String(error)));
       return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -366,13 +391,13 @@ export class ChatService {
 
   private async sendLocation(accountId: string, target: string, input: LocationInput) {
     const provider = await this.ensureAccountLive(accountId);
-    const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target, accountId);
     this.license.reserve('outbound');
     try {
       const result = await provider.sendLocation(remoteJid, input);
-      const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
+      const canonical = result.remoteJid || remoteJid;
       this.log(result.id, accountId, canonical, 'location', input.name ?? input.address ?? '', 'pending', undefined, undefined, undefined, undefined, { transportJid: remoteJid });
-      await this.touchChat(accountId, canonical);
+      void this.touchChat(accountId, canonical).catch(error => console.warn('[webchat:touch-chat]', error instanceof Error ? error.message : String(error)));
       return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -383,13 +408,13 @@ export class ChatService {
 
   private async sendContact(accountId: string, target: string, input: ContactCardInput) {
     const provider = await this.ensureAccountLive(accountId);
-    const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target, accountId);
     this.license.reserve('outbound');
     try {
       const result = await provider.sendContact(remoteJid, input);
-      const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
+      const canonical = result.remoteJid || remoteJid;
       this.log(result.id, accountId, canonical, 'contact', input.displayName, 'pending', undefined, undefined, undefined, undefined, { transportJid: remoteJid });
-      await this.touchChat(accountId, canonical);
+      void this.touchChat(accountId, canonical).catch(error => console.warn('[webchat:touch-chat]', error instanceof Error ? error.message : String(error)));
       return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -400,16 +425,16 @@ export class ChatService {
 
   async sendPoll(accountId: string, target: string, input: PollInput) {
     const provider = await this.ensureAccountLive(accountId);
-    const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target, accountId);
     const question = input.name.trim();
     const values = [...new Set(input.values.map(item => item.trim()).filter(Boolean))].slice(0, 12);
     if (!question || values.length < 2) throw new Error('A enquete precisa de pergunta e pelo menos duas opções');
     this.license.reserve('outbound');
     try {
       const result = await provider.sendPoll(remoteJid, { name: question, values, selectableCount: Math.max(1, Math.min(values.length, input.selectableCount ?? 1)) });
-      const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
+      const canonical = result.remoteJid || remoteJid;
       this.log(result.id, accountId, canonical, 'poll', question, 'pending', undefined, undefined, undefined, undefined, { question, options: values, selectableCount: input.selectableCount ?? 1, transportJid: remoteJid });
-      await this.touchChat(accountId, canonical);
+      void this.touchChat(accountId, canonical).catch(error => console.warn('[webchat:touch-chat]', error instanceof Error ? error.message : String(error)));
       return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

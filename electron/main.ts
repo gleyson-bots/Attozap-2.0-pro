@@ -99,7 +99,7 @@ app.whenReady().then(async () => {
   mainWindow = createWindow();
 
   safeRegister('recovery-ipc', () => registerRecoveryIpc(db, userData));
-  safeRegister('core-ipc', () => registerIpc({ window: mainWindow!, db, accounts, campaigns, autoReply, tools, license, deliveryCenter }));
+  safeRegister('core-ipc', () => registerIpc({ window: mainWindow!, db, accounts, chat, campaigns, autoReply, tools, license, deliveryCenter }));
   safeRegister('extractor-ipc', () => registerExtractorIpc(db));
   safeRegister('desktop-ipc', () => registerDesktopIpc(mainWindow!));
   safeRegister('chat-ipc', () => registerChatIpc(chat, license));

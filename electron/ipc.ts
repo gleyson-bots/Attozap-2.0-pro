@@ -8,6 +8,7 @@ import type { AutoReplyEngine, AutoReplyRuleInput } from './automation/auto-repl
 import type { WaSenderTools, ImportedContact } from './tools/wasender-tools.js';
 import type { LicenseService } from './license-service.js';
 import type { DeliveryCenter, DeliveryQuery } from './delivery-center.js';
+import type { ChatService } from './messaging/chat-service.js';
 
 function send(window: BrowserWindow, channel: string, payload: unknown) {
   if (!window.isDestroyed()) window.webContents.send(channel, payload);
@@ -19,13 +20,14 @@ export function registerIpc(input: {
   window: BrowserWindow;
   db: AttozapDatabase;
   accounts: AccountManager;
+  chat: ChatService;
   campaigns: CampaignEngine;
   autoReply: AutoReplyEngine;
   tools: WaSenderTools;
   license: LicenseService;
   deliveryCenter: DeliveryCenter;
 }) {
-  const { window, db, accounts, campaigns, autoReply, tools, license, deliveryCenter } = input;
+  const { window, db, accounts, chat, campaigns, autoReply, tools, license, deliveryCenter } = input;
 
   function requireLicense() {
     const status = license.status();
@@ -98,7 +100,11 @@ export function registerIpc(input: {
   });
   accounts.on('error', payload => send(window, 'accounts:error', payload));
   accounts.on('restriction', payload => send(window, 'accounts:restriction', payload));
-  accounts.on('message', payload => send(window, 'messages:incoming', payload));
+  accounts.on('contact', payload => send(window, 'messages:contact', payload));
+  accounts.on('message', payload => {
+    const persisted = payload?.message?.id ? chat.messageRow(payload.accountId, payload.message.id) : undefined;
+    send(window, 'messages:incoming', { ...payload, persisted });
+  });
   accounts.on('poll-update', payload => {
     db.prepare(`
       INSERT INTO poll_reports (account_id, poll_id, remote_jid, question, result_json, updated_at)
