@@ -93,8 +93,11 @@ async function requestJson(url: string, init: RequestInit, timeoutMs = 45_000) {
 
 export function listAiProviders(db: AttozapDatabase) {
   return Object.values(PROVIDERS).map(config => {
-    const current = providerConfig(db, config.id);
-    return { id: config.id, label: config.label, model: current.model, configured: Boolean(current.key), protocol: config.protocol };
+    const configuredBase = config.baseSetting ? setting(db, config.baseSetting) : undefined;
+    const base = configuredBase || config.defaultBase;
+    const key = secret(db, config.apiKeySetting);
+    const model = setting(db, config.modelSetting) || config.defaultModel;
+    return { id: config.id, label: config.label, model, configured: Boolean(key && base), protocol: config.protocol };
   });
 }
 
