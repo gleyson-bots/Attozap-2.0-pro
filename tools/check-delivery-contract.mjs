@@ -30,7 +30,7 @@ function walk(directory) {
   return output;
 }
 
-requireText('package.json', '"version": "2.0.0-rc.11"', 'RC11 package version');
+requireText('package.json', '"version": "2.0.0-rc.12"', 'RC12 package version');
 requireText('electron/messaging/baileys-provider.ts', 'getLIDForPN', 'PN -> LID transport mapping');
 requireText('electron/messaging/baileys-provider.ts', 'messages.update', 'asynchronous WhatsApp status listener');
 requireText('electron/messaging/chat-service.ts', 'return resolved?.lid ?? resolved?.pnJid', 'LID-first direct resolution');
