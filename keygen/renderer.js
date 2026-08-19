@@ -1,5 +1,6 @@
 const FEATURES = [
-  ['sender','Contact Sender'],['group_sender','Group Sender'],['scheduler','Agendamentos'],['contacts','Contatos'],
+  ['webchat','WebChat'],['sender','Contact Sender'],['group_sender','Group Sender'],['campaign_center','Campaign Center'],
+  ['delivery_center','Delivery Center'],['warmup','Aquecimento'],['ai_chat','Chat IA'],['scheduler','Agendamentos'],['contacts','Contatos'],
   ['groups','Group Tools'],['bulk_groups','Bulk Groups'],['filter','Number Filter'],['grabber','Contact Grabber'],
   ['autoreply','Auto Reply'],['templates','Templates'],['poll_report','Poll Report'],['extractors','Extratores'],['proxy','Proxy por conta']
 ];
