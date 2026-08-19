@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from '../messaging/account-manager.js';
 import type { ContactCardInput, LocationInput, MessageResult, MessagingProvider, PollInput, SendMediaInput } from '../messaging/provider.js';
+import type { ChatService } from '../messaging/chat-service.js';
 import { getCachedMessageStatus, mergeDeliveryStatus, type StoredDeliveryStatus } from '../messaging/status.js';
 import {
   finalizeRecipientSubmission,
@@ -136,7 +137,7 @@ function uniqueStrings(values: Array<string | undefined>) {
 export class CampaignEngine extends EventEmitter {
   private readonly runtime = new Map<string, RuntimeState>();
 
-  constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager) {
+  constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager, private readonly chats: ChatService) {
     super();
   }
 
@@ -282,7 +283,7 @@ export class CampaignEngine extends EventEmitter {
           for (let index = 0; index < selectedMessages.length; index++) {
             const text = renderTemplate(selectedMessages[index], recipient).trim();
             if (text) {
-              const receipt = await provider.sendText(originalTarget, text);
+              const receipt = await this.chats.sendText(selectedAccountId, originalTarget, text);
               this.logMessage(receipt.id, selectedAccountId, receipt.remoteJid || originalTarget, 'out', 'text', text, 'pending');
               recordCampaignDelivery(this.db, { campaignId: id, recipientId: row.id, accountId: selectedAccountId, messageId: receipt.id, messageType: 'text' });
               registered++;
@@ -292,7 +293,7 @@ export class CampaignEngine extends EventEmitter {
 
           for (let index = 0; index < parts.length; index++) {
             const part = parts[index];
-            const result = await this.sendPart(provider, originalTarget, part, recipient);
+            const result = await this.sendPart(selectedAccountId, originalTarget, part, recipient);
             this.logMessage(result.id, selectedAccountId, result.remoteJid || originalTarget, 'out', part.type, '', 'pending');
             recordCampaignDelivery(this.db, { campaignId: id, recipientId: row.id, accountId: selectedAccountId, messageId: result.id, messageType: part.type });
             registered++;
@@ -408,17 +409,17 @@ export class CampaignEngine extends EventEmitter {
 
   private emitRuntime(id: string) { this.emit('runtime', this.runtimeState(id)); }
 
-  private async sendPart(provider: MessagingProvider, target: string, part: CampaignPart, recipient: CampaignRecipient): Promise<MessageResult> {
+  private async sendPart(accountId: string, target: string, part: CampaignPart, recipient: CampaignRecipient): Promise<MessageResult> {
     const render = (value?: string) => value ? renderTemplate(value, recipient) : value;
     switch (part.type) {
-      case 'image': return provider.sendImage(target, { ...part.input, caption: render(part.input.caption) });
-      case 'video': return provider.sendVideo(target, { ...part.input, caption: render(part.input.caption) });
-      case 'document': return provider.sendDocument(target, { ...part.input, caption: render(part.input.caption) });
-      case 'audio': return provider.sendAudio(target, part.input);
-      case 'sticker': return provider.sendSticker(target, part.input);
-      case 'location': return provider.sendLocation(target, part.input);
-      case 'contact': return provider.sendContact(target, { ...part.input, displayName: render(part.input.displayName) ?? part.input.displayName });
-      case 'poll': return provider.sendPoll(target, { ...part.input, name: render(part.input.name) ?? part.input.name, values: part.input.values.map(value => render(value) ?? value) });
+      case 'image': return this.chats.sendContent(accountId, target, { type: 'image', input: { ...part.input, caption: render(part.input.caption) } });
+      case 'video': return this.chats.sendContent(accountId, target, { type: 'video', input: { ...part.input, caption: render(part.input.caption) } });
+      case 'document': return this.chats.sendContent(accountId, target, { type: 'document', input: { ...part.input, caption: render(part.input.caption) } });
+      case 'audio': return this.chats.sendContent(accountId, target, { type: 'audio', input: part.input });
+      case 'sticker': return this.chats.sendContent(accountId, target, { type: 'sticker', input: part.input });
+      case 'location': return this.chats.sendContent(accountId, target, { type: 'location', input: part.input });
+      case 'contact': return this.chats.sendContent(accountId, target, { type: 'contact', input: { ...part.input, displayName: render(part.input.displayName) ?? part.input.displayName } });
+      case 'poll': return this.chats.sendContent(accountId, target, { type: 'poll', input: { ...part.input, name: render(part.input.name) ?? part.input.name, values: part.input.values.map(value => render(value) ?? value) } });
     }
     throw new Error('Tipo de conteúdo não suportado');
   }

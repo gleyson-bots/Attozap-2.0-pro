@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from './account-manager.js';
-import type { MessagingProvider, PollInput, SendMediaInput } from './provider.js';
+import type { ContactCardInput, LocationInput, MessagingProvider, OutboundContent, PollInput, SendMediaInput } from './provider.js';
 import { getCachedMessageStatus, mergeDeliveryStatus, type StoredDeliveryStatus } from './status.js';
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
@@ -191,7 +191,9 @@ export class ChatService {
     if (!phone) throw new Error('Destinatário inválido');
     const [resolved] = await provider.checkNumbers([phone]);
     if (!resolved?.exists) throw new Error(`O número ${phone} não foi localizado no WhatsApp`);
-    return resolved.lid ?? resolved.pnJid ?? resolved.jid ?? `${phone}@s.whatsapp.net`;
+    // Para números digitados pela primeira vez, o PN JID é o alvo mais estável.
+    // O provider converte PN -> LID apenas quando possui um mapeamento confirmado.
+    return resolved.pnJid ?? resolved.jid ?? resolved.lid ?? `${phone}@s.whatsapp.net`;
   }
 
   async resolveTarget(accountId: string, target: string) {
@@ -234,6 +236,52 @@ export class ChatService {
       const message = error instanceof Error ? error.message : String(error);
       this.log(randomUUID(), accountId, remoteJid, type, input.caption ?? input.fileName ?? '', 'failed', message, input.path, input.fileName, input.mimetype);
       throw new Error(`Falha ao enviar ${type} para ${remoteJid}: ${message}`);
+    }
+  }
+
+  async sendContent(accountId: string, target: string, content: OutboundContent) {
+    switch (content.type) {
+      case 'text': return this.sendText(accountId, target, content.text);
+      case 'image': return this.sendMedia(accountId, target, 'image', content.input);
+      case 'video': return this.sendMedia(accountId, target, 'video', content.input);
+      case 'document': return this.sendMedia(accountId, target, 'document', content.input);
+      case 'audio': return this.sendMedia(accountId, target, 'audio', content.input);
+      case 'sticker': return this.sendMedia(accountId, target, 'sticker', content.input);
+      case 'poll': return this.sendPoll(accountId, target, content.input);
+      case 'location': return this.sendLocation(accountId, target, content.input);
+      case 'contact': return this.sendContact(accountId, target, content.input);
+    }
+  }
+
+  private async sendLocation(accountId: string, target: string, input: LocationInput) {
+    const provider = await this.ensureAccountLive(accountId);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    try {
+      const result = await provider.sendLocation(remoteJid, input);
+      const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
+      this.log(result.id, accountId, canonical, 'location', input.name ?? input.address ?? '', 'pending', undefined, undefined, undefined, undefined, { transportJid: remoteJid });
+      await this.touchChat(accountId, canonical);
+      return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log(randomUUID(), accountId, remoteJid, 'location', input.name ?? input.address ?? '', 'failed', message);
+      throw new Error(`Falha ao enviar localização para ${remoteJid}: ${message}`);
+    }
+  }
+
+  private async sendContact(accountId: string, target: string, input: ContactCardInput) {
+    const provider = await this.ensureAccountLive(accountId);
+    const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    try {
+      const result = await provider.sendContact(remoteJid, input);
+      const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
+      this.log(result.id, accountId, canonical, 'contact', input.displayName, 'pending', undefined, undefined, undefined, undefined, { transportJid: remoteJid });
+      await this.touchChat(accountId, canonical);
+      return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log(randomUUID(), accountId, remoteJid, 'contact', input.displayName, 'failed', message);
+      throw new Error(`Falha ao enviar contato para ${remoteJid}: ${message}`);
     }
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { File, FileUp, MessageCircle, Paperclip, RefreshCw, Search, Send, Settings2, Smile, Vote, Wifi, X } from 'lucide-react';
+import { File, FileUp, MessageCircle, Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings2, Smile, Square, Vote, Wifi, X } from 'lucide-react';
 import { toLocalDateTime } from '../lib';
 
 function labelFor(chat: any) { return chat?.display_name || chat?.name || (chat?.phone ? `+${chat.phone}` : chat?.jid || 'Conversa'); }
@@ -16,6 +16,14 @@ function messageTime(message: any) { return epochMs(message?.created_at); }
 function messageStatusLabel(status?: string) {
   const labels: Record<string, string> = { pending: 'enviando…', sent: 'enviada', delivered: 'entregue', read: 'lida', played: 'reproduzida', failed: 'falhou' };
   return labels[String(status ?? '')] ?? String(status ?? '');
+}
+function blobAsBase64(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('Não foi possível ler o áudio gravado'));
+    reader.onloadend = () => resolve(String(reader.result ?? '').split(',').pop() ?? '');
+    reader.readAsDataURL(blob);
+  });
 }
 function orderMessages(rows: any[]) {
   const byId = new Map<string, any>();
@@ -83,6 +91,10 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const [proxy, setProxy] = useState('');
   const [showProxy, setShowProxy] = useState(false);
   const [showPoll, setShowPoll] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState('Sim\nNão');
   const [busy, setBusy] = useState(false);
@@ -92,6 +104,10 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const messageLoadGeneration = useRef(0);
   const localSequence = useRef(0);
   const reconcileTimer = useRef<number | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingStartedAtRef = useRef(0);
 
   useEffect(() => {
     const available = connected.find(account => account.id === accountId);
@@ -158,6 +174,19 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     setMessages([]);
     if (selected?.jid) void loadMessages(selected.jid, true);
   }, [accountId, selected?.jid]);
+
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => setRecordingSeconds(Math.max(0, Math.floor((Date.now() - recordingStartedAtRef.current) / 1000))), 250);
+    return () => window.clearInterval(timer);
+  }, [recording]);
+
+  useEffect(() => () => {
+    recorderRef.current?.stop();
+    recordingStreamRef.current?.getTracks().forEach(track => track.stop());
+    recorderRef.current = null;
+    recordingStreamRef.current = null;
+  }, []);
 
   useEffect(() => {
     const offIncoming = window.attozap.messages.onIncoming((payload: any) => {
@@ -235,6 +264,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   }
 
   async function attach(forceType?: 'sticker') {
+    setShowAttachMenu(false);
     const requested = newTarget.trim();
     const sendTarget = requested || selected?.jid || '';
     if (!accountId || !sendTarget) { setError('Selecione uma conversa ou informe um destinatário.'); return; }
@@ -256,6 +286,51 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       scheduleReconcile(resolved, 180);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
+  }
+
+  async function startRecording() {
+    const recordedTarget = newTarget.trim() || selected?.jid || '';
+    if (!accountId || !recordedTarget) { setError('Selecione uma conversa ou informe um destinatário antes de gravar.'); return; }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { setError('Este ambiente não oferece gravação de áudio pelo microfone.'); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find(value => MediaRecorder.isTypeSupported(value)) ?? '';
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      recordingChunksRef.current = [];
+      recordingStreamRef.current = stream;
+      recorderRef.current = recorder;
+      recordingStartedAtRef.current = Date.now();
+      setRecordingSeconds(0);
+      recorder.ondataavailable = event => { if (event.data.size > 0) recordingChunksRef.current.push(event.data); };
+      recorder.onerror = () => { setError('O gravador de áudio falhou.'); setRecording(false); };
+      recorder.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        recordingChunksRef.current = [];
+        void (async () => {
+          if (!blob.size) throw new Error('A gravação ficou vazia');
+          setBusy(true); setError('');
+          const base64 = await blobAsBase64(blob);
+          const saved = await window.attozap.files.saveTempBinary({ base64, suggestedName: 'mensagem-de-voz.webm', maxBytes: 15 * 1024 * 1024 });
+          const result = await window.attozap.webchat.sendMedia(accountId, recordedTarget, 'audio', { path: saved.filePath, fileName: 'mensagem-de-voz.webm', mimetype: blob.type || 'audio/webm', ptt: true });
+          const resolved = result.resolvedTarget ?? result.remoteJid ?? recordedTarget;
+          appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'audio', text: 'Mensagem de voz', file_name: 'mensagem-de-voz.webm', status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { ptt: true, transportJid: result.transportJid } });
+          setSelected((current: any) => newTarget.trim() ? { jid: resolved, display_name: newTarget.trim() } : { ...(current ?? {}), jid: resolved });
+          setNewTarget('');
+          await loadChats();
+          scheduleReconcile(resolved, 180);
+        })().catch((e: any) => setError(e?.message ?? String(e))).finally(() => setBusy(false));
+      };
+      recorder.start(250);
+      setRecording(true);
+    } catch (e: any) { setError(e?.message ?? 'Permissão do microfone negada.'); }
+  }
+
+  function stopRecording() {
+    recorderRef.current?.stop();
+    recordingStreamRef.current?.getTracks().forEach(track => track.stop());
+    recorderRef.current = null;
+    recordingStreamRef.current = null;
+    setRecording(false);
   }
 
   async function sendPoll() {
@@ -300,7 +375,17 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
         <header><Avatar chat={selected} large/><div className="grow"><b>{typedTarget ? `Nova conversa · ${typedTarget}` : selected ? labelFor(selected) : 'Selecione uma conversa'}</b><small>{typedTarget || selected?.jid || 'Envie para número/JID/LID para iniciar'}</small></div></header>
         <div className="message-stream">{messages.map(message => <div key={message.id} className={`chat-bubble ${message.direction === 'out' ? 'out' : 'in'} ${message.status === 'failed' ? 'failed' : ''}`}><MessageBody message={message}/><small>{toLocalDateTime(message.created_at)}{message.status === 'failed' ? ` · ${message.error || 'falhou'}` : message.direction === 'out' ? ` · ${messageStatusLabel(message.status)}` : ''}</small></div>)}{selected && !messages.length && <div className="empty mini"><MessageCircle size={26}/><p>Sem mensagens registradas nesta conversa.</p></div>}<div ref={bottom}/></div>
         {showPoll && <div className="poll-composer"><div className="field grow"><label>Pergunta</label><input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} placeholder="Qual opção você prefere?"/></div><div className="field grow"><label>Opções — uma por linha</label><textarea value={pollOptions} onChange={e => setPollOptions(e.target.value)}/></div><button className="button primary" disabled={busy} onClick={() => void sendPoll()}><Vote size={15}/> Enviar enquete</button></div>}
-        <footer><button className="icon-button" disabled={busy || !target} onClick={() => void attach()} title="Imagem, vídeo, áudio ou documento"><Paperclip size={18}/></button><button className="icon-button" disabled={busy || !target} onClick={() => void attach('sticker')} title="Enviar figurinha WebP"><Smile size={18}/></button><button className={`icon-button ${showPoll ? 'active' : ''}`} disabled={busy || !target} onClick={() => setShowPoll(v => !v)} title="Enquete"><Vote size={18}/></button><textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendText(); } }} placeholder="Digite uma mensagem..."/><button className="button primary send-chat" disabled={busy || !text.trim() || !target} onClick={() => void sendText()}>{busy ? <FileUp size={17}/> : <Send size={17}/>} Enviar</button></footer>
+        <div className="webchat-popovers">
+          {showAttachMenu && <div className="webchat-popover attach-popover"><b>Anexar conteúdo</b><div className="popover-actions"><button onClick={() => void attach()}><Paperclip size={15}/> Mídia ou documento</button><button onClick={() => void attach('sticker')}><Smile size={15}/> Figurinha WebP</button><button onClick={() => setShowPoll(true)}><Vote size={15}/> Enquete</button></div></div>}
+          {showEmoji && <div className="webchat-popover emoji-popover"><b>Emojis rápidos</b><div className="emoji-grid">{['😀','😂','😍','👍','🙏','🔥','✅','🎉','👋','💬','❤️','😅'].map(emoji => <button key={emoji} onClick={() => { setText(current => `${current}${emoji}`); setShowEmoji(false); }}>{emoji}</button>)}</div></div>}
+        </div>
+        <footer className={recording ? 'recording' : ''}>
+          <button className={`icon-button ${showAttachMenu ? 'active' : ''}`} disabled={busy || !target || recording} onClick={() => { setShowAttachMenu(value => !value); setShowEmoji(false); }} title="Anexar"><Plus size={18}/></button>
+          <button className={`icon-button ${showEmoji ? 'active' : ''}`} disabled={busy || !target || recording} onClick={() => { setShowEmoji(value => !value); setShowAttachMenu(false); }} title="Emojis"><Smile size={18}/></button>
+          <button className={`icon-button ${recording ? 'danger' : ''}`} disabled={busy || !target && !recording} onClick={() => recording ? stopRecording() : void startRecording()} title={recording ? 'Parar gravação' : 'Gravar áudio'}>{recording ? <Square size={17}/> : <Mic size={18}/>}</button>
+          {recording && <span className="recording-timer">Gravando {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</span>}
+          <textarea value={text} disabled={recording} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendText(); } }} placeholder={recording ? 'Gravação em andamento…' : 'Digite uma mensagem…'}/><button className="button primary send-chat" disabled={busy || recording || !text.trim() || !target} onClick={() => void sendText()}>{busy ? <FileUp size={17}/> : <Send size={17}/>} Enviar</button>
+        </footer>
       </section>
     </div>
   </div>;

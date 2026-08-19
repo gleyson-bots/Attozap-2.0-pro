@@ -83,7 +83,7 @@ app.whenReady().then(async () => {
 
   const accounts = new AccountManager(db, join(userData, 'sessions'));
   const chat = new ChatService(db, accounts);
-  const campaigns = new CampaignEngine(db, accounts);
+  const campaigns = new CampaignEngine(db, accounts, chat);
   const autoReply = new AutoReplyEngine(db, accounts);
   const tools = new WaSenderTools(db, accounts);
   warmupEngine = new WarmupEngine(db, chat);

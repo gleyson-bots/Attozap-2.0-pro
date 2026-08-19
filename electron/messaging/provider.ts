@@ -103,6 +103,17 @@ export type PollInput = {
   selectableCount?: number;
 };
 
+export type OutboundContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; input: SendMediaInput }
+  | { type: 'video'; input: SendMediaInput }
+  | { type: 'document'; input: SendMediaInput }
+  | { type: 'audio'; input: SendMediaInput }
+  | { type: 'sticker'; input: SendMediaInput }
+  | { type: 'location'; input: LocationInput }
+  | { type: 'contact'; input: ContactCardInput }
+  | { type: 'poll'; input: PollInput };
+
 export type GroupParticipantIdentity = {
   jid: string;
   lid?: string;
