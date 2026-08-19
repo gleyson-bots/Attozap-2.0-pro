@@ -10,7 +10,7 @@
   <main class="shell">
     <header class="hero">
       <div class="brand"><span class="logo bot-logo"><svg viewBox="0 0 128 128" aria-hidden="true"><defs><linearGradient id="kg" x1="16" y1="12" x2="112" y2="116"><stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs><path d="M64 8c4 0 7 3 7 7v6c18 2 32 16 34 34l7 5c4 3 6 7 6 12v12c0 6-4 11-10 13l-6 2c-7 15-21 24-38 24s-31-9-38-24l-6-2C14 95 10 90 10 84V72c0-5 2-9 6-12l7-5c2-18 16-32 34-34v-6c0-4 3-7 7-7Z" fill="url(#kg)"/><rect x="30" y="34" width="68" height="62" rx="26" fill="#eef3ff"/><rect x="37" y="43" width="54" height="42" rx="19" fill="#0a0e19"/><circle cx="52" cy="63" r="7" fill="#38e8ff"/><circle cx="76" cy="63" r="7" fill="#38e8ff"/><path d="M51 76c7 6 19 6 26 0" fill="none" stroke="#94f4ff" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>ATTOZAP</strong><small>LICENSE AUTHORITY</small></div></div>
-      <div><span class="eyebrow">KEYGEN PORTABLE</span><h1>Emita licenças assinadas com Ed25519</h1><p>A chave privada permanece fora do WASender. Selecione sua chave, informe os limites e gere a licença do cliente.</p></div>
+      <div><span class="eyebrow">KEYGEN PORTABLE · RC.12</span><h1>Emita licenças assinadas com Ed25519</h1><p>A chave privada permanece fora do WASender. Selecione a sua chave, escolha o plano e gere uma licença com quotas reais.</p></div>
     </header>
 
     <section class="grid">
@@ -19,25 +19,24 @@
         <label>Chave privada PEM</label>
         <div class="path-row"><input id="privateKeyPath" readonly placeholder="Nenhuma chave selecionada"/><button id="selectKey" class="ghost">Selecionar</button></div>
         <div class="row-actions"><button id="generateKeys" class="ghost">Gerar novo par</button></div>
-        <div class="warning"><strong>Importante:</strong> gerar um novo par exige recompilar o WASender com a nova chave pública. Para a build entregue, use a chave privada entregue junto do KeyGen.</div>
+        <div class="warning"><strong>Importante:</strong> gerar um novo par exige recompilar o WASender com a nova chave pública. A chave privada nunca é incorporada no executável.</div>
       </article>
 
       <article class="card">
-        <div class="section-title"><span>02</span><div><h2>Cliente</h2><p>Dados comerciais e vínculo opcional ao fingerprint.</p></div></div>
+        <div class="section-title"><span>02</span><div><h2>Cliente e plano</h2><p>O plano preenche quotas comerciais aplicadas pelo desktop.</p></div></div>
         <div class="form-grid">
           <div><label>ID do cliente</label><input id="customerId" placeholder="cliente-001"/></div>
           <div><label>Nome do cliente</label><input id="customerName" placeholder="Empresa / cliente"/></div>
-          <div><label>Plano</label><select id="plan"><option value="solo">Solo</option><option value="solo_plus">Solo Plus</option><option value="solo_pro" selected>Solo Pro</option><option value="team">Equipe</option><option value="team_plus">Equipe Plus</option><option value="team_pro">Equipe Pro</option><option value="enterprise">Enterprise</option></select></div>
+          <div><label>Plano</label><select id="plan"><option value="plus">Plus</option><option value="pro" selected>Pro</option><option value="ultra">Ultra</option><option value="enterprise">Enterprise — ilimitado</option></select></div>
           <div><label>Expira em</label><input id="expiresAt" type="date"/></div>
-          <div><label>Máx. usuários</label><input id="maxSeats" type="number" min="1" value="1"/></div>
-          <div><label>Máx. contas WhatsApp</label><input id="maxInstances" type="number" min="1" value="3"/></div>
+          <div class="wide"><label>Resumo das quotas</label><div id="planLimits" class="plan-limits"></div></div>
           <div class="wide"><label>Fingerprint opcional</label><input id="fingerprint" placeholder="Cole o fingerprint exibido no WASender"/></div>
         </div>
       </article>
     </section>
 
     <section class="card features-card">
-      <div class="section-title"><span>03</span><div><h2>Recursos liberados</h2><p>Selecione as funções que esta licença poderá usar.</p></div></div>
+      <div class="section-title"><span>03</span><div><h2>Recursos liberados</h2><p>O plano define os recursos padrão; pode ajustar a seleção antes de emitir.</p></div></div>
       <div id="features" class="feature-grid"></div>
     </section>
 

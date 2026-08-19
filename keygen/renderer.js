@@ -1,9 +1,32 @@
 const FEATURES = [
-  ['webchat','WebChat'],['sender','Contact Sender'],['group_sender','Group Sender'],['campaign_center','Campaign Center'],
-  ['delivery_center','Delivery Center'],['warmup','Aquecimento'],['ai_chat','Chat IA'],['scheduler','Agendamentos'],['contacts','Contatos'],
-  ['groups','Group Tools'],['bulk_groups','Bulk Groups'],['filter','Number Filter'],['grabber','Contact Grabber'],
-  ['autoreply','Auto Reply'],['templates','Templates'],['poll_report','Poll Report'],['extractors','Extratores'],['proxy','Proxy por conta']
+  ['webchat','WebChat'],['sender','Contact Sender'],['groups','Group Sender'],['campaigns','Campanhas'],
+  ['delivery','Delivery Center'],['warmup','Aquecimento'],['ai_chat','Chat IA'],['scheduler','Agendamentos'],['contacts','Contatos'],
+  ['filter','Number Filter'],['autoreply','Auto Reply'],['templates','Templates'],['poll_report','Poll Report'],['extractors','Extratores'],
+  ['proxy','Proxy por conta']
 ];
+
+const PLANS = {
+  plus: {
+    label: 'Plus',
+    limits: { maxSeats: 1, maxInstances: 1, dailyOutbound: 250, campaignRecipients: 1000, campaignStartsDaily: 2, warmupProfiles: 1, warmupDaily: 40, aiDaily: 50 },
+    features: ['webchat','sender','campaigns','delivery','warmup','contacts','templates'],
+  },
+  pro: {
+    label: 'Pro',
+    limits: { maxSeats: 3, maxInstances: 3, dailyOutbound: 1500, campaignRecipients: 10000, campaignStartsDaily: 10, warmupProfiles: 3, warmupDaily: 150, aiDaily: 300 },
+    features: ['webchat','sender','groups','campaigns','delivery','warmup','ai_chat','scheduler','contacts','filter','autoreply','templates','poll_report'],
+  },
+  ultra: {
+    label: 'Ultra',
+    limits: { maxSeats: 10, maxInstances: 10, dailyOutbound: 5000, campaignRecipients: 50000, campaignStartsDaily: 30, warmupProfiles: 10, warmupDaily: 500, aiDaily: 1000 },
+    features: ['*'],
+  },
+  enterprise: {
+    label: 'Enterprise',
+    limits: { maxSeats: null, maxInstances: null, dailyOutbound: null, campaignRecipients: null, campaignStartsDaily: null, warmupProfiles: null, warmupDaily: null, aiDaily: null },
+    features: ['*'],
+  },
+};
 
 const $ = id => document.getElementById(id);
 let lastLicense = null;
@@ -11,9 +34,25 @@ let lastLicense = null;
 for (const [value, label] of FEATURES) {
   const el = document.createElement('label');
   el.className = 'feature';
-  el.innerHTML = `<input type="checkbox" value="${value}" checked><span><b>${label}</b><small>${value}</small></span>`;
+  el.innerHTML = `<input type="checkbox" value="${value}"><span><b>${label}</b><small>${value}</small></span>`;
   $('features').appendChild(el);
 }
+
+function fmt(value) {
+  return value == null ? 'Ilimitado' : new Intl.NumberFormat('pt-BR').format(value);
+}
+
+function renderPlan() {
+  const plan = PLANS[$('plan').value] || PLANS.pro;
+  $('planLimits').textContent = `Contas: ${fmt(plan.limits.maxInstances)} · Saídas/dia: ${fmt(plan.limits.dailyOutbound)} · Campanha: ${fmt(plan.limits.campaignRecipients)} destinatários · Aquecimento: ${fmt(plan.limits.warmupProfiles)} perfil / ${fmt(plan.limits.warmupDaily)} por dia · IA: ${fmt(plan.limits.aiDaily)}/dia`;
+  const all = plan.features.includes('*');
+  for (const input of document.querySelectorAll('#features input')) {
+    input.checked = all || plan.features.includes(input.value);
+  }
+}
+
+$('plan').addEventListener('change', renderPlan);
+renderPlan();
 
 $('selectKey').addEventListener('click', async () => {
   const path = await window.keygen.selectPrivateKey();
@@ -33,21 +72,22 @@ $('issue').addEventListener('click', async () => {
   setStatus('Assinando licença...', 'busy');
   $('issue').disabled = true;
   try {
+    const selectedPlan = $('plan').value;
+    const plan = PLANS[selectedPlan];
     const features = [...document.querySelectorAll('#features input:checked')].map(el => el.value);
     const result = await window.keygen.issueLicense({
       privateKeyPath: $('privateKeyPath').value,
       customerId: $('customerId').value,
       customerName: $('customerName').value,
-      plan: $('plan').value,
+      plan: selectedPlan,
+      limits: plan.limits,
       expiresAt: $('expiresAt').value || null,
-      maxSeats: Number($('maxSeats').value),
-      maxInstances: Number($('maxInstances').value),
       fingerprint: $('fingerprint').value,
       features,
     });
     lastLicense = result;
     $('licenseId').textContent = result.payload.licenseId;
-    $('summary').textContent = `${result.payload.customerName} · ${result.payload.plan} · ${result.payload.maxInstances} conta(s)`;
+    $('summary').textContent = `${result.payload.customerName} · ${plan.label} · ${fmt(result.payload.limits.maxInstances)} conta(s) · ${fmt(result.payload.limits.dailyOutbound)} saídas/dia`;
     $('encoded').value = result.encoded;
     $('result').classList.remove('hidden');
     setStatus('Licença gerada e assinada com sucesso.', 'ok');

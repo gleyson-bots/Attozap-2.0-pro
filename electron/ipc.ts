@@ -71,8 +71,9 @@ export function registerIpc(input: {
   ipcMain.handle('accounts:list', () => accounts.list());
   ipcMain.handle('accounts:create', (_event, name: string) => {
     const payload = requireLicense();
-    if (accounts.list().length >= payload.maxInstances) {
-      throw new Error(`Esta licença permite no máximo ${payload.maxInstances} conta(s) WhatsApp.`);
+    const limits = license.limitsFor(payload);
+    if (limits.maxInstances != null && accounts.list().length >= limits.maxInstances) {
+      throw new Error(`Esta licença permite no máximo ${limits.maxInstances} conta(s) WhatsApp.`);
     }
     return accounts.create(name);
   });

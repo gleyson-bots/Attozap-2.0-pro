@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import type { AttozapDatabase } from '../database.js';
+import type { LicenseService } from '../license-service.js';
 import type { ChatService } from '../messaging/chat-service.js';
 import { generateWarmupText, type WarmupAiProvider } from './ai-text.js';
 
@@ -112,7 +113,7 @@ function mimeFor(path: string, type: ReturnType<typeof mediaType>) {
 export class WarmupEngine {
   private readonly runtime = new Map<string, Runtime>();
 
-  constructor(private readonly db: AttozapDatabase, private readonly chats: ChatService) {}
+  constructor(private readonly db: AttozapDatabase, private readonly chats: ChatService, private readonly license: LicenseService) {}
 
   private setting(key: string) {
     return (this.db.prepare(`SELECT value FROM settings WHERE key=?`).get(key) as { value?: string } | undefined)?.value;
@@ -246,6 +247,9 @@ export class WarmupEngine {
   }
 
   create(input: WarmupProfileInput) {
+    this.license.assertFeature('warmup');
+    const currentProfiles = Number((this.db.prepare(`SELECT COUNT(*) AS count FROM warmup_profiles`).get() as { count?: number } | undefined)?.count ?? 0);
+    this.license.assertWithin('warmupProfiles', currentProfiles + 1);
     const mode = input.mode === 'pool' ? 'pool' : 'direct';
     const peers = mode === 'pool' ? this.validatePeerAccounts(input.peerAccountIds ?? []) : [];
     const accountId = (mode === 'pool' ? peers[0]?.id : input.accountId)?.trim();
@@ -261,10 +265,12 @@ export class WarmupEngine {
 
     const min = clamp(input.minDelaySeconds, 180, 3600, 300);
     const max = Math.max(min, clamp(input.maxDelaySeconds, min, 7200, 900));
-    const daily = clamp(input.dailyLimit, 1, 30, 12);
+    const daily = clamp(input.dailyLimit, 1, 100000, 12);
+    this.license.assertWithin('warmupDaily', daily);
     const start = clamp(input.activeHourStart, 0, 23, 9);
     const end = clamp(input.activeHourEnd, start + 1, 24, 20);
-    const aiDaily = Math.min(daily, clamp(input.aiDailyLimit, 1, 12, 6));
+    const aiDaily = Math.min(daily, clamp(input.aiDailyLimit, 1, 100000, 6));
+    if (source === 'ai') this.license.assertWithin('aiDaily', aiDaily);
     const simulationEnabled = Boolean(input.simulationEnabled);
     const circuitBreakerLimit = clamp(input.circuitBreakerLimit, 1, 5, 3);
     const circuitBreakerCooldownMinutes = clamp(input.circuitBreakerCooldownMinutes, 5, 1440, 60);
@@ -282,6 +288,7 @@ export class WarmupEngine {
   }
 
   update(id: string, input: Partial<WarmupProfileInput>) {
+    this.license.assertFeature('warmup');
     const current = this.get(id);
     if (!current) throw new Error('Perfil de aquecimento não encontrado');
     if (this.runtime.has(id)) throw new Error('Pare o aquecimento antes de editar o perfil');
@@ -297,10 +304,12 @@ export class WarmupEngine {
 
     const min = clamp(input.minDelaySeconds ?? current.min_delay_seconds, 180, 3600, 300);
     const max = Math.max(min, clamp(input.maxDelaySeconds ?? current.max_delay_seconds, min, 7200, 900));
-    const daily = clamp(input.dailyLimit ?? current.daily_limit, 1, 30, 12);
+    const daily = clamp(input.dailyLimit ?? current.daily_limit, 1, 100000, 12);
+    this.license.assertWithin('warmupDaily', daily);
     const start = clamp(input.activeHourStart ?? current.active_hour_start, 0, 23, 9);
     const end = clamp(input.activeHourEnd ?? current.active_hour_end, start + 1, 24, 20);
-    const aiDaily = Math.min(daily, clamp(input.aiDailyLimit ?? current.ai_daily_limit, 1, 12, 6));
+    const aiDaily = Math.min(daily, clamp(input.aiDailyLimit ?? current.ai_daily_limit, 1, 100000, 6));
+    if (source === 'ai') this.license.assertWithin('aiDaily', aiDaily);
     const simulationEnabled = input.simulationEnabled ?? Boolean(current.simulation_enabled);
     const circuitBreakerLimit = clamp(input.circuitBreakerLimit ?? current.circuit_breaker_limit, 1, 5, 3);
     const circuitBreakerCooldownMinutes = clamp(input.circuitBreakerCooldownMinutes ?? current.circuit_breaker_cooldown_minutes, 5, 1440, 60);
@@ -333,6 +342,7 @@ export class WarmupEngine {
   }
 
   async start(id: string) {
+    this.license.assertFeature('warmup');
     const profile = this.get(id);
     if (!profile) throw new Error('Perfil de aquecimento não encontrado');
     const simulated = Boolean(profile.simulation_enabled);
@@ -443,6 +453,7 @@ export class WarmupEngine {
     }
     if (profile.message_source === 'ai' && profile.ai_provider && this.aiUsedToday(profile.id) < profile.ai_daily_limit) {
       try {
+        this.license.reserve('ai');
         const relationship = senderName && recipientName
           ? `Você é ${senderName} respondendo para ${recipientName}. Continue naturalmente a conversa curta entre duas contas de teste próprias.`
           : '';

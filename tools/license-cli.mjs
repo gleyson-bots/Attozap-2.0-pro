@@ -3,21 +3,30 @@ import { createPrivateKey, generateKeyPairSync, randomUUID, sign } from 'node:cr
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
+const PLAN_LIMITS = {
+  plus: { maxSeats: 1, maxInstances: 1, dailyOutbound: 250, campaignRecipients: 1000, campaignStartsDaily: 2, warmupProfiles: 1, warmupDaily: 40, aiDaily: 50 },
+  pro: { maxSeats: 3, maxInstances: 3, dailyOutbound: 1500, campaignRecipients: 10000, campaignStartsDaily: 10, warmupProfiles: 3, warmupDaily: 150, aiDaily: 300 },
+  ultra: { maxSeats: 10, maxInstances: 10, dailyOutbound: 5000, campaignRecipients: 50000, campaignStartsDaily: 30, warmupProfiles: 10, warmupDaily: 500, aiDaily: 1000 },
+  enterprise: { maxSeats: null, maxInstances: null, dailyOutbound: null, campaignRecipients: null, campaignStartsDaily: null, warmupProfiles: null, warmupDaily: null, aiDaily: null },
+};
+const LEGACY_PLAN_MAP = { solo: 'plus', solo_plus: 'plus', solo_pro: 'pro', team: 'pro', team_plus: 'pro', team_pro: 'ultra' };
+
 function usage() {
   console.log(`ATTOZAP License Authority
 
 Comandos:
   node tools/license-cli.mjs keys --out .secrets/attozap-license
   node tools/license-cli.mjs issue --private .secrets/attozap-license.private.pem \\
-    --customer-id cliente-001 --customer-name "Cliente" --plan solo_pro \\
-    --max-instances 3 --expires 2027-08-15 --features sender,groups,filter,autoreply
+    --customer-id cliente-001 --customer-name "Cliente" --plan pro \\
+    --expires 2027-08-15 --features webchat,sender,campaigns,warmup
+
+Planos: plus, pro, ultra, enterprise
+Enterprise usa null/ilimitado para quotas e contas.
 
 Opções de issue:
   --fingerprint <sha256>       Vincula a uma máquina específica
-  --max-seats <n>              Padrão: 1
-  --max-instances <n>          Padrão: 1
   --expires <ISO|never>        Padrão: never
-  --features <csv>             Recursos liberados
+  --features <csv>             Recursos liberados; vazio usa os recursos do plano
   --out <arquivo>              Salva a licença codificada
 `);
 }
@@ -45,13 +54,30 @@ function canonicalize(payload) {
     maxSeats: payload.maxSeats,
     maxInstances: payload.maxInstances,
     features: [...payload.features].sort(),
+    ...(payload.limits ? { limits: {
+      maxSeats: payload.limits.maxSeats,
+      maxInstances: payload.limits.maxInstances,
+      dailyOutbound: payload.limits.dailyOutbound,
+      campaignRecipients: payload.limits.campaignRecipients,
+      campaignStartsDaily: payload.limits.campaignStartsDaily,
+      warmupProfiles: payload.limits.warmupProfiles,
+      warmupDaily: payload.limits.warmupDaily,
+      aiDaily: payload.limits.aiDaily,
+    } } : {}),
     fingerprint: payload.fingerprint ?? null,
     version: payload.version,
   });
 }
 
-function ensureParent(file) {
-  mkdirSync(dirname(resolve(file)), { recursive: true });
+function ensureParent(file) { mkdirSync(dirname(resolve(file)), { recursive: true }); }
+function normalizePlan(value) {
+  const plan = String(value ?? '').trim().toLowerCase();
+  return PLAN_LIMITS[plan] ? plan : LEGACY_PLAN_MAP[plan] || null;
+}
+function featuresFor(plan) {
+  if (plan === 'plus') return ['webchat','sender','campaigns','delivery','warmup','contacts','templates'];
+  if (plan === 'pro') return ['webchat','sender','groups','campaigns','delivery','warmup','ai_chat','scheduler','contacts','filter','autoreply','templates','poll_report'];
+  return ['*'];
 }
 
 function generateKeys(options) {
@@ -70,13 +96,8 @@ function generateKeys(options) {
 function issue(options) {
   const required = ['private', 'customer-id', 'customer-name', 'plan'];
   for (const key of required) if (!options[key]) throw new Error(`Falta --${key}`);
-  const allowedPlans = new Set(['solo', 'solo_plus', 'solo_pro', 'team', 'team_plus', 'team_pro', 'enterprise']);
-  if (!allowedPlans.has(options.plan)) throw new Error(`Plano inválido: ${options.plan}`);
-
-  const maxSeats = Number(options['max-seats'] ?? 1);
-  const maxInstances = Number(options['max-instances'] ?? 1);
-  if (!Number.isInteger(maxSeats) || maxSeats < 1) throw new Error('--max-seats deve ser inteiro >= 1');
-  if (!Number.isInteger(maxInstances) || maxInstances < 1) throw new Error('--max-instances deve ser inteiro >= 1');
+  const plan = normalizePlan(options.plan);
+  if (!plan) throw new Error(`Plano inválido: ${options.plan}. Use plus, pro, ultra ou enterprise.`);
 
   let expiresAt = null;
   if (options.expires && options.expires !== 'never') {
@@ -85,16 +106,19 @@ function issue(options) {
     expiresAt = date.toISOString();
   }
 
+  const limits = { ...PLAN_LIMITS[plan] };
+  const features = [...new Set(String(options.features ?? '').split(',').map(v => v.trim()).filter(Boolean))];
   const payload = {
     licenseId: `AZ-${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`,
     customerId: options['customer-id'],
     customerName: options['customer-name'],
-    plan: options.plan,
+    plan,
     issuedAt: new Date().toISOString(),
     expiresAt,
-    maxSeats,
-    maxInstances,
-    features: [...new Set(String(options.features ?? '').split(',').map(v => v.trim()).filter(Boolean))].sort(),
+    maxSeats: limits.maxSeats,
+    maxInstances: limits.maxInstances,
+    limits,
+    features: (features.length ? features : featuresFor(plan)).sort(),
     fingerprint: options.fingerprint || null,
     version: 1,
   };

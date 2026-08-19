@@ -84,13 +84,13 @@ app.whenReady().then(async () => {
   }
 
   const accounts = new AccountManager(db, join(userData, 'sessions'));
-  const chat = new ChatService(db, accounts);
-  const campaigns = new CampaignEngine(db, accounts, chat);
-  const autoReply = new AutoReplyEngine(db, accounts);
-  const tools = new WaSenderTools(db, accounts);
-  warmupEngine = new WarmupEngine(db, chat);
   const licenseResources = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources');
   const license = new LicenseService(db, licenseResources);
+  const chat = new ChatService(db, accounts, license);
+  const campaigns = new CampaignEngine(db, accounts, chat, license);
+  const autoReply = new AutoReplyEngine(db, accounts, license);
+  const tools = new WaSenderTools(db, accounts);
+  warmupEngine = new WarmupEngine(db, chat, license);
   const deliveryCenter = new DeliveryCenter(db);
 
   ipcMain.handle('app:get-version', () => app.getVersion());

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app } from 'electron';
 import type { AttozapDatabase } from '../database.js';
+import type { LicenseService } from '../license-service.js';
 import type { AccountManager } from './account-manager.js';
 import type { ContactCardInput, ContactPresence, LocationInput, MessagingProvider, OutboundContent, PollInput, SendMediaInput } from './provider.js';
 import { upsertWaIdentity } from './identity-store.js';
@@ -15,7 +16,7 @@ function at(value: unknown) { const parsed = Date.parse(String(value ?? '')); re
 function jsonObject(value: unknown) { try { const parsed = JSON.parse(String(value ?? '{}')); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } }
 
 export class ChatService {
-  constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager) {
+  constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager, private readonly license: LicenseService) {
     accounts.on('message', payload => {
       try {
         const message = payload?.message;
@@ -313,6 +314,7 @@ export class ChatService {
     if (!cleanText) throw new Error('Digite uma mensagem');
     const provider = await this.ensureAccountLive(accountId);
     const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    this.license.reserve('outbound');
     try {
       const result = await provider.sendText(remoteJid, cleanText);
       const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
@@ -329,6 +331,7 @@ export class ChatService {
   async sendMedia(accountId: string, target: string, type: 'image'|'video'|'document'|'audio'|'sticker', input: SendMediaInput) {
     const provider = await this.ensureAccountLive(accountId);
     const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    this.license.reserve('outbound');
     try {
       const result = type === 'image' ? await provider.sendImage(remoteJid, input)
         : type === 'video' ? await provider.sendVideo(remoteJid, input)
@@ -363,6 +366,7 @@ export class ChatService {
   private async sendLocation(accountId: string, target: string, input: LocationInput) {
     const provider = await this.ensureAccountLive(accountId);
     const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    this.license.reserve('outbound');
     try {
       const result = await provider.sendLocation(remoteJid, input);
       const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
@@ -379,6 +383,7 @@ export class ChatService {
   private async sendContact(accountId: string, target: string, input: ContactCardInput) {
     const provider = await this.ensureAccountLive(accountId);
     const remoteJid = await this.resolveTargetWithProvider(provider, target);
+    this.license.reserve('outbound');
     try {
       const result = await provider.sendContact(remoteJid, input);
       const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
@@ -398,6 +403,7 @@ export class ChatService {
     const question = input.name.trim();
     const values = [...new Set(input.values.map(item => item.trim()).filter(Boolean))].slice(0, 12);
     if (!question || values.length < 2) throw new Error('A enquete precisa de pergunta e pelo menos duas opções');
+    this.license.reserve('outbound');
     try {
       const result = await provider.sendPoll(remoteJid, { name: question, values, selectableCount: Math.max(1, Math.min(values.length, input.selectableCount ?? 1)) });
       const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);

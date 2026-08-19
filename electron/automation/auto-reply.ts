@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
+import type { LicenseService } from '../license-service.js';
 import type { AccountManager } from '../messaging/account-manager.js';
 import type { IncomingMessage } from '../messaging/provider.js';
 
@@ -30,7 +31,7 @@ function match(rule: any, text: string) {
 export class AutoReplyEngine {
   private readonly processed = new Set<string>();
 
-  constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager) {
+  constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager, private readonly license: LicenseService) {
     accounts.on('message', payload => void this.handle(payload.accountId, payload.message));
   }
 
@@ -98,6 +99,8 @@ export class AutoReplyEngine {
     if (!rule) return;
 
     try {
+      this.license.assertFeature('autoreply');
+      this.license.reserve('outbound');
       await provider.sendText(message.remoteJid, rule.response_text);
       this.audit('autoreply.sent', rule.id, {
         accountId,

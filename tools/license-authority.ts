@@ -1,6 +1,7 @@
 import { generateKeyPairSync, createPrivateKey, sign, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import type { LicensePayload, LicensePlan, SignedLicense } from '../electron/license.js';
+import { commercialPlan, planFeatures, planLimits, type PlanLimits } from '../electron/license-plans.js';
 
 function canonicalize(payload: LicensePayload) {
   return JSON.stringify({
@@ -13,6 +14,16 @@ function canonicalize(payload: LicensePayload) {
     maxSeats: payload.maxSeats,
     maxInstances: payload.maxInstances,
     features: [...payload.features].sort(),
+    ...(payload.limits ? { limits: {
+      maxSeats: payload.limits.maxSeats,
+      maxInstances: payload.limits.maxInstances,
+      dailyOutbound: payload.limits.dailyOutbound,
+      campaignRecipients: payload.limits.campaignRecipients,
+      campaignStartsDaily: payload.limits.campaignStartsDaily,
+      warmupProfiles: payload.limits.warmupProfiles,
+      warmupDaily: payload.limits.warmupDaily,
+      aiDaily: payload.limits.aiDaily,
+    } } : {}),
     fingerprint: payload.fingerprint ?? null,
     version: payload.version,
   });
@@ -32,21 +43,25 @@ export function issueLicense(input: {
   customerName: string;
   plan: LicensePlan;
   expiresAt?: string | null;
-  maxSeats: number;
-  maxInstances: number;
-  features: string[];
+  maxSeats?: number | null;
+  maxInstances?: number | null;
+  limits?: PlanLimits;
+  features?: string[];
   fingerprint?: string | null;
 }, privateKeyPem: string): SignedLicense {
+  const plan = commercialPlan(input.plan);
+  const limits = input.limits ?? planLimits(plan);
   const payload: LicensePayload = {
     licenseId: `AZ-${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`,
     customerId: input.customerId,
     customerName: input.customerName,
-    plan: input.plan,
+    plan,
     issuedAt: new Date().toISOString(),
     expiresAt: input.expiresAt ?? null,
-    maxSeats: input.maxSeats,
-    maxInstances: input.maxInstances,
-    features: [...new Set(input.features)].sort(),
+    maxSeats: input.maxSeats ?? limits.maxSeats,
+    maxInstances: input.maxInstances ?? limits.maxInstances,
+    limits,
+    features: [...new Set(input.features?.length ? input.features : planFeatures(plan))].sort(),
     fingerprint: input.fingerprint ?? null,
     version: 1,
   };

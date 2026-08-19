@@ -1,7 +1,8 @@
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import { hostname, platform, arch } from 'node:os';
+import type { PlanLimits } from './license-plans.js';
 
-export type LicensePlan = 'solo' | 'solo_plus' | 'solo_pro' | 'team' | 'team_plus' | 'team_pro' | 'enterprise';
+export type LicensePlan = 'solo' | 'solo_plus' | 'solo_pro' | 'team' | 'team_plus' | 'team_pro' | 'plus' | 'pro' | 'ultra' | 'enterprise';
 
 export type LicensePayload = {
   licenseId: string;
@@ -10,9 +11,10 @@ export type LicensePayload = {
   plan: LicensePlan;
   issuedAt: string;
   expiresAt: string | null;
-  maxSeats: number;
-  maxInstances: number;
+  maxSeats: number | null;
+  maxInstances: number | null;
   features: string[];
+  limits?: PlanLimits;
   fingerprint?: string | null;
   version: 1;
 };
@@ -40,6 +42,16 @@ function canonicalize(payload: LicensePayload) {
     maxSeats: payload.maxSeats,
     maxInstances: payload.maxInstances,
     features: [...payload.features].sort(),
+    ...(payload.limits ? { limits: {
+      maxSeats: payload.limits.maxSeats,
+      maxInstances: payload.limits.maxInstances,
+      dailyOutbound: payload.limits.dailyOutbound,
+      campaignRecipients: payload.limits.campaignRecipients,
+      campaignStartsDaily: payload.limits.campaignStartsDaily,
+      warmupProfiles: payload.limits.warmupProfiles,
+      warmupDaily: payload.limits.warmupDaily,
+      aiDaily: payload.limits.aiDaily,
+    } } : {}),
     fingerprint: payload.fingerprint ?? null,
     version: payload.version,
   });

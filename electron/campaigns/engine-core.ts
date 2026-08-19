@@ -4,6 +4,7 @@ import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from '../messaging/account-manager.js';
 import type { ContactCardInput, LocationInput, MessageResult, MessagingProvider, PollInput, SendMediaInput } from '../messaging/provider.js';
 import type { ChatService } from '../messaging/chat-service.js';
+import type { LicenseService } from '../license-service.js';
 import { getCachedMessageStatus, mergeDeliveryStatus, type StoredDeliveryStatus } from '../messaging/status.js';
 import {
   finalizeRecipientSubmission,
@@ -149,15 +150,17 @@ function failureMeta(error: unknown) {
 export class CampaignEngine extends EventEmitter {
   private readonly runtime = new Map<string, RuntimeState>();
 
-  constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager, private readonly chats: ChatService) {
+  constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager, private readonly chats: ChatService, private readonly license: LicenseService) {
     super();
   }
 
   create(input: CreateCampaignInput) {
+    this.license.assertFeature('campaigns');
     const recipients = input.recipients
       .map(recipient => ({ ...recipient, target: recipient.target.trim() }))
       .filter(recipient => Boolean(recipient.target));
     if (!recipients.length) throw new Error('A campanha precisa de pelo menos um destinatário');
+    this.license.assertWithin('campaignRecipients', recipients.length);
 
     const id = randomUUID();
     const targetType = input.targetType ?? 'contact';
@@ -218,11 +221,13 @@ export class CampaignEngine extends EventEmitter {
   }
 
   async start(id: string) {
+    this.license.assertFeature('campaigns');
     const campaign = this.db.prepare(`SELECT * FROM campaigns WHERE id = ?`).get(id) as any;
     if (!campaign) throw new Error('Campanha não encontrada');
     if (this.runtime.has(id) || ['running', 'stopping'].includes(String(campaign.status))) throw new Error('Esta campanha já está em execução');
     if (campaign.status === 'awaiting_ack') throw new Error('A campanha ainda aguarda confirmações do WhatsApp');
     if (campaign.status === 'completed') throw new Error('Esta campanha já foi concluída');
+    this.license.reserve('campaign');
 
     const options = normalizeOptions(JSON.parse(campaign.options_json || '{}') as CampaignOptions);
     const circuitUntil = campaign.circuit_open_until ? Date.parse(String(campaign.circuit_open_until)) : 0;

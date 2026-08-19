@@ -12,14 +12,18 @@ export function registerChatIpc(chat: ChatService, license: LicenseService) {
   ipcMain.handle('webchat:messages', (_event, accountId: string, remoteJid: string, limit = 250) => chat.listMessages(accountId, remoteJid, limit));
   ipcMain.handle('webchat:refresh-profile', (_event, accountId: string, remoteJid: string) => chat.refreshProfile(accountId, remoteJid));
   ipcMain.handle('webchat:message-status', (_event, accountId: string, messageId: string) => chat.messageStatus(accountId, messageId));
-  ipcMain.handle('webchat:resolve', (_event, accountId: string, target: string) => { requireLicense(); return chat.resolveTarget(accountId, target); });
-  ipcMain.handle('webchat:send-text', (_event, accountId: string, target: string, text: string) => { requireLicense(); return chat.sendText(accountId, target, text); });
-  ipcMain.handle('webchat:send-media', (_event, accountId: string, target: string, type: 'image'|'video'|'document'|'audio'|'sticker', input: any) => {
+  const requireWebChat = () => {
     requireLicense();
+    license.assertFeature('webchat');
+  };
+  ipcMain.handle('webchat:resolve', (_event, accountId: string, target: string) => { requireWebChat(); return chat.resolveTarget(accountId, target); });
+  ipcMain.handle('webchat:send-text', (_event, accountId: string, target: string, text: string) => { requireWebChat(); return chat.sendText(accountId, target, text); });
+  ipcMain.handle('webchat:send-media', (_event, accountId: string, target: string, type: 'image'|'video'|'document'|'audio'|'sticker', input: any) => {
+    requireWebChat();
     return chat.sendMedia(accountId, target, type, input);
   });
   ipcMain.handle('webchat:send-poll', (_event, accountId: string, target: string, input: { name: string; values: string[]; selectableCount?: number }) => {
-    requireLicense();
+    requireWebChat();
     return chat.sendPoll(accountId, target, input);
   });
 }

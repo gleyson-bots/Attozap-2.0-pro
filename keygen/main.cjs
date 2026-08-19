@@ -3,6 +3,15 @@ const { createPrivateKey, generateKeyPairSync, randomUUID, sign } = require('nod
 const { readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 
+const PLAN_LIMITS = {
+  plus: { maxSeats: 1, maxInstances: 1, dailyOutbound: 250, campaignRecipients: 1000, campaignStartsDaily: 2, warmupProfiles: 1, warmupDaily: 40, aiDaily: 50 },
+  pro: { maxSeats: 3, maxInstances: 3, dailyOutbound: 1500, campaignRecipients: 10000, campaignStartsDaily: 10, warmupProfiles: 3, warmupDaily: 150, aiDaily: 300 },
+  ultra: { maxSeats: 10, maxInstances: 10, dailyOutbound: 5000, campaignRecipients: 50000, campaignStartsDaily: 30, warmupProfiles: 10, warmupDaily: 500, aiDaily: 1000 },
+  enterprise: { maxSeats: null, maxInstances: null, dailyOutbound: null, campaignRecipients: null, campaignStartsDaily: null, warmupProfiles: null, warmupDaily: null, aiDaily: null },
+};
+
+const LEGACY_PLAN_MAP = { solo: 'plus', solo_plus: 'plus', solo_pro: 'pro', team: 'pro', team_plus: 'pro', team_pro: 'ultra' };
+
 function canonicalize(payload) {
   return JSON.stringify({
     licenseId: payload.licenseId,
@@ -14,9 +23,24 @@ function canonicalize(payload) {
     maxSeats: payload.maxSeats,
     maxInstances: payload.maxInstances,
     features: [...payload.features].sort(),
+    ...(payload.limits ? { limits: {
+      maxSeats: payload.limits.maxSeats,
+      maxInstances: payload.limits.maxInstances,
+      dailyOutbound: payload.limits.dailyOutbound,
+      campaignRecipients: payload.limits.campaignRecipients,
+      campaignStartsDaily: payload.limits.campaignStartsDaily,
+      warmupProfiles: payload.limits.warmupProfiles,
+      warmupDaily: payload.limits.warmupDaily,
+      aiDaily: payload.limits.aiDaily,
+    } } : {}),
     fingerprint: payload.fingerprint ?? null,
     version: payload.version,
   });
+}
+
+function normalizePlan(value) {
+  const plan = String(value ?? '').trim().toLowerCase();
+  return PLAN_LIMITS[plan] ? plan : LEGACY_PLAN_MAP[plan] || null;
 }
 
 function createWindow() {
@@ -57,16 +81,19 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('license:issue', async (_event, input) => {
-    const allowedPlans = new Set(['solo', 'solo_plus', 'solo_pro', 'team', 'team_plus', 'team_pro', 'enterprise']);
     if (!input?.privateKeyPath) throw new Error('Selecione a chave privada.');
     if (!input.customerId?.trim()) throw new Error('Informe o ID do cliente.');
     if (!input.customerName?.trim()) throw new Error('Informe o nome do cliente.');
-    if (!allowedPlans.has(input.plan)) throw new Error('Plano inválido.');
+    const plan = normalizePlan(input.plan);
+    if (!plan) throw new Error('Plano inválido. Escolha Plus, Pro, Ultra ou Enterprise.');
 
-    const maxSeats = Number(input.maxSeats ?? 1);
-    const maxInstances = Number(input.maxInstances ?? 1);
-    if (!Number.isInteger(maxSeats) || maxSeats < 1) throw new Error('Max seats inválido.');
-    if (!Number.isInteger(maxInstances) || maxInstances < 1) throw new Error('Max instances inválido.');
+    const limits = { ...PLAN_LIMITS[plan], ...(input.limits || {}) };
+    for (const key of Object.keys(limits)) {
+      if (limits[key] != null && (!Number.isInteger(Number(limits[key])) || Number(limits[key]) < 1)) {
+        throw new Error(`Limite inválido: ${key}`);
+      }
+      if (limits[key] != null) limits[key] = Number(limits[key]);
+    }
 
     let expiresAt = null;
     if (input.expiresAt) {
@@ -79,11 +106,12 @@ app.whenReady().then(() => {
       licenseId: `AZ-${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`,
       customerId: input.customerId.trim(),
       customerName: input.customerName.trim(),
-      plan: input.plan,
+      plan,
       issuedAt: new Date().toISOString(),
       expiresAt,
-      maxSeats,
-      maxInstances,
+      maxSeats: limits.maxSeats,
+      maxInstances: limits.maxInstances,
+      limits,
       features: [...new Set((input.features ?? []).map(value => String(value).trim()).filter(Boolean))].sort(),
       fingerprint: input.fingerprint?.trim() || null,
       version: 1,

@@ -31,6 +31,15 @@ export function openDatabase(path: string) {
       last_validated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS license_usage (
+      license_id TEXT NOT NULL,
+      usage_date TEXT NOT NULL,
+      outbound_count INTEGER NOT NULL DEFAULT 0,
+      campaign_starts INTEGER NOT NULL DEFAULT 0,
+      ai_count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(license_id, usage_date),
+      FOREIGN KEY(license_id) REFERENCES licenses(license_id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS instances (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -218,6 +227,7 @@ export function openDatabase(path: string) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_identity_pn ON wa_identities(account_id, pn_jid) WHERE pn_jid IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_wa_identity_phone ON wa_identities(account_id, phone);
     CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_license_usage_date ON license_usage(usage_date);
     CREATE INDEX IF NOT EXISTS idx_instances_status ON instances(status);
     CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
     CREATE INDEX IF NOT EXISTS idx_contacts_lists ON contacts(is_blocked, is_friendly);
