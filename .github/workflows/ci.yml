@@ -1,0 +1,20 @@
+name: Windows Runner Probe 2025
+
+on:
+  push:
+    branches: ["feat/foundation-v2"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Verify runner allocation
+        shell: pwsh
+        run: |
+          Write-Host "RUNNER_OS=$env:RUNNER_OS"
+          Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
+          Write-Host "WINDOWS_2025_RUNNER_OK"
