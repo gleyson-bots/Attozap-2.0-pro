@@ -52,12 +52,12 @@
     </section>
 
     <section class="card issue-card renewal-issue-card">
-      <div class="section-title"><span>05</span><div><h2>Emitir chave de renovação</h2><p>Gere um token separado para acrescentar dias à mensalidade de uma licença já ativada.</p></div></div>
+      <div class="section-title"><span>05</span><div><h2>Emitir chave de renovação</h2><p>Gere um token separado para acrescentar dias à mensalidade de uma licença já ativada. Não copie aqui a licença principal.</p></div></div>
       <div class="form-grid renewal-grid">
-        <div><label>ID da licença</label><input id="renewalLicenseId" placeholder="AZ-..."/></div>
+        <div><label>ID da licença a renovar</label><input id="renewalLicenseId" placeholder="AZ-..."/></div>
         <div><label>Dias contratados</label><input id="renewalDays" type="number" min="1" max="366" value="30"/></div>
       </div>
-      <button id="issueRenewal" class="primary">Gerar renovação de 30 dias</button>
+      <button id="issueRenewal" class="primary">Gerar token de renovação — 30 dias</button>
       <div id="renewalResult" class="result hidden">
         <div class="result-head"><div><strong id="renewalId">—</strong><small id="renewalSummary">—</small></div><div><button id="copyRenewal" class="ghost">Copiar</button><button id="saveRenewal" class="primary small">Salvar</button></div></div>
         <textarea id="renewalEncoded" readonly></textarea>

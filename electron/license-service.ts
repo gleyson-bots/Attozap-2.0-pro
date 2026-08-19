@@ -263,9 +263,19 @@ export class LicenseService {
   renew(encoded: string) {
     if (!this.publicKey) throw new Error('A chave pública da License Authority ainda não foi configurada neste build');
     const licensePayload = this.verifiedLicensePayload();
-    const renewal = decodeRenewal(encoded);
+    let renewal;
+    try {
+      renewal = decodeRenewal(encoded);
+    } catch {
+      throw new Error('Chave de renovação inválida: INVALID_PAYLOAD. Cole o token codificado gerado na seção “Emitir chave de renovação” do KeyGen.');
+    }
     const validation = validateSignedRenewal(renewal, this.publicKey);
-    if (!validation.valid || !validation.payload) throw new Error(`Chave de renovação inválida: ${validation.reason ?? 'UNKNOWN'}`);
+    if (!validation.valid || !validation.payload) {
+      if (validation.reason === 'NOT_RENEWAL_KEY') {
+        throw new Error('O conteúdo colado é uma licença principal, não uma chave de renovação. Gere e copie o token da seção “Emitir chave de renovação” do KeyGen.');
+      }
+      throw new Error(`Chave de renovação inválida: ${validation.reason ?? 'UNKNOWN'}`);
+    }
     const payload: RenewalPayload = validation.payload;
     if (payload.licenseId !== licensePayload.licenseId) throw new Error('Esta chave de renovação pertence a outra licença.');
     if (payload.customerId !== licensePayload.customerId) throw new Error('Esta chave de renovação pertence a outro cliente.');

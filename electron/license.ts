@@ -52,7 +52,7 @@ export type LicenseValidation = {
 
 export type RenewalValidation = {
   valid: boolean;
-  reason?: 'INVALID_SIGNATURE' | 'DEVICE_MISMATCH' | 'INVALID_PAYLOAD';
+  reason?: 'INVALID_SIGNATURE' | 'DEVICE_MISMATCH' | 'INVALID_PAYLOAD' | 'NOT_RENEWAL_KEY';
   payload?: RenewalPayload;
 };
 
@@ -134,16 +134,31 @@ function canonicalizeRenewal(payload: RenewalPayload) {
   });
 }
 
+function normalizeEncoded(encoded: string) {
+  const trimmed = String(encoded ?? '').trim();
+  if (!trimmed) throw new Error('EMPTY_LICENSE_TOKEN');
+  const unquoted = trimmed.replace(/^(?:\"|')|(?:\"|')$/g, '');
+  return unquoted.startsWith('{') ? unquoted : unquoted.replace(/\s+/g, '');
+}
+
+function decodeSignedToken<T>(encoded: string) {
+  const normalized = normalizeEncoded(encoded);
+  const json = normalized.startsWith('{')
+    ? normalized
+    : Buffer.from(normalized, 'base64url').toString('utf8');
+  return JSON.parse(json) as T;
+}
+
 export function encodeLicense(license: SignedLicense) {
   return Buffer.from(JSON.stringify(license), 'utf8').toString('base64url');
 }
 
 export function decodeLicense(encoded: string): SignedLicense {
-  return JSON.parse(Buffer.from(encoded.trim(), 'base64url').toString('utf8')) as SignedLicense;
+  return decodeSignedToken<SignedLicense>(encoded);
 }
 
 export function decodeRenewal(encoded: string): SignedRenewal {
-  return JSON.parse(Buffer.from(encoded.trim(), 'base64url').toString('utf8')) as SignedRenewal;
+  return decodeSignedToken<SignedRenewal>(encoded);
 }
 
 export function validateSignedRenewal(
@@ -151,11 +166,18 @@ export function validateSignedRenewal(
   publicKeyPem: string,
 ): RenewalValidation {
   try {
-    const payload = renewal.payload;
-    if (renewal.algorithm !== 'Ed25519' || payload.kind !== 'subscription_renewal' || payload.version !== 1) {
+    const payload = renewal?.payload;
+    if (!renewal || typeof renewal !== 'object' || renewal.algorithm !== 'Ed25519' || !payload || typeof payload !== 'object') {
       return { valid: false, reason: 'INVALID_PAYLOAD' };
     }
-    if (!payload.renewalId || !payload.licenseId || !payload.customerId || !payload.plan || !Number.isInteger(payload.days) || payload.days < 1 || payload.days > 366) {
+    if (payload.kind !== 'subscription_renewal') {
+      return { valid: false, reason: 'NOT_RENEWAL_KEY' };
+    }
+    if (payload.version !== 1) {
+      return { valid: false, reason: 'INVALID_PAYLOAD' };
+    }
+    const days = typeof payload.days === 'number' ? payload.days : Number(payload.days);
+    if (!payload.renewalId || !payload.licenseId || !payload.customerId || !payload.plan || !Number.isInteger(days) || days < 1 || days > 366) {
       return { valid: false, reason: 'INVALID_PAYLOAD' };
     }
     const publicKey = createPublicKey(publicKeyPem);
@@ -163,7 +185,7 @@ export function validateSignedRenewal(
     const signed = Buffer.from(canonicalizeRenewal(payload));
     if (!verify(null, signed, publicKey, signature)) return { valid: false, reason: 'INVALID_SIGNATURE' };
     if (payload.fingerprint && payload.fingerprint !== deviceFingerprint()) return { valid: false, reason: 'DEVICE_MISMATCH', payload };
-    return { valid: true, payload };
+    return { valid: true, payload: { ...payload, days } };
   } catch {
     return { valid: false, reason: 'INVALID_PAYLOAD' };
   }

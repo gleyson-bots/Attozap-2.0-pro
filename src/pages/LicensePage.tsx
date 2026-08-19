@@ -140,7 +140,7 @@ export function LicenseActivationPage() {
           <div className="wide"><span>Recursos</span><p>{status.payload.features.length ? status.payload.features.join(' · ') : 'Nenhum recurso restrito'}</p></div>
           {status.subscription?.required && <div className="wide renewal-box">
             <div className="card-head"><div><h3>Renovar mensalidade</h3><p>Esta chave é diferente da licença e pode acrescentar dias ao período atual.</p></div><RefreshCw size={17}/></div>
-            <textarea value={renewalEncoded} onChange={e => setRenewalEncoded(e.target.value)} placeholder="Cole aqui a chave de renovação emitida pelo KeyGen..."/>
+            <textarea value={renewalEncoded} onChange={e => setRenewalEncoded(e.target.value)} placeholder="Cole aqui somente o token codificado gerado em “Emitir chave de renovação” no KeyGen. Não cole a licença principal."/>
             <button className="button primary full" disabled={busy || !renewalEncoded.trim()} onClick={() => void renew()}><RefreshCw size={16}/>{busy ? 'Aplicando...' : 'Aplicar chave de renovação'}</button>
           </div>}
           <button className="button ghost danger-button wide" disabled={busy} onClick={() => void deactivate()}><Trash2 size={15}/> Desativar nesta máquina</button>

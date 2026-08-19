@@ -89,6 +89,9 @@ $('issue').addEventListener('click', async () => {
     });
     lastLicense = result;
     $('renewalLicenseId').value = result.payload.licenseId;
+    $('customerId').value = result.payload.customerId;
+    $('plan').value = result.payload.plan;
+    renderPlan();
     $('licenseId').textContent = result.payload.licenseId;
     $('summary').textContent = `${result.payload.customerName} · ${plan.label} · ${fmt(result.payload.limits.maxInstances)} conta(s) · ${fmt(result.payload.limits.dailyOutbound)} saídas/dia`;
     $('encoded').value = result.encoded;
@@ -116,13 +119,15 @@ $('issueRenewal').addEventListener('click', async () => {
   setStatus('Assinando renovação mensal...', 'busy');
   $('issueRenewal').disabled = true;
   try {
+    const renewalLicenseId = $('renewalLicenseId').value.trim();
+    const issuedForCurrentLicense = lastLicense?.payload?.licenseId === renewalLicenseId;
     const result = await window.keygen.issueRenewal({
       privateKeyPath: $('privateKeyPath').value,
-      licenseId: $('renewalLicenseId').value,
-      customerId: $('customerId').value,
-      plan: $('plan').value,
+      licenseId: renewalLicenseId,
+      customerId: issuedForCurrentLicense ? lastLicense.payload.customerId : $('customerId').value,
+      plan: issuedForCurrentLicense ? lastLicense.payload.plan : $('plan').value,
       days: $('renewalDays').value,
-      fingerprint: $('fingerprint').value,
+      fingerprint: issuedForCurrentLicense ? (lastLicense.payload.fingerprint ?? '') : $('fingerprint').value,
     });
     lastRenewal = result;
     $('renewalId').textContent = result.payload.renewalId;
