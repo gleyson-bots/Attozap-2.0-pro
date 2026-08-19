@@ -80,6 +80,43 @@ function signingPrivateKey(privatePem) {
   return privateKey;
 }
 
+function loadSigningPrivateKey(inputValue) {
+  const raw = String(inputValue ?? '').trim();
+  if (!raw) throw new Error('Selecione um ficheiro de chave privada PEM antes de emitir.');
+
+  let pem = raw;
+  if (!raw.includes('-----BEGIN')) {
+    if (!existsSync(raw)) throw new Error('O caminho da chave privada não existe ou não está acessível. Selecione novamente o ficheiro .pem.');
+    try {
+      pem = readFileSync(raw, 'utf8');
+    } catch {
+      throw new Error('Não foi possível ler o ficheiro da chave privada. Verifique as permissões e selecione-o novamente.');
+    }
+  }
+
+  pem = String(pem).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
+  if (!pem) throw new Error('O ficheiro da chave privada está vazio.');
+  if (/-----BEGIN (?:PUBLIC KEY|CERTIFICATE)-----/.test(pem)) {
+    throw new Error('Foi selecionada uma chave pública/certificado. No campo “Chave privada PEM”, selecione o ficheiro que começa por -----BEGIN PRIVATE KEY-----.');
+  }
+  if (!/-----BEGIN (?:PRIVATE KEY|ENCRYPTED PRIVATE KEY|RSA PRIVATE KEY|EC PRIVATE KEY)-----/.test(pem) || !/-----END (?:PRIVATE KEY|ENCRYPTED PRIVATE KEY|RSA PRIVATE KEY|EC PRIVATE KEY)-----/.test(pem)) {
+    throw new Error('O ficheiro selecionado não contém um PEM de chave privada válido. Ele deve começar por -----BEGIN PRIVATE KEY----- e terminar por -----END PRIVATE KEY-----.');
+  }
+
+  try {
+    return signingPrivateKey(pem);
+  } catch (error) {
+    const message = String(error?.message ?? error);
+    if (/bad decrypt|bad password|bad password read|pkcs8|passphrase/i.test(message)) {
+      throw new Error('A chave privada está protegida por palavra-passe ou está num formato não suportado pelo KeyGen. Use uma chave Ed25519 PKCS#8 PEM sem palavra-passe.');
+    }
+    if (/unsupported|no start line|header too long|bad base64|decoder routines/i.test(message)) {
+      throw new Error('O PEM da chave privada não pôde ser lido. Confirme que selecionou uma chave Ed25519 privada completa, não a chave pública.');
+    }
+    throw error;
+  }
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1120,
@@ -155,8 +192,8 @@ app.whenReady().then(() => {
       version: 1,
     };
 
-    const privatePem = readFileSync(input.privateKeyPath, 'utf8');
-    const signature = sign(null, Buffer.from(canonicalize(payload)), signingPrivateKey(privatePem)).toString('base64url');
+    const privateKey = loadSigningPrivateKey(input.privateKeyPath);
+    const signature = sign(null, Buffer.from(canonicalize(payload)), privateKey).toString('base64url');
     const signed = { payload, signature, algorithm: 'Ed25519' };
     const encoded = Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
     return { payload, encoded };
@@ -182,8 +219,8 @@ app.whenReady().then(() => {
       fingerprint: input.fingerprint?.trim() || null,
       version: 1,
     };
-    const privatePem = readFileSync(input.privateKeyPath, 'utf8');
-    const signature = sign(null, Buffer.from(canonicalizeRenewal(payload)), signingPrivateKey(privatePem)).toString('base64url');
+    const privateKey = loadSigningPrivateKey(input.privateKeyPath);
+    const signature = sign(null, Buffer.from(canonicalizeRenewal(payload)), privateKey).toString('base64url');
     const signed = { payload, signature, algorithm: 'Ed25519' };
     const encoded = Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
     return { payload, encoded };
