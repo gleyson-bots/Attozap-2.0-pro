@@ -1,5 +1,8 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { app } from 'electron';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from './account-manager.js';
 import type { ContactCardInput, LocationInput, MessagingProvider, OutboundContent, PollInput, SendMediaInput } from './provider.js';
@@ -84,6 +87,42 @@ export class ChatService {
     });
   }
 
+  private async cacheProfilePicture(remoteUrl: string | undefined): Promise<string | undefined> {
+    if (!remoteUrl || remoteUrl.startsWith('file:')) return remoteUrl;
+    try {
+      const parsed = new URL(remoteUrl);
+      const host = parsed.hostname.toLowerCase();
+      const allowedHost = host === 'whatsapp.net' || host.endsWith('.whatsapp.net') || host.endsWith('.fbcdn.net');
+      if (parsed.protocol !== 'https:' || !allowedHost) return remoteUrl;
+
+      const response = await fetch(parsed, { signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) return remoteUrl;
+      const contentType = (response.headers.get('content-type') || 'image/jpeg').split(';', 1)[0].toLowerCase();
+      if (!contentType.startsWith('image/')) return remoteUrl;
+      const declaredLength = Number(response.headers.get('content-length') || 0);
+      if (declaredLength > 5 * 1024 * 1024) return remoteUrl;
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!bytes.length || bytes.length > 5 * 1024 * 1024) return remoteUrl;
+
+      const extension = contentType === 'image/png' ? 'png' : contentType === 'image/webp' ? 'webp' : 'jpg';
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const directory = join(app.getPath('userData'), 'cache', 'avatars');
+      const destination = join(directory, `${digest}.${extension}`);
+      await mkdir(directory, { recursive: true });
+      const temporary = join(directory, `.${digest}.${process.pid}.tmp`);
+      await writeFile(temporary, bytes, { flag: 'w' });
+      try {
+        await rename(temporary, destination);
+      } catch (error: any) {
+        if (error?.code !== 'EEXIST') throw error;
+      }
+      return pathToFileURL(destination).toString();
+    } catch (error) {
+      console.warn('[webchat:profile-cache]', error instanceof Error ? error.message : String(error));
+      return remoteUrl;
+    }
+  }
+
   async ensureAccountLive(accountId: string): Promise<MessagingProvider> {
     return this.accounts.ensureConnected(accountId);
   }
@@ -160,6 +199,7 @@ export class ChatService {
       if (profileUrl) break;
     }
     const canonical = identity?.jid ?? remoteJid;
+    profileUrl = await this.cacheProfilePicture(profileUrl);
     const existing = this.db.prepare(`
       SELECT jid FROM chat_cache
       WHERE account_id=? AND (jid IN (${aliases.map(() => '?').join(',')}) OR lid IN (${aliases.map(() => '?').join(',')}) OR pn_jid IN (${aliases.map(() => '?').join(',')}))
@@ -403,7 +443,7 @@ export class ChatService {
     const provider = await this.ensureAccountLive(accountId);
     const canonical = await this.canonicalJid(accountId, remoteJid);
     const identity = canonical.endsWith('@g.us') ? undefined : await provider.resolveIdentity(canonical).catch(() => undefined);
-    const profileUrl = await provider.profilePictureUrl(canonical).catch(() => undefined);
+    const profileUrl = await this.cacheProfilePicture(await provider.profilePictureUrl(canonical).catch(() => undefined));
     const existing = this.db.prepare(`SELECT jid FROM chat_cache WHERE account_id=? AND (jid=? OR lid=? OR pn_jid=?) LIMIT 1`).get(accountId, canonical, canonical, canonical) as { jid?: string } | undefined;
     const now = new Date().toISOString();
     if (existing?.jid) {
