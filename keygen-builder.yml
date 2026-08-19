@@ -15,6 +15,9 @@ files:
   - preload.cjs
   - package.json
   - "!**/node_modules/**"
+extraResources:
+  - from: resources/license-public.pem
+    to: license-public.pem
 win:
   icon: build/icon.svg
   target:

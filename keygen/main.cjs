@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron');
-const { createPrivateKey, generateKeyPairSync, randomUUID, sign } = require('node:crypto');
-const { readFileSync, writeFileSync } = require('node:fs');
+const { createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign } = require('node:crypto');
+const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 
 const PLAN_LIMITS = {
@@ -56,6 +56,28 @@ function canonicalizeRenewal(payload) {
 function normalizePlan(value) {
   const plan = String(value ?? '').trim().toLowerCase();
   return PLAN_LIMITS[plan] ? plan : LEGACY_PLAN_MAP[plan] || null;
+}
+
+function embeddedPublicKey() {
+  const candidates = [
+    path.join(process.resourcesPath, 'license-public.pem'),
+    path.join(__dirname, '..', 'resources', 'license-public.pem'),
+    path.join(__dirname, 'license-public.pem'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return readFileSync(candidate, 'utf8');
+  }
+  throw new Error('Chave pública do aplicativo não encontrada neste KeyGen. Reinstale o pacote oficial.');
+}
+
+function signingPrivateKey(privatePem) {
+  const privateKey = createPrivateKey(privatePem);
+  const expectedPublic = createPublicKey(embeddedPublicKey()).export({ type: 'spki', format: 'der' });
+  const actualPublic = createPublicKey(privateKey).export({ type: 'spki', format: 'der' });
+  if (!actualPublic.equals(expectedPublic)) {
+    throw new Error('A chave privada selecionada não corresponde à chave pública deste ATTOZAP. Se gerou um novo par, o app precisa ser recompilado com o novo license-public.pem.');
+  }
+  return privateKey;
 }
 
 function createWindow() {
@@ -134,7 +156,7 @@ app.whenReady().then(() => {
     };
 
     const privatePem = readFileSync(input.privateKeyPath, 'utf8');
-    const signature = sign(null, Buffer.from(canonicalize(payload)), createPrivateKey(privatePem)).toString('base64url');
+    const signature = sign(null, Buffer.from(canonicalize(payload)), signingPrivateKey(privatePem)).toString('base64url');
     const signed = { payload, signature, algorithm: 'Ed25519' };
     const encoded = Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
     return { payload, encoded };
@@ -161,7 +183,7 @@ app.whenReady().then(() => {
       version: 1,
     };
     const privatePem = readFileSync(input.privateKeyPath, 'utf8');
-    const signature = sign(null, Buffer.from(canonicalizeRenewal(payload)), createPrivateKey(privatePem)).toString('base64url');
+    const signature = sign(null, Buffer.from(canonicalizeRenewal(payload)), signingPrivateKey(privatePem)).toString('base64url');
     const signed = { payload, signature, algorithm: 'Ed25519' };
     const encoded = Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
     return { payload, encoded };

@@ -113,6 +113,7 @@ export default function App() {
       <nav className="nav-scroll">{visibleSections.map(section => <div className="nav-section" key={section.label}><p>{section.label}</p>{section.items.map(item => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => { setView(item.id); setMobileNav(false); }}><Icon size={18}/><span>{item.label}</span>{view === item.id && <ChevronRight size={14}/>}</button>; })}</div>)}</nav>
       <div className="sidebar-footer"><img src={attoLogo} alt=""/><div><b>ATTOZAP {version}</b><span>ATTO FLOW BY GLEYSONDEVS</span></div></div>
     </aside>
+    <button className={`mobile-nav-backdrop ${mobileNav ? 'visible' : ''}`} aria-label="Fechar menu de navegação" onClick={() => setMobileNav(false)} />
 
     <main className="workspace">
       <header className="topbar">

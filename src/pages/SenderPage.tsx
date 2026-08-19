@@ -14,6 +14,7 @@ const cadenceProfiles: Record<CadenceProfile, { label: string; description: stri
 };
 
 function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
+const TESTABLE_MEDIA_TYPES = new Set(['image', 'video', 'document', 'audio', 'sticker']);
 function previewTemplate(template: string, recipient: any) {
   const hour = new Date().getHours();
   const saudacao = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
@@ -114,14 +115,18 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
   async function testFirstRecipient() {
     if (!accountId) { setError('Conecte e selecione uma conta.'); return; }
     if (!recipients[0]) { setError(mode === 'contact' ? 'Informe pelo menos um destinatário para testar.' : 'Selecione um grupo para testar.'); return; }
-    if (!nonEmptyMessages[0]) { setError('Digite pelo menos uma mensagem de texto para o teste.'); return; }
+    const testPart = parts.find(part => TESTABLE_MEDIA_TYPES.has(String(part.type)));
+    if (!nonEmptyMessages[0] && !testPart) { setError('Digite uma mensagem ou adicione um ficheiro de mídia para o teste.'); return; }
+    if (testPart?.type === 'audio' && nonEmptyMessages.length) { setError('Áudio/PPG não suporta texto ou legenda. Deixe a mensagem vazia para testar o áudio.'); return; }
     setTesting(true); setError(''); setTestStatus(''); setTestKind('info');
     try {
       const recipient = recipients[0];
-      const text = previewTemplate(nonEmptyMessages[0], recipient);
-      const receipt = await window.attozap.webchat.sendText(accountId, recipient.target, text);
+      const text = nonEmptyMessages[0] ? previewTemplate(nonEmptyMessages[0], recipient) : '';
+      const receipt = testPart
+        ? await window.attozap.webchat.sendMedia(accountId, recipient.target, testPart.type, { ...testPart.input, ...(testPart.type === 'audio' || testPart.type === 'sticker' || !text ? {} : { caption: text }) })
+        : await window.attozap.webchat.sendText(accountId, recipient.target, text);
       const target = receipt.resolvedTarget ?? receipt.remoteJid ?? recipient.target;
-      setTestStatus(`Mensagem submetida para ${target}. Aguardando confirmação do WhatsApp…`);
+      setTestStatus(`${testPart ? 'Mídia' : 'Mensagem'} submetida para ${target}. Aguardando confirmação do WhatsApp…`);
       const confirmation = await waitForDelivery(accountId, receipt.id);
       if (isConfirmed(confirmation?.status)) {
         setTestKind('success');
@@ -157,6 +162,8 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
   }
 
   const relevantCampaigns = campaigns.filter(item => item.target_type === mode).slice(0, 12);
+  const hasTestableMedia = parts.some(part => TESTABLE_MEDIA_TYPES.has(String(part.type)));
+  const canTest = Boolean(accountId && recipients.length && (nonEmptyMessages.length || hasTestableMedia) && !(parts.some(part => part.type === 'audio') && nonEmptyMessages.length));
 
   return <div className="page-stack">
     <div className="page-head"><div><span className="kicker">{mode === 'contact' ? 'CONTACT SENDER' : 'GROUP SENDER'}</span><h2>{mode === 'contact' ? 'Envio para contatos' : 'Envio para grupos'}</h2><p>Campanhas com perfis de cadência, múltiplas mensagens, contas, mídia, documentos e resolução JID/LID.</p></div><span className="safety-pill"><ShieldCheck size={15}/> Blocklist sempre respeitada</span></div>
@@ -185,7 +192,7 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
         <div className="field"><label>Contas conectadas</label><div className="group-picker account-picker">{connected.map(account => <label key={account.id}><input type="checkbox" checked={selectedAccountIds.includes(account.id)} onChange={e => toggleAccount(account.id, e.target.checked)}/><span><b>{account.name}</b><small>{account.phone ? `+${account.phone}` : 'Conectada'}</small></span></label>)}{!connected.length && <div className="empty mini"><Users size={22}/><p>Conecte uma conta primeiro.</p></div>}</div></div>
         {selectedAccountIds.length > 1 && <div className="field"><label>Trocar de conta a cada X destinatários</label><input type="number" min="1" value={switchAfter} onChange={e => setSwitchAfter(Math.max(1, Number(e.target.value)))}/><small>As contas selecionadas são usadas em sequência.</small></div>}
         {mode === 'contact' ? <><div className="field"><label>Números / contatos</label><textarea className="recipients-box" value={rawRecipients} onChange={e => setRawRecipients(e.target.value)} placeholder={'5511999999999;Maria;cidade=São Paulo\n5511888888888;João;cidade=Campinas'}/><small>Formato: número;nome;campo=valor. Também aceita PN JID e LID.</small></div><label className="check-row"><input type="checkbox" checked={filterBefore} onChange={e => setFilterBefore(e.target.checked)}/><span><b>Filtrar números antes de enviar</b><small>Consulta todos os números antes da campanha.</small></span></label><label className="check-row"><input type="checkbox" checked={friendlyOnly} onChange={e => setFriendlyOnly(e.target.checked)}/><span><b>Somente Friendly List</b><small>Ignora contatos que não estejam marcados como amigáveis.</small></span></label></> : <div className="group-picker">{groups.length === 0 ? <div className="empty mini"><Users size={24}/><p>Sincronize os grupos na ferramenta de grupos.</p></div> : groups.map(group => { const id = group.group_id ?? group.id; return <label key={id}><input type="checkbox" checked={selectedGroups.includes(id)} onChange={e => setSelectedGroups(current => e.target.checked ? [...current, id] : current.filter(value => value !== id))}/><span><b>{group.subject}</b><small>{group.member_count ?? group.size ?? 0} membros</small></span></label>; })}</div>}
-        <div className="sender-actions"><button className="button ghost big" disabled={testing || creating || !accountId || !recipients.length || !nonEmptyMessages.length} onClick={() => void testFirstRecipient()}><TestTube2 size={17}/>{testing ? 'Aguardando ACK...' : 'Testar 1º destinatário'}</button><button className="button primary big" disabled={creating || !selectedAccountIds.length} onClick={() => void createAndStart()}><Send size={18}/>{creating ? 'Preparando...' : `Iniciar envio para ${recipients.length}`}</button></div>
+        <div className="sender-actions"><button className="button ghost big" disabled={testing || creating || !canTest} onClick={() => void testFirstRecipient()}><TestTube2 size={17}/>{testing ? 'Aguardando ACK...' : 'Testar 1º destinatário'}</button><button className="button primary big" disabled={creating || !selectedAccountIds.length} onClick={() => void createAndStart()}><Send size={18}/>{creating ? 'Preparando...' : `Iniciar envio para ${recipients.length}`}</button></div>
         {!connected.length && <small className="warning-text">Conecte uma conta antes de iniciar uma campanha.</small>}
       </section>
     </div>
