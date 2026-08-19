@@ -115,7 +115,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       // Resolve against the latest selected state rather than the value captured when
       // this async request started. This prevents a refresh from restoring the old
       // conversation after a new-target send has already selected another identity.
-      setSelected(current => {
+      setSelected((current: any) => {
         if (!current) return current;
         const fresh = data.find((item: any) => sameIdentity(item, current));
         return fresh ?? current;
