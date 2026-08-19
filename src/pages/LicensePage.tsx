@@ -6,8 +6,18 @@ type LicenseStatus = {
   configured: boolean;
   activated: boolean;
   valid: boolean;
+  licenseValid: boolean;
   reason?: string;
   fingerprint: string;
+  subscription?: {
+    required: boolean;
+    active: boolean;
+    reason?: string;
+    renewalId?: string;
+    startedAt?: string;
+    expiresAt?: string;
+    daysRemaining: number | null;
+  };
   payload?: {
     licenseId: string;
     customerId: string;
@@ -19,12 +29,14 @@ type LicenseStatus = {
     maxInstances: number;
     features: string[];
     fingerprint?: string | null;
+    billingMode?: 'perpetual' | 'subscription';
   };
 };
 
 export function LicenseActivationPage() {
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [encoded, setEncoded] = useState('');
+  const [renewalEncoded, setRenewalEncoded] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -53,6 +65,18 @@ export function LicenseActivationPage() {
     } finally { setBusy(false); }
   }
 
+  async function renew() {
+    if (!renewalEncoded.trim()) { setError('Cole a chave de renovação antes de aplicar.'); return; }
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const next = await window.attozap.license.renew(renewalEncoded.trim());
+      setStatus(next);
+      setRenewalEncoded('');
+      setNotice(next.valid ? `Mensalidade renovada por ${next.subscription?.daysRemaining ?? 0} dia(s).` : `A renovação foi processada, mas o estado continua bloqueado: ${next.reason ?? 'SUBSCRIPTION_EXPIRED'}.`);
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setBusy(false); }
+  }
+
   async function deactivate() {
     setBusy(true); setError(''); setNotice('');
     try {
@@ -73,9 +97,12 @@ export function LicenseActivationPage() {
     }
   }
 
+  const statusTitle = status?.valid ? 'Licença e mensalidade ativas' : status?.licenseValid && status.subscription?.required ? (status.subscription.reason === 'SUBSCRIPTION_REQUIRED' ? 'Aguardando renovação' : 'Mensalidade expirada') : status?.activated ? 'Licença inválida' : 'Não ativado';
+  const statusText = status?.valid ? `Licenciado para ${status.payload?.customerName}.` : status?.licenseValid && status.subscription?.required ? 'A licença foi reconhecida, mas as operações ficam bloqueadas até aplicar uma chave de renovação.' : status?.reason ? `Status: ${status.reason}` : 'Insira uma chave de licença emitida pela sua autoridade.';
+
   return <div className="page-stack">
     <div className="page-head">
-      <div><span className="kicker">LICENSING</span><h2>Licença do ATTOZAP</h2><p>Ativação local com assinatura Ed25519 e fingerprint opcional.</p></div>
+      <div><span className="kicker">LICENSING</span><h2>Licença e mensalidade</h2><p>Licença Ed25519 separada da validade mensal controlada por chave de renovação.</p></div>
       <button className="button ghost" onClick={() => void reload()}><RefreshCw size={15}/> Validar novamente</button>
     </div>
     {error && <div className="notice error">{error}</div>}
@@ -86,26 +113,36 @@ export function LicenseActivationPage() {
       <section className="card license-card">
         <div className={`license-seal ${status?.valid ? 'valid' : ''}`}>{status?.valid ? <CheckCircle2 size={29}/> : <KeyRound size={28}/>}</div>
         <span>STATUS LOCAL</span>
-        <h3>{status?.valid ? 'Licença ativa' : status?.activated ? 'Licença inválida' : 'Não ativado'}</h3>
-        <p>{status?.valid ? `Licenciado para ${status.payload?.customerName}.` : status?.reason ? `Status: ${status.reason}` : 'Insira uma chave de licença emitida pela sua autoridade.'}</p>
+        <h3>{statusTitle}</h3>
+        <p>{statusText}</p>
         <div className="license-features">
           <span><ShieldCheck size={15}/> Assinatura Ed25519</span>
-          <span><ShieldCheck size={15}/> Expiração validada</span>
+          <span><ShieldCheck size={15}/> Validade mensal assinada</span>
           <span><ShieldCheck size={15}/> Fingerprint opcional</span>
-          <span><ShieldCheck size={15}/> Recursos e contas</span>
+          <span><ShieldCheck size={15}/> Recursos e quotas do plano</span>
         </div>
       </section>
 
       <section className="card license-panel">
-        <div className="card-head"><div><h3>{status?.valid ? 'Detalhes da licença' : 'Ativar licença'}</h3><p>A chave privada nunca fica neste aplicativo.</p></div>{status?.valid ? <CheckCircle2 size={18}/> : <XCircle size={18}/>}</div>
-        {status?.valid && status.payload ? <div className="license-details">
+        <div className="card-head"><div><h3>{status?.licenseValid ? 'Detalhes da licença' : 'Ativar licença'}</h3><p>A chave privada nunca fica neste aplicativo.</p></div>{status?.valid ? <CheckCircle2 size={18}/> : <XCircle size={18}/>}</div>
+        {status?.licenseValid && status.payload ? <div className="license-details">
           <div><span>Cliente</span><b>{status.payload.customerName}</b></div>
           <div><span>Plano</span><b>{status.payload.plan}</b></div>
           <div><span>Licença</span><code>{status.payload.licenseId}</code></div>
           <div><span>Máx. contas</span><b>{status.payload.maxInstances}</b></div>
           <div><span>Emitida</span><b>{toLocalDateTime(status.payload.issuedAt)}</b></div>
           <div><span>Expira</span><b>{status.payload.expiresAt ? toLocalDateTime(status.payload.expiresAt) : 'Sem expiração'}</b></div>
+          <div><span>Modalidade</span><b>{status.payload.billingMode === 'subscription' ? 'Mensal' : 'Perpétua'}</b></div>
+          {status.subscription?.required && <>
+            <div><span>Mensalidade</span><b className={status.subscription.active ? 'subscription-active' : 'subscription-expired'}>{status.subscription.active ? `${status.subscription.daysRemaining} dia(s) restante(s)` : status.subscription.reason === 'SUBSCRIPTION_REQUIRED' ? 'Renovação necessária' : 'Expirada'}</b></div>
+            <div><span>Válida até</span><b>{status.subscription.expiresAt ? toLocalDateTime(status.subscription.expiresAt) : 'Ainda não renovada'}</b></div>
+          </>}
           <div className="wide"><span>Recursos</span><p>{status.payload.features.length ? status.payload.features.join(' · ') : 'Nenhum recurso restrito'}</p></div>
+          {status.subscription?.required && <div className="wide renewal-box">
+            <div className="card-head"><div><h3>Renovar mensalidade</h3><p>Esta chave é diferente da licença e pode acrescentar dias ao período atual.</p></div><RefreshCw size={17}/></div>
+            <textarea value={renewalEncoded} onChange={e => setRenewalEncoded(e.target.value)} placeholder="Cole aqui a chave de renovação emitida pelo KeyGen..."/>
+            <button className="button primary full" disabled={busy || !renewalEncoded.trim()} onClick={() => void renew()}><RefreshCw size={16}/>{busy ? 'Aplicando...' : 'Aplicar chave de renovação'}</button>
+          </div>}
           <button className="button ghost danger-button wide" disabled={busy} onClick={() => void deactivate()}><Trash2 size={15}/> Desativar nesta máquina</button>
         </div> : <div className="license-activation">
           <div className="field"><label>Chave de licença</label><textarea value={encoded} onChange={e => setEncoded(e.target.value)} placeholder="Cole aqui a licença codificada emitida pelo painel proprietário..."/></div>

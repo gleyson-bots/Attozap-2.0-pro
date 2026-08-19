@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, BookOpen, CheckCircle2, Clipboard, Copy, ExternalLink, KeyRound, LifeBuoy, Mail, MessageCircle, ShieldAlert, ShieldCheck, Sparkles, Wifi } from 'lucide-react';
+import { ArrowRight, BookOpen, CheckCircle2, Clipboard, Copy, ExternalLink, KeyRound, LifeBuoy, Mail, MessageCircle, RefreshCw, ShieldAlert, ShieldCheck, Sparkles, Wifi } from 'lucide-react';
 import attoLogo from '../assets/attozap-logo.svg';
 
 type Props = { onReady: () => void };
@@ -8,6 +8,7 @@ export function StartupGate({ onReady }: Props) {
   const [stage, setStage] = useState<'loading'|'license'|'tutorial'>('loading');
   const [status, setStatus] = useState<any>(null);
   const [key, setKey] = useState('');
+  const [renewalKey, setRenewalKey] = useState('');
   const [error, setError] = useState('');
   const [step, setStep] = useState(0);
 
@@ -25,15 +26,27 @@ export function StartupGate({ onReady }: Props) {
     try {
       const next = await window.attozap.license.activate(key.trim());
       setStatus(next);
-      if (!next.valid) { setError(next.reason || 'Licença inválida'); return; }
+      if (!next.valid) { setError(next.reason || 'A licença foi ativada, mas exige uma renovação mensal.'); return; }
       setError(''); setKey(''); setStage('tutorial');
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+  }
+  async function renew() {
+    if (!renewalKey.trim()) return;
+    try {
+      const next = await window.attozap.license.renew(renewalKey.trim());
+      setStatus(next);
+      if (!next.valid) { setError(next.reason || 'A chave de renovação não ativou a mensalidade.'); return; }
+      setError(''); setRenewalKey(''); setStage('tutorial');
     } catch (e: any) { setError(e?.message ?? String(e)); }
   }
   async function finish() { await window.attozap.settings.set('onboarding_completed', 'true'); onReady(); }
 
   if (stage === 'loading') return <div className="startup-gate"><img src={attoLogo}/><b>ATTOZAP</b><span>Validando licença...</span></div>;
 
-  if (stage === 'license') return <div className="license-gate"><div className="license-gate-card"><img className="license-gate-logo" src={attoLogo}/><span className="kicker">ATTOZAP WASENDER PRO</span><h1>Ative sua licença para começar</h1><p>O aplicativo só libera as ferramentas depois de validar a chave desta máquina.</p>{error && <div className="notice error">{error}</div>}<div className="fingerprint-box"><div><span>FINGERPRINT</span><code>{status?.fingerprint || 'Carregando...'}</code></div><button className="icon-button" onClick={() => status?.fingerprint && void window.attozap.clipboard.writeText(status.fingerprint)}><Copy size={15}/></button></div><div className="field"><label>Chave de licença</label><textarea value={key} onChange={e => setKey(e.target.value)} placeholder="Cole aqui a chave emitida pelo KeyGen..."/></div><button className="button primary big full" disabled={!key.trim() || !status?.configured} onClick={() => void activate()}><KeyRound size={17}/> Ativar e continuar</button><div className="license-gate-trust"><span><ShieldCheck size={14}/> Ed25519</span><span><ShieldCheck size={14}/> Fingerprint</span><span><ShieldCheck size={14}/> Limites do plano</span></div></div></div>;
+  if (stage === 'license') {
+    const renewalRequired = Boolean(status?.licenseValid && status?.subscription?.required && !status?.valid);
+    return <div className="license-gate"><div className="license-gate-card"><img className="license-gate-logo" src={attoLogo}/><span className="kicker">ATTOZAP WASENDER PRO</span><h1>{renewalRequired ? 'Renove sua mensalidade para continuar' : 'Ative sua licença para começar'}</h1><p>{renewalRequired ? 'A licença desta máquina continua reconhecida, mas o período mensal terminou. Cole uma chave de renovação válida para desbloquear o aplicativo.' : 'O aplicativo só libera as ferramentas depois de validar a chave desta máquina.'}</p>{error && <div className="notice error">{error}</div>}<div className="fingerprint-box"><div><span>FINGERPRINT</span><code>{status?.fingerprint || 'Carregando...'}</code></div><button className="icon-button" onClick={() => status?.fingerprint && void window.attozap.clipboard.writeText(status.fingerprint)}><Copy size={15}/></button></div>{renewalRequired ? <><div className="field"><label>Chave de renovação mensal</label><textarea value={renewalKey} onChange={e => setRenewalKey(e.target.value)} placeholder="Cole aqui a chave de renovação emitida pelo KeyGen..."/></div><button className="button primary big full" disabled={!renewalKey.trim()} onClick={() => void renew()}><RefreshCw size={17}/> Renovar e continuar</button></> : <><div className="field"><label>Chave de licença</label><textarea value={key} onChange={e => setKey(e.target.value)} placeholder="Cole aqui a chave emitida pelo KeyGen..."/></div><button className="button primary big full" disabled={!key.trim() || !status?.configured} onClick={() => void activate()}><KeyRound size={17}/> Ativar e continuar</button></>}<div className="license-gate-trust"><span><ShieldCheck size={14}/> Ed25519</span><span><ShieldCheck size={14}/> Fingerprint</span><span><ShieldCheck size={14}/> Controle mensal</span></div></div></div>;
+  }
 
   const slides = [
     { icon: Wifi, title: '1. Conecte a sua conta WhatsApp', text: 'Comece por criar uma conta local, ler o QR Code e aguardar até o estado ficar Conectado. Não feche o app durante a sincronização inicial.', details: [['Conta local', 'Cada sessão fica guardada neste computador e pode ser gerida em Contas.'], ['QR Code', 'Use o WhatsApp no telemóvel em Dispositivos conectados para ler o código.'], ['Confirmação', 'Só avance para envios depois de ver o estado Conectado e o número da conta.'], ['Segurança', 'Não partilhe QR Codes, sessões ou ficheiros de backup com terceiros.']] },

@@ -30,6 +30,7 @@ const PLANS = {
 
 const $ = id => document.getElementById(id);
 let lastLicense = null;
+let lastRenewal = null;
 
 for (const [value, label] of FEATURES) {
   const el = document.createElement('label');
@@ -83,9 +84,11 @@ $('issue').addEventListener('click', async () => {
       limits: plan.limits,
       expiresAt: $('expiresAt').value || null,
       fingerprint: $('fingerprint').value,
+      billingMode: $('billingMode').value,
       features,
     });
     lastLicense = result;
+    $('renewalLicenseId').value = result.payload.licenseId;
     $('licenseId').textContent = result.payload.licenseId;
     $('summary').textContent = `${result.payload.customerName} · ${plan.label} · ${fmt(result.payload.limits.maxInstances)} conta(s) · ${fmt(result.payload.limits.dailyOutbound)} saídas/dia`;
     $('encoded').value = result.encoded;
@@ -107,6 +110,42 @@ $('save').addEventListener('click', async () => {
   const safe = String(lastLicense.payload.customerId).replace(/[^a-z0-9_-]/gi, '-');
   const path = await window.keygen.saveLicense(lastLicense.encoded, `${safe}-${lastLicense.payload.licenseId}.license.txt`);
   if (path) setStatus(`Licença salva em ${path}`, 'ok');
+});
+
+$('issueRenewal').addEventListener('click', async () => {
+  setStatus('Assinando renovação mensal...', 'busy');
+  $('issueRenewal').disabled = true;
+  try {
+    const result = await window.keygen.issueRenewal({
+      privateKeyPath: $('privateKeyPath').value,
+      licenseId: $('renewalLicenseId').value,
+      customerId: $('customerId').value,
+      plan: $('plan').value,
+      days: $('renewalDays').value,
+      fingerprint: $('fingerprint').value,
+    });
+    lastRenewal = result;
+    $('renewalId').textContent = result.payload.renewalId;
+    $('renewalSummary').textContent = `${result.payload.licenseId} · ${result.payload.days} dia(s) · ${result.payload.plan}`;
+    $('renewalEncoded').value = result.encoded;
+    $('renewalResult').classList.remove('hidden');
+    setStatus('Chave de renovação gerada e assinada com sucesso.', 'ok');
+  } catch (error) {
+    setStatus(error.message || String(error), 'error');
+  } finally { $('issueRenewal').disabled = false; }
+});
+
+$('copyRenewal').addEventListener('click', async () => {
+  if (!lastRenewal) return;
+  await window.keygen.copy(lastRenewal.encoded);
+  setStatus('Chave de renovação copiada.', 'ok');
+});
+
+$('saveRenewal').addEventListener('click', async () => {
+  if (!lastRenewal) return;
+  const safe = String(lastRenewal.payload.customerId).replace(/[^a-z0-9_-]/gi, '-');
+  const path = await window.keygen.saveLicense(lastRenewal.encoded, `${safe}-${lastRenewal.payload.renewalId}.renewal.txt`);
+  if (path) setStatus(`Renovação salva em ${path}`, 'ok');
 });
 
 function setStatus(text, type = '') {

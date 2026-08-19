@@ -16,6 +16,7 @@ export type LicensePayload = {
   features: string[];
   limits?: PlanLimits;
   fingerprint?: string | null;
+  billingMode?: 'perpetual' | 'subscription';
   version: 1;
 };
 
@@ -25,10 +26,34 @@ export type SignedLicense = {
   algorithm: 'Ed25519';
 };
 
+export type RenewalPayload = {
+  kind: 'subscription_renewal';
+  renewalId: string;
+  licenseId: string;
+  customerId: string;
+  plan: LicensePlan;
+  issuedAt: string;
+  days: number;
+  fingerprint?: string | null;
+  version: 1;
+};
+
+export type SignedRenewal = {
+  payload: RenewalPayload;
+  signature: string;
+  algorithm: 'Ed25519';
+};
+
 export type LicenseValidation = {
   valid: boolean;
   reason?: 'INVALID_SIGNATURE' | 'EXPIRED' | 'DEVICE_MISMATCH' | 'INVALID_PAYLOAD';
   payload?: LicensePayload;
+};
+
+export type RenewalValidation = {
+  valid: boolean;
+  reason?: 'INVALID_SIGNATURE' | 'DEVICE_MISMATCH' | 'INVALID_PAYLOAD';
+  payload?: RenewalPayload;
 };
 
 function canonicalize(payload: LicensePayload) {
@@ -53,6 +78,7 @@ function canonicalize(payload: LicensePayload) {
       aiDaily: payload.limits.aiDaily,
     } } : {}),
     fingerprint: payload.fingerprint ?? null,
+    ...(payload.billingMode ? { billingMode: payload.billingMode } : {}),
     version: payload.version,
   });
 }
@@ -94,10 +120,51 @@ export function validateSignedLicense(
   }
 }
 
+function canonicalizeRenewal(payload: RenewalPayload) {
+  return JSON.stringify({
+    kind: payload.kind,
+    renewalId: payload.renewalId,
+    licenseId: payload.licenseId,
+    customerId: payload.customerId,
+    plan: payload.plan,
+    issuedAt: payload.issuedAt,
+    days: payload.days,
+    fingerprint: payload.fingerprint ?? null,
+    version: payload.version,
+  });
+}
+
 export function encodeLicense(license: SignedLicense) {
   return Buffer.from(JSON.stringify(license), 'utf8').toString('base64url');
 }
 
 export function decodeLicense(encoded: string): SignedLicense {
   return JSON.parse(Buffer.from(encoded.trim(), 'base64url').toString('utf8')) as SignedLicense;
+}
+
+export function decodeRenewal(encoded: string): SignedRenewal {
+  return JSON.parse(Buffer.from(encoded.trim(), 'base64url').toString('utf8')) as SignedRenewal;
+}
+
+export function validateSignedRenewal(
+  renewal: SignedRenewal,
+  publicKeyPem: string,
+): RenewalValidation {
+  try {
+    const payload = renewal.payload;
+    if (renewal.algorithm !== 'Ed25519' || payload.kind !== 'subscription_renewal' || payload.version !== 1) {
+      return { valid: false, reason: 'INVALID_PAYLOAD' };
+    }
+    if (!payload.renewalId || !payload.licenseId || !payload.customerId || !payload.plan || !Number.isInteger(payload.days) || payload.days < 1 || payload.days > 366) {
+      return { valid: false, reason: 'INVALID_PAYLOAD' };
+    }
+    const publicKey = createPublicKey(publicKeyPem);
+    const signature = Buffer.from(renewal.signature, 'base64url');
+    const signed = Buffer.from(canonicalizeRenewal(payload));
+    if (!verify(null, signed, publicKey, signature)) return { valid: false, reason: 'INVALID_SIGNATURE' };
+    if (payload.fingerprint && payload.fingerprint !== deviceFingerprint()) return { valid: false, reason: 'DEVICE_MISMATCH', payload };
+    return { valid: true, payload };
+  } catch {
+    return { valid: false, reason: 'INVALID_PAYLOAD' };
+  }
 }

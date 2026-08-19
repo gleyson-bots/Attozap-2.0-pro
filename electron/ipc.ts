@@ -214,6 +214,7 @@ export function registerIpc(input: {
 
   ipcMain.handle('license:status', () => license.status());
   ipcMain.handle('license:activate', (_event, encoded: string) => license.activate(encoded));
+  ipcMain.handle('license:renew', (_event, encoded: string) => license.renew(encoded));
   ipcMain.handle('license:deactivate', () => license.deactivate());
 
   ipcMain.handle('files:pick', async (_event, options?: { multiple?: boolean; filters?: Array<{ name: string; extensions: string[] }> }) => {

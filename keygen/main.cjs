@@ -34,6 +34,21 @@ function canonicalize(payload) {
       aiDaily: payload.limits.aiDaily,
     } } : {}),
     fingerprint: payload.fingerprint ?? null,
+    ...(payload.billingMode ? { billingMode: payload.billingMode } : {}),
+    version: payload.version,
+  });
+}
+
+function canonicalizeRenewal(payload) {
+  return JSON.stringify({
+    kind: payload.kind,
+    renewalId: payload.renewalId,
+    licenseId: payload.licenseId,
+    customerId: payload.customerId,
+    plan: payload.plan,
+    issuedAt: payload.issuedAt,
+    days: payload.days,
+    fingerprint: payload.fingerprint ?? null,
     version: payload.version,
   });
 }
@@ -114,11 +129,39 @@ app.whenReady().then(() => {
       limits,
       features: [...new Set((input.features ?? []).map(value => String(value).trim()).filter(Boolean))].sort(),
       fingerprint: input.fingerprint?.trim() || null,
+      billingMode: input.billingMode === 'perpetual' ? 'perpetual' : 'subscription',
       version: 1,
     };
 
     const privatePem = readFileSync(input.privateKeyPath, 'utf8');
     const signature = sign(null, Buffer.from(canonicalize(payload)), createPrivateKey(privatePem)).toString('base64url');
+    const signed = { payload, signature, algorithm: 'Ed25519' };
+    const encoded = Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
+    return { payload, encoded };
+  });
+
+  ipcMain.handle('renewal:issue', async (_event, input) => {
+    if (!input?.privateKeyPath) throw new Error('Selecione a chave privada.');
+    if (!input.licenseId?.trim()) throw new Error('Informe o ID da licença.');
+    if (!input.customerId?.trim()) throw new Error('Informe o ID do cliente.');
+    const plan = normalizePlan(input.plan);
+    if (!plan) throw new Error('Plano inválido. Escolha Plus, Pro, Ultra ou Enterprise.');
+    const days = Number(input.days);
+    if (!Number.isInteger(days) || days < 1 || days > 366) throw new Error('A renovação deve ter entre 1 e 366 dias.');
+
+    const payload = {
+      kind: 'subscription_renewal',
+      renewalId: `AZR-${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`,
+      licenseId: input.licenseId.trim(),
+      customerId: input.customerId.trim(),
+      plan,
+      issuedAt: new Date().toISOString(),
+      days,
+      fingerprint: input.fingerprint?.trim() || null,
+      version: 1,
+    };
+    const privatePem = readFileSync(input.privateKeyPath, 'utf8');
+    const signature = sign(null, Buffer.from(canonicalizeRenewal(payload)), createPrivateKey(privatePem)).toString('base64url');
     const signed = { payload, signature, algorithm: 'Ed25519' };
     const encoded = Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
     return { payload, encoded };

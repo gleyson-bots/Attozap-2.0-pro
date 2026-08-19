@@ -40,6 +40,21 @@ export function openDatabase(path: string) {
       PRIMARY KEY(license_id, usage_date),
       FOREIGN KEY(license_id) REFERENCES licenses(license_id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS license_subscriptions (
+      license_id TEXT PRIMARY KEY,
+      renewal_id TEXT,
+      started_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS license_renewals (
+      renewal_id TEXT PRIMARY KEY,
+      license_id TEXT NOT NULL,
+      days INTEGER NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS instances (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
