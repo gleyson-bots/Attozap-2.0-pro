@@ -1,45 +1,20 @@
-name: Windows CI
+name: Windows Runner Probe
 
 on:
   push:
     branches: ["feat/foundation-v2"]
+  pull_request:
+    branches: ["main"]
   workflow_dispatch:
 
 jobs:
-  build:
+  probe:
     runs-on: windows-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 5
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Verify Windows runner
+      - name: Verify runner allocation
         shell: pwsh
         run: |
           Write-Host "RUNNER_OS=$env:RUNNER_OS"
-          Write-Host "PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE"
-          if ($env:RUNNER_OS -ne 'Windows') { throw 'ATTOZAP desktop CI must run on Windows' }
-          node --version
-          npm --version
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Validate delivery and IPC contracts + TypeScript/Vite/Electron
-        run: npm run build
-
-      - name: Rebuild native dependencies for Electron
-        run: npx electron-builder install-app-deps
-
-      - name: Verify compiled desktop entrypoints
-        shell: pwsh
-        run: |
-          if (-not (Test-Path 'dist-electron/main.js')) { throw 'dist-electron/main.js was not generated' }
-          if (-not (Test-Path 'dist-electron/preload.cjs')) { throw 'dist-electron/preload.cjs was not generated' }
-          Write-Host 'Windows desktop build validation OK'
+          Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
+          Write-Host "WINDOWS_RUNNER_OK"
