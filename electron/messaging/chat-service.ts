@@ -6,6 +6,7 @@ import { app } from 'electron';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from './account-manager.js';
 import type { ContactCardInput, ContactPresence, LocationInput, MessagingProvider, OutboundContent, PollInput, SendMediaInput } from './provider.js';
+import { upsertWaIdentity } from './identity-store.js';
 import { getCachedMessageStatus, mergeDeliveryStatus, type StoredDeliveryStatus } from './status.js';
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
@@ -206,24 +207,7 @@ export class ChatService {
       LIMIT 1
     `).get(accountId, ...aliases, ...aliases, ...aliases) as { jid?: string } | undefined;
     const now = new Date().toISOString();
-    if (identity?.jid) {
-      const identityRow = this.db.prepare(`
-        SELECT canonical_jid FROM wa_identities
-        WHERE account_id=? AND (canonical_jid=? OR (? IS NOT NULL AND lid=?) OR (? IS NOT NULL AND pn_jid=?))
-        LIMIT 1
-      `).get(accountId, identity.jid, identity.lid ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.pnJid ?? null) as { canonical_jid?: string } | undefined;
-      const identityKey = identityRow?.canonical_jid ?? identity.jid;
-      this.db.prepare(`
-        INSERT INTO wa_identities (account_id,canonical_jid,lid,pn_jid,phone,source,last_seen_at)
-        VALUES (?,?,?,?,?,'webchat.profile',CURRENT_TIMESTAMP)
-        ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
-          lid=COALESCE(excluded.lid,wa_identities.lid),
-          pn_jid=COALESCE(excluded.pn_jid,wa_identities.pn_jid),
-          phone=COALESCE(excluded.phone,wa_identities.phone),
-          source=excluded.source,
-          last_seen_at=CURRENT_TIMESTAMP
-      `).run(accountId, identityKey, identity.lid ?? null, identity.pnJid ?? null, identity.phone ?? null);
-    }
+    if (identity?.jid) upsertWaIdentity(this.db, accountId, identity, 'webchat.profile');
     if (existing?.jid) {
       this.db.prepare(`
         UPDATE chat_cache SET
@@ -314,22 +298,7 @@ export class ChatService {
 
   private persistResolvedIdentity(accountId: string, identity: ContactPresence) {
     if (!identity.jid || identity.jid.endsWith('@g.us')) return;
-    const existing = this.db.prepare(`
-      SELECT canonical_jid FROM wa_identities
-      WHERE account_id=? AND (canonical_jid=? OR (? IS NOT NULL AND lid=?) OR (? IS NOT NULL AND pn_jid=?))
-      LIMIT 1
-    `).get(accountId, identity.jid, identity.lid ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.pnJid ?? null) as { canonical_jid?: string } | undefined;
-    const canonical = existing?.canonical_jid ?? identity.jid;
-    this.db.prepare(`
-      INSERT INTO wa_identities (account_id,canonical_jid,lid,pn_jid,phone,source,last_seen_at)
-      VALUES (?,?,?,?,?,'webchat.resolve',CURRENT_TIMESTAMP)
-      ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
-        lid=COALESCE(excluded.lid,wa_identities.lid),
-        pn_jid=COALESCE(excluded.pn_jid,wa_identities.pn_jid),
-        phone=COALESCE(excluded.phone,wa_identities.phone),
-        source=excluded.source,
-        last_seen_at=CURRENT_TIMESTAMP
-    `).run(accountId, canonical, identity.lid ?? null, identity.pnJid ?? null, identity.phone ?? null);
+    upsertWaIdentity(this.db, accountId, identity, 'webchat.resolve');
   }
 
   async resolveTarget(accountId: string, target: string) {

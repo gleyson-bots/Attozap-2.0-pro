@@ -92,7 +92,7 @@ input:focus,textarea:focus,select:focus{box-shadow:0 0 0 3px color-mix(in srgb,v
 .health-overview{min-height:132px;padding:22px}.health-overview span{font-size:9px}.health-overview h3{font-size:22px}.health-overview p{font-size:10.5px}.health-score b{font-size:24px}.health-metrics{gap:14px}.health-metrics article{padding:17px}.health-metrics span{font-size:10px}.health-metrics b{font-size:17px}.health-metrics small{font-size:9px}.health-grid{grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);gap:16px}.health-accounts b{font-size:11px}.health-accounts small{font-size:9.5px}.health-issues b{font-size:10px}.health-issues span{font-size:9.5px}.backup-action{padding:16px}.backup-action b{font-size:11px}.backup-action span{font-size:9.5px}.identity-stats article{padding:15px}.identity-stats span{font-size:9.5px}.identity-stats b{font-size:20px}.identity-toolbar{padding:14px;grid-template-columns:minmax(180px,.8fr) minmax(240px,1.4fr) auto}.identity-head{font-size:9px}.identity-row b{font-size:10.5px}.identity-row small,.identity-row time,.identity-values code,.identity-values .muted{font-size:9px}
 
 /* Campaign center */
-.campaign-center-layout{grid-template-columns:minmax(290px,330px) minmax(0,1fr);gap:16px}.campaign-center-list{top:90px}.campaign-center-list .card-head{padding:16px}.campaign-center-scroll>button{padding:13px}.campaign-center-scroll button b{font-size:11.5px}.campaign-center-scroll button span{font-size:9.5px}.campaign-live-grid{grid-template-columns:minmax(0,1fr) minmax(250px,300px);gap:16px}.campaign-runtime-card{padding:22px}.runtime-top h3{font-size:19px}.runtime-top p{font-size:10.5px}.runtime-body{grid-template-columns:176px minmax(0,1fr);gap:24px}.countdown-ring{width:166px;height:166px}.runtime-details>div{min-height:88px;padding:13px}.runtime-details span{font-size:9px}.runtime-details b{font-size:12px}.runtime-details small{font-size:9.5px}.runtime-progress>div:first-child{font-size:9.5px}.campaign-recipient-row{font-size:9.5px;padding:11px 16px}
+.campaign-center-layout{grid-template-columns:minmax(290px,330px) minmax(0,1fr);gap:16px}.campaign-center-list{top:90px}.campaign-center-list .card-head{padding:16px}.campaign-center-scroll>button{padding:13px}.campaign-center-scroll button b{font-size:11.5px}.campaign-center-scroll button span{font-size:9.5px}.campaign-live-grid{grid-template-columns:minmax(0,1fr) minmax(360px,420px);gap:16px}.campaign-stats-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}.campaign-runtime-card{padding:22px}.runtime-top h3{font-size:19px}.runtime-top p{font-size:10.5px}.runtime-body{grid-template-columns:minmax(176px,.75fr) minmax(0,1.25fr);gap:24px}.countdown-ring{width:166px;height:166px}.runtime-details>div{min-height:88px;padding:13px}.runtime-details span{font-size:9px}.runtime-details b{font-size:12px}.runtime-details small{font-size:9.5px}.runtime-progress>div:first-child{font-size:9.5px}.campaign-recipient-row{font-size:9.5px;padding:11px 16px}
 
 /* Warmup */
 .warmup-layout{grid-template-columns:minmax(0,1.45fr) minmax(320px,.8fr);gap:16px}.warmup-editor{padding:18px;gap:16px}.warmup-editor>.card-head{margin:-18px -18px 0}.warmup-profile-list{padding:10px;gap:6px}.warmup-profile-list>button{padding:11px}.warmup-profile-list b{font-size:11px}.warmup-profile-list small{font-size:9px}.warmup-controls{padding:14px}.warmup-target-picker{max-height:180px;padding:10px}.warmup-target-picker>button{min-height:48px;padding:8px 10px}.warmup-target-picker>button>b{font-size:10px}.warmup-target-picker>button>small{font-size:9px}.ai-warmup-box{padding:0 14px 14px}
@@ -109,12 +109,16 @@ img,video{max-width:100%}
 pre,code,.identity-values code{max-width:100%}
 .campaign-center-main,.webchat-thread-pane,.message-stream,.maps-table,.identity-table,.campaign-recipient-table{min-width:0}
 
+@media(max-width:1500px){
+  .campaign-live-grid{grid-template-columns:1fr}
+  .campaign-stats-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}
+}
 @media(max-width:1280px){
   :root{--sidebar-w:244px;--page-x:22px}
   .sender-layout{grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr)}
   .extractor-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .account-grid{grid-template-columns:repeat(2,minmax(260px,1fr))}
-  .campaign-live-grid{grid-template-columns:1fr}.campaign-stats-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .campaign-live-grid{grid-template-columns:1fr}.campaign-stats-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}
   .identity-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 @media(max-width:1080px){
@@ -134,7 +138,7 @@ pre,code,.identity-values code{max-width:100%}
 }
 @media(max-width:760px){
   .page-head h2{font-size:22px}.page-head p{font-size:11px}.form-grid.two,.form-grid.three,.delay-box{grid-template-columns:1fr}
-  .account-grid,.extractor-grid,.metric-grid,.health-metrics,.identity-stats,.backup-actions,.campaign-stats-grid{grid-template-columns:1fr}
+  .account-grid,.extractor-grid,.metric-grid,.health-metrics,.identity-stats,.backup-actions{grid-template-columns:1fr}.campaign-stats-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}
   .cadence-profiles{grid-template-columns:1fr 1fr}.sender-actions{grid-template-columns:1fr}
   .webchat-workspace{grid-template-columns:1fr}.webchat-list-pane{display:none}.chat-bubble{max-width:90%}
   .runtime-body{grid-template-columns:1fr}.countdown-ring{margin-inline:auto}.runtime-details{grid-template-columns:1fr}

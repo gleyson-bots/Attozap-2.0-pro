@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { upsertWaIdentity } from './identity-store.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
@@ -273,25 +274,7 @@ export class AccountManager extends EventEmitter {
   }
 
   private persistIdentity(accountId: string, identity: ContactPresence, pushName: string | undefined, source: string) {
-    const canonicalJid = identity.jid;
-    if (!canonicalJid) return;
-    const existing = this.db.prepare(`
-      SELECT canonical_jid FROM wa_identities
-      WHERE account_id=? AND (canonical_jid=? OR (? IS NOT NULL AND lid=?) OR (? IS NOT NULL AND pn_jid=?))
-      LIMIT 1
-    `).get(accountId, canonicalJid, identity.lid ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.pnJid ?? null) as { canonical_jid?: string } | undefined;
-    const key = existing?.canonical_jid ?? canonicalJid;
-    this.db.prepare(`
-      INSERT INTO wa_identities (account_id, canonical_jid, lid, pn_jid, phone, push_name, source, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
-        lid=COALESCE(excluded.lid, wa_identities.lid),
-        pn_jid=COALESCE(excluded.pn_jid, wa_identities.pn_jid),
-        phone=COALESCE(excluded.phone, wa_identities.phone),
-        push_name=COALESCE(excluded.push_name, wa_identities.push_name),
-        source=excluded.source,
-        last_seen_at=CURRENT_TIMESTAMP
-    `).run(accountId, key, identity.lid ?? null, identity.pnJid ?? null, identity.phone ?? null, pushName?.trim() || null, source);
+    upsertWaIdentity(this.db, accountId, identity, source, pushName);
   }
 
   private audit(action: string, entityId: string, metadata?: unknown) {

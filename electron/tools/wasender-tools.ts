@@ -1,5 +1,6 @@
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from '../messaging/account-manager.js';
+import { upsertWaIdentity } from '../messaging/identity-store.js';
 
 export type ImportedContact = {
   phone: string;
@@ -126,20 +127,10 @@ export class WaSenderTools {
       INSERT INTO contacts (phone, wa_exists, last_checked_at) VALUES (?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(phone) DO UPDATE SET wa_exists=excluded.wa_exists, last_checked_at=CURRENT_TIMESTAMP
     `);
-    const upsertIdentity = this.db.prepare(`
-      INSERT INTO wa_identities (account_id, canonical_jid, lid, pn_jid, phone, source, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, 'number-filter', CURRENT_TIMESTAMP)
-      ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
-        lid=COALESCE(excluded.lid, wa_identities.lid),
-        pn_jid=COALESCE(excluded.pn_jid, wa_identities.pn_jid),
-        phone=COALESCE(excluded.phone, wa_identities.phone),
-        source='number-filter',
-        last_seen_at=CURRENT_TIMESTAMP
-    `);
     const tx = this.db.transaction(() => {
       for (const item of result) {
         upsertContact.run(digits(item.input), item.exists ? 1 : 0);
-        if (item.exists && item.jid) upsertIdentity.run(accountId, item.jid, item.lid ?? null, item.pnJid ?? null, item.phone ?? digits(item.input));
+        if (item.exists && item.jid) upsertWaIdentity(this.db, accountId, { jid: item.jid, lid: item.lid, pnJid: item.pnJid, phone: item.phone ?? digits(item.input) }, 'number-filter');
       }
     });
     tx();
@@ -180,18 +171,8 @@ export class WaSenderTools {
 
   async groupMembers(accountId: string, groupJid: string) {
     const participants = (await this.accounts.provider(accountId).getGroupMetadata(groupJid)).participants;
-    const upsertIdentity = this.db.prepare(`
-      INSERT INTO wa_identities (account_id, canonical_jid, lid, pn_jid, phone, source, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, 'group-metadata', CURRENT_TIMESTAMP)
-      ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
-        lid=COALESCE(excluded.lid, wa_identities.lid),
-        pn_jid=COALESCE(excluded.pn_jid, wa_identities.pn_jid),
-        phone=COALESCE(excluded.phone, wa_identities.phone),
-        source='group-metadata',
-        last_seen_at=CURRENT_TIMESTAMP
-    `);
     const tx = this.db.transaction(() => {
-      for (const participant of participants) upsertIdentity.run(accountId, participant.jid, participant.lid ?? null, participant.pnJid ?? null, participant.phone ?? null);
+      for (const participant of participants) upsertWaIdentity(this.db, accountId, { jid: participant.jid, lid: participant.lid, pnJid: participant.pnJid, phone: participant.phone }, 'group-metadata');
     });
     tx();
     return participants;

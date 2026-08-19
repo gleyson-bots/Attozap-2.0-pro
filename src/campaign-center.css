@@ -14,7 +14,7 @@
 .campaign-center-scroll button em{position:absolute;right:12px;bottom:10px;font-style:normal;font-size:8px;color:var(--muted)}
 .campaign-center-main{min-width:0;display:grid;gap:18px}
 .campaign-extreme-warning{margin:0}
-.campaign-live-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,350px);gap:18px;align-items:stretch}
+.campaign-live-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,420px);gap:18px;align-items:stretch}
 .campaign-runtime-card{min-width:0;padding:22px}
 .runtime-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
 .runtime-top>div{min-width:0}
@@ -37,7 +37,7 @@
 .runtime-progress>div:first-child{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:7px}
 .runtime-controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
 .button.danger-soft{border-color:color-mix(in srgb,var(--danger) 35%,var(--line));background:color-mix(in srgb,var(--danger) 8%,var(--surface));color:var(--danger)}
-.campaign-stats-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-width:0}
+.campaign-stats-grid{display:grid;grid-template-columns:repeat(2,minmax(150px,1fr));gap:12px;min-width:0}
 .campaign-stats-grid .metric-card{min-width:0;min-height:142px;padding:17px}
 .campaign-stats-grid .metric-card>span,.campaign-stats-grid .metric-card>small{overflow-wrap:break-word;word-break:normal}
 .campaign-queue-card{padding:0;overflow:hidden}
@@ -56,8 +56,8 @@
 .recipient-state.pending,.recipient-state.sending{background:var(--muted-2)}
 .campaign-recipient-row:last-child{border-bottom:0}
 @keyframes pulseCampaign{50%{box-shadow:inset 0 0 30px color-mix(in srgb,var(--accent) 14%,transparent),0 0 42px color-mix(in srgb,var(--accent) 22%,transparent)}}
-@media(max-width:1500px){.campaign-live-grid{grid-template-columns:1fr}.campaign-stats-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media(max-width:1180px){.campaign-center-layout{grid-template-columns:260px minmax(0,1fr)}.campaign-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.runtime-body{grid-template-columns:minmax(145px,.7fr) minmax(0,1.3fr)}.countdown-ring{width:min(100%,150px)}.cadence-profiles{grid-template-columns:1fr 1fr}}
+@media(max-width:1500px){.campaign-live-grid{grid-template-columns:1fr}.campaign-stats-grid{grid-template-columns:repeat(4,minmax(150px,1fr))}}
+@media(max-width:1180px){.campaign-center-layout{grid-template-columns:260px minmax(0,1fr)}.campaign-stats-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}.runtime-body{grid-template-columns:minmax(145px,.7fr) minmax(0,1.3fr)}.countdown-ring{width:min(100%,150px)}.cadence-profiles{grid-template-columns:1fr 1fr}}
 @media(max-width:850px){.campaign-center-layout{grid-template-columns:1fr}.campaign-center-list{position:static;max-height:none}.campaign-center-scroll{display:flex;overflow-x:auto;max-height:none}.campaign-center-scroll>button{min-width:250px}.runtime-body{grid-template-columns:1fr}.countdown-ring{margin:auto}.campaign-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cadence-profiles{grid-template-columns:1fr 1fr}}
 @media(max-width:560px){.runtime-details{grid-template-columns:1fr}.campaign-stats-grid{grid-template-columns:1fr 1fr}.cadence-profiles{grid-template-columns:1fr}.runtime-controls .button{flex:1}.campaign-runtime-card{padding:15px}}
 @media(max-width:380px){.campaign-stats-grid{grid-template-columns:1fr}.runtime-top{flex-direction:column}.runtime-top>.status-chip{align-self:flex-start}}
