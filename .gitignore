@@ -17,3 +17,6 @@ sessions/
 auth_info/
 .DS_Store
 Thumbs.db
+
+# Local release signing material
+.release-secrets/
