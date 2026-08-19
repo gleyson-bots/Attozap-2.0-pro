@@ -33,6 +33,7 @@ import type {
   PollInput,
   ProviderEvents,
   SendMediaInput,
+  AccountRestrictionState,
 } from './provider.js';
 
 const logger = P({ level: 'silent' });
@@ -201,8 +202,21 @@ export class BaileysProvider implements MessagingProvider {
   private proxyUrl?: string;
   private readonly pollCreations = new Map<string, { remoteJid: string; question: string; message: NonNullable<WAMessage['message']> }>();
   private readonly pictureCache = new Map<string, { url?: string; expires: number }>();
+  private lastRestriction?: AccountRestrictionState;
 
   constructor(private readonly authDirectory: string, proxyUrl?: string) { this.proxyUrl = validateProxy(proxyUrl); }
+
+  private publishRestriction(raw: { isActive?: boolean; timeEnforcementEnds?: Date; enforcementType?: string }): AccountRestrictionState {
+    const state: AccountRestrictionState = {
+      isActive: Boolean(raw?.isActive),
+      timeEnforcementEnds: raw?.timeEnforcementEnds instanceof Date && Number.isFinite(raw.timeEnforcementEnds.getTime()) ? raw.timeEnforcementEnds.getTime() : undefined,
+      enforcementType: raw?.enforcementType ? String(raw.enforcementType) : undefined,
+      checkedAt: Date.now(),
+    };
+    this.lastRestriction = state;
+    this.events.onRestriction?.(state);
+    return state;
+  }
   setProxy(proxyUrl?: string) { this.proxyUrl = validateProxy(proxyUrl); }
 
   async connect(events: ProviderEvents = {}) {
@@ -234,10 +248,26 @@ export class BaileysProvider implements MessagingProvider {
           if (status) {
             const rawFailureCode = status === 'failed' ? (update as any).messageStubParameters?.[0] : undefined;
             const failureCode = typeof rawFailureCode === 'undefined' || rawFailureCode === null ? '' : String(rawFailureCode).trim();
+            const isAccountRestriction = failureCode === '463';
             const error = status === 'failed'
-              ? failureCode ? `WhatsApp rejeitou a mensagem (código ${failureCode})` : 'WhatsApp rejeitou a mensagem'
+              ? isAccountRestriction
+                ? 'WhatsApp rejeitou a mensagem (código 463): a conta pode estar sob restrição temporária para novos contactos ou sem token de privacidade para este destinatário. Não repetir automaticamente.'
+                : failureCode ? `WhatsApp rejeitou a mensagem (código ${failureCode})` : 'WhatsApp rejeitou a mensagem'
               : undefined;
-            this.events.onMessageStatus?.({ id: key.id, remoteJid: key.remoteJid ?? undefined, participant: key.participant ?? undefined, status, rawStatus, timestamp: Date.now(), error });
+            this.events.onMessageStatus?.({
+              id: key.id,
+              remoteJid: key.remoteJid ?? undefined,
+              participant: key.participant ?? undefined,
+              status,
+              rawStatus,
+              failureCode: failureCode || undefined,
+              failureClass: isAccountRestriction ? 'account_restriction' : failureCode ? 'remote_rejection' : undefined,
+              timestamp: Date.now(),
+              error,
+            });
+            if (isAccountRestriction && Date.now() - Number(this.lastRestriction?.checkedAt ?? 0) > 30_000) {
+              void this.getAccountRestriction().catch(() => undefined);
+            }
           }
         }
         if (!key.id || !update.pollUpdates?.length) continue;
@@ -268,7 +298,8 @@ export class BaileysProvider implements MessagingProvider {
       }
     });
 
-    socket.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+    socket.ev.on('connection.update', async ({ connection, lastDisconnect, qr, reachoutTimeLock }) => {
+      if (reachoutTimeLock) this.publishRestriction(reachoutTimeLock);
       if (qr) { events.onState?.('qr'); events.onQr?.(qr); }
       if (connection === 'open') { this.connected = true; events.onState?.('connected'); }
       if (connection === 'close') {
@@ -339,6 +370,11 @@ export class BaileysProvider implements MessagingProvider {
     if (logout) await socket.logout().catch(() => undefined); else socket.end(new Error('Manual disconnect'));
   }
   private requireSocket() { if (!this.socket || !this.connected) throw new Error('A conta do WhatsApp não está conectada'); return this.socket; }
+
+  async getAccountRestriction(): Promise<AccountRestrictionState> {
+    const state = await this.requireSocket().fetchAccountReachoutTimelock();
+    return this.publishRestriction(state);
+  }
 
   private async outboundJid(remoteJid: string) {
     const normalized = userJid(remoteJid);

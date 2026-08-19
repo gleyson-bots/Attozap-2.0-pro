@@ -8,7 +8,7 @@ import { applyCampaignDeliveryStatus } from './campaigns/delivery.js';
 export function registerMessageStatusTracking(input: { window: BrowserWindow; db: AttozapDatabase; accounts: AccountManager }) {
   const { window, db, accounts } = input;
 
-  accounts.on('message-status', (payload: { accountId: string; id: string; remoteJid?: string; participant?: string; status: MessageDeliveryStatus; timestamp?: number; error?: string }) => {
+  accounts.on('message-status', (payload: { accountId: string; id: string; remoteJid?: string; participant?: string; status: MessageDeliveryStatus; rawStatus?: number; failureCode?: string; failureClass?: 'account_restriction' | 'remote_rejection'; timestamp?: number; error?: string }) => {
     if (!payload?.id || !payload?.status) return;
 
     // Persist the provider event first. sendMessage() and Baileys events can race;
@@ -34,6 +34,8 @@ export function registerMessageStatusTracking(input: { window: BrowserWindow; db
       ...payload,
       status: cached.status,
       error: cached.status === 'failed' ? (cached.error ?? payload.error) : undefined,
+      failureCode: payload.failureCode,
+      failureClass: payload.failureClass,
     };
 
     if (!window.isDestroyed()) {

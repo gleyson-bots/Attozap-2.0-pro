@@ -65,6 +65,10 @@ function todayLocal() {
 }
 function randomBetween(min: number, max: number) { return Math.floor(min + Math.random() * (max - min + 1)); }
 function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function isReachoutRestriction(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error);
+  return /(?:código|code)\s*463\b|reach.?out|timelock|reachouttimelock/i.test(text);
+}
 
 function mediaType(item: WarmupMediaItem): 'image' | 'video' | 'document' | 'audio' | 'sticker' {
   if (item.type) return item.type;
@@ -549,6 +553,7 @@ export class WarmupEngine {
 
     let chosen: { text: string; source: 'library' | 'ai' } | undefined;
     let success = false;
+    let blockedByRestriction = false;
 
     try {
       chosen = await this.chooseMessage(profile, target!, senderName, recipientName);
@@ -599,13 +604,21 @@ export class WarmupEngine {
       success = true;
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
+      blockedByRestriction = isReachoutRestriction(error);
       this.db.prepare(`
         INSERT INTO warmup_logs
         (profile_id,account_id,target_jid,message,status,error,source,sender_account_id,recipient_account_id)
         VALUES (?,?,?,?, 'failed',?,?,?,?)
       `).run(id, senderAccountId, target, chosen?.text ?? null, text, chosen?.source ?? 'library', senderAccountId, recipientAccountId ?? null);
       runtime.phase = 'error';
-      runtime.lastError = text;
+      runtime.lastError = blockedByRestriction
+        ? `${text} O aquecimento foi pausado para evitar novas tentativas enquanto a restrição estiver ativa.`
+        : text;
+    }
+
+    if (blockedByRestriction) {
+      runtime.nextRunAt = undefined;
+      return;
     }
 
     // A failed pool sender keeps the turn. This prevents A from repeatedly

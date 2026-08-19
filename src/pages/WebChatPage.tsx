@@ -105,6 +105,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const [pollOptions, setPollOptions] = useState('Sim\nNão');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [restriction, setRestriction] = useState<any>(null);
   const bottom = useRef<HTMLDivElement | null>(null);
   const lastAutoScroll = useRef(0);
   const messageLoadGeneration = useRef(0);
@@ -121,6 +122,26 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     const current = accounts.find(account => account.id === accountId);
     setProxy(current?.proxy ?? '');
   }, [accounts, accountId]);
+
+  async function refreshRestriction() {
+    if (!accountId || !window.attozap.accounts.restriction) return;
+    try {
+      const result = await window.attozap.accounts.restriction(accountId);
+      setRestriction(result?.restriction ?? null);
+    } catch { setRestriction(null); }
+  }
+
+  useEffect(() => {
+    if (!accountId) { setRestriction(null); return; }
+    let cancelled = false;
+    void window.attozap.accounts.restriction?.(accountId).then((result: any) => {
+      if (!cancelled) setRestriction(result?.restriction ?? null);
+    }).catch(() => undefined);
+    const offRestriction = window.attozap.accounts.onRestriction?.((payload: any) => {
+      if (!cancelled && payload?.accountId === accountId) setRestriction(payload);
+    });
+    return () => { cancelled = true; offRestriction?.(); };
+  }, [accountId]);
 
   function scrollToBottom(force = false) {
     const now = Date.now();
@@ -231,7 +252,12 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     const offStatus = window.attozap.messages.onStatus((payload: any) => {
       if (payload?.accountId !== accountId || !payload?.id) return;
       setMessages(current => orderMessages(current.map(message => message.id === payload.id ? { ...message, status: payload.status, error: payload.status === 'failed' ? (payload.error || message.error) : undefined } : message)));
-      if (payload.status === 'failed') setError(payload.error || 'O WhatsApp rejeitou a mensagem.');
+      if (payload.status === 'failed') {
+        if (payload.failureClass === 'account_restriction' || payload.failureCode === '463') {
+          setRestriction((current: any) => current ?? { isActive: true, checkedAt: Date.now() });
+        }
+        setError(payload.error || 'O WhatsApp rejeitou a mensagem.');
+      }
     });
     const offProfile = window.attozap.messages.onProfile?.((payload: any) => {
       if (payload?.accountId !== accountId) return;
@@ -397,6 +423,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       <div className="head-actions"><label className="channel-picker"><span>Canal</span><select className="top-select" value={accountId} onChange={e => { setAccountId(e.target.value); setSelected(null); setNewTarget(''); setMessages([]); }}><option value="">Escolha o canal...</option>{connected.map(account => <option key={account.id} value={account.id}>{String(account.provider || 'baileys').toUpperCase()} · {account.name}{account.phone ? ` · +${account.phone}` : ''}</option>)}</select></label><button className="icon-button" title="Proxy do canal" disabled={!accountId} onClick={() => setShowProxy(v => !v)}><Settings2 size={16}/></button><button className="icon-button" title="Atualizar" disabled={!accountId} onClick={() => { void loadChats(); void loadMessages(); }}><RefreshCw size={16}/></button></div>
     </div>
     {error && <div className="notice error webchat-notice">{error}<button onClick={() => setError('')}><X size={14}/></button></div>}
+    {restriction?.isActive && <div className="notice error webchat-notice webchat-restriction-notice"><div><b>Restrição de alcance do WhatsApp detectada</b><span>O servidor está a impedir temporariamente novas mensagens para alguns destinatários. Não repita automaticamente o envio; teste primeiro uma conversa já iniciada e aguarde o prazo do WhatsApp.</span>{restriction.timeEnforcementEnds && <small>Fim informado pelo servidor: {new Date(restriction.timeEnforcementEnds).toLocaleString('pt-BR')}</small>}</div><button className="button ghost" onClick={() => void refreshRestriction()}>Verificar novamente</button></div>}
     {showProxy && <div className="webchat-proxy"><b>Proxy do canal</b><input value={proxy} onChange={e => setProxy(e.target.value)} placeholder="http://usuario:senha@host:porta"/><button className="button primary" onClick={() => void saveProxy()}>Salvar</button></div>}
     <div className="webchat-workspace">
       <aside className="webchat-list-pane">

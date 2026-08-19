@@ -7,12 +7,21 @@ export type MessageResult = {
 };
 
 export type MessageDeliveryStatus = 'failed' | 'sent' | 'delivered' | 'read' | 'played';
+export type AccountRestrictionState = {
+  isActive: boolean;
+  timeEnforcementEnds?: number;
+  enforcementType?: string;
+  checkedAt: number;
+};
+
 export type MessageStatusEvent = {
   id: string;
   remoteJid?: string;
   participant?: string;
   status: MessageDeliveryStatus;
   rawStatus?: number;
+  failureCode?: string;
+  failureClass?: 'account_restriction' | 'remote_rejection';
   timestamp?: number;
   error?: string;
 };
@@ -43,6 +52,7 @@ export type ProviderEvents = {
   onMessage?: (message: IncomingMessage) => void;
   onContact?: (event: ContactProfileEvent) => void;
   onMessageStatus?: (event: MessageStatusEvent) => void;
+  onRestriction?: (state: AccountRestrictionState) => void;
   onPollUpdate?: (event: PollUpdateEvent) => void;
 };
 
@@ -166,4 +176,5 @@ export interface MessagingProvider {
   getGroupInvite(groupJid: string): Promise<string>;
   isConnected(): boolean;
   getSelfJid(): string | undefined;
+  getAccountRestriction?(): Promise<AccountRestrictionState>;
 }

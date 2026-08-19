@@ -74,6 +74,7 @@ export function registerIpc(input: {
   });
   ipcMain.handle('accounts:disconnect', async (_event, id: string, logout = false) => accounts.disconnect(id, logout));
   ipcMain.handle('accounts:remove', async (_event, id: string) => accounts.remove(id));
+  ipcMain.handle('accounts:restriction', (_event, id: string) => accounts.restrictionDiagnostics(id));
 
   accounts.on('state', payload => send(window, 'accounts:state', payload));
   accounts.on('qr', async payload => {
@@ -85,6 +86,7 @@ export function registerIpc(input: {
     }
   });
   accounts.on('error', payload => send(window, 'accounts:error', payload));
+  accounts.on('restriction', payload => send(window, 'accounts:restriction', payload));
   accounts.on('message', payload => send(window, 'messages:incoming', payload));
   accounts.on('poll-update', payload => {
     db.prepare(`

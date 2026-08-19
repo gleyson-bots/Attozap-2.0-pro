@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from '../database.js';
 import { BaileysProvider } from './baileys-provider.js';
 import { phoneFromPnJid } from './identity.js';
-import type { ConnectionState, ContactPresence, ContactProfileEvent, IncomingMessage, MessagingProvider } from './provider.js';
+import type { AccountRestrictionState, ConnectionState, ContactPresence, ContactProfileEvent, IncomingMessage, MessagingProvider } from './provider.js';
 
 export type AccountRecord = {
   id: string;
@@ -15,6 +15,7 @@ export type AccountRecord = {
   proxy?: string;
   createdAt: string;
   updatedAt: string;
+  restriction?: AccountRestrictionState;
 };
 
 function sleep(ms: number) {
@@ -24,6 +25,7 @@ function sleep(ms: number) {
 export class AccountManager extends EventEmitter {
   private readonly providers = new Map<string, MessagingProvider>();
   private readonly ensurePromises = new Map<string, Promise<MessagingProvider>>();
+  private readonly restrictions = new Map<string, AccountRestrictionState>();
 
   constructor(private readonly db: AttozapDatabase, private readonly authRoot: string) {
     super();
@@ -43,6 +45,7 @@ export class AccountManager extends EventEmitter {
       proxy: row.proxy_url ? String(row.proxy_url) : undefined,
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
+      restriction: this.restrictions.get(String(row.id)),
     }));
   }
 
@@ -93,6 +96,10 @@ export class AccountManager extends EventEmitter {
       onMessage: message => void this.onMessage(id, message, provider),
       onContact: event => void this.onContact(id, event, provider),
       onMessageStatus: event => this.emit('message-status', { accountId: id, ...event }),
+      onRestriction: state => {
+        this.restrictions.set(id, state);
+        this.emit('restriction', { accountId: id, ...state });
+      },
       onPollUpdate: event => this.emit('poll-update', { accountId: id, ...event }),
     });
     return this.get(id);
@@ -151,6 +158,7 @@ export class AccountManager extends EventEmitter {
 
   async remove(id: string) {
     await this.disconnect(id, true).catch(() => undefined);
+    this.restrictions.delete(id);
     this.db.prepare(`DELETE FROM instances WHERE id = ?`).run(id);
     this.audit('account.remove', id);
   }
@@ -159,6 +167,17 @@ export class AccountManager extends EventEmitter {
     const provider = this.providers.get(id);
     if (!provider || !provider.isConnected()) throw new Error('A conta selecionada não está conectada');
     return provider;
+  }
+
+  async restrictionDiagnostics(id: string) {
+    const account = this.get(id);
+    if (!account) throw new Error('Conta não encontrada');
+    const provider = this.providers.get(id);
+    if (provider?.isConnected() && provider.getAccountRestriction) {
+      const restriction = await provider.getAccountRestriction();
+      this.restrictions.set(id, restriction);
+    }
+    return { accountId: id, connected: Boolean(provider?.isConnected()), restriction: this.restrictions.get(id) ?? null };
   }
 
   private updateState(id: string, status: ConnectionState, provider?: MessagingProvider) {
