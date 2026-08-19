@@ -29,6 +29,7 @@ declare global {
       clipboard: any;
       settings: any;
       secure: any;
+      ai: any;
       system: any;
       diagnostics: any;
       identities: any;

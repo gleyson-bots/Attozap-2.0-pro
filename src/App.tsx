@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Activity, BarChart3, Bot, BriefcaseBusiness, CalendarClock, ChevronRight, ContactRound, FileSearch, FileText, Fingerprint, Flame, Gauge, Group,
+  Activity, BarChart3, Bot, BriefcaseBusiness, CalendarClock, ChevronRight, ContactRound, FileSearch, FileText, Fingerprint, Flame, Gauge, Group, Sparkles,
   HeartPulse, KeyRound, LayoutDashboard, ListChecks, Menu, MessageCircle, MessageSquareText, Moon, PanelLeftClose, PanelLeftOpen, Search, Send, Settings,
   Sun, Users, Wifi, Wrench, X,
 } from 'lucide-react';
@@ -19,6 +19,7 @@ import { ExtractorsPage } from './pages/ExtractorsPage';
 import { AutoReplyPage, SchedulerPage } from './pages/AutomationPages';
 import { LicenseActivationPage } from './pages/LicensePage';
 import { WebChatPage } from './pages/WebChatPage';
+import { AIChatPage } from './pages/AIChatPage';
 import { WarmupPage } from './pages/WarmupPage';
 import { RecruitingPage } from './pages/RecruitingPage';
 import { StartupGate } from './pages/StartupGate';
@@ -28,7 +29,7 @@ import { IdentityCenterPage } from './pages/IdentityCenterPage';
 import { campaignPercent, toLocalDateTime } from './lib';
 
 type UiMode = 'basic'|'advanced';
-type View = 'dashboard'|'sender'|'groupSender'|'campaignCenter'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'recruiting'|'health'|'identities'|'license'|'settings';
+type View = 'dashboard'|'sender'|'groupSender'|'campaignCenter'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'aiChat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'recruiting'|'health'|'identities'|'license'|'settings';
 type NavItem = { id: View; label: string; icon: any; advanced?: boolean };
 
 const sections: Array<{ label: string; items: NavItem[] }> = [
@@ -42,7 +43,7 @@ const sections: Array<{ label: string; items: NavItem[] }> = [
     { id: 'contacts', label: 'Contatos & listas', icon: ContactRound }, { id: 'contactGrabber', label: 'Contact Grabber', icon: MessageSquareText, advanced: true },
     { id: 'groups', label: 'Ferramentas de grupos', icon: Users }, { id: 'bulkGroups', label: 'Bulk Group Tools', icon: Group, advanced: true },
   ] },
-  { label: 'AUTOMAÇÃO', items: [{ id: 'autoReply', label: 'Auto Reply', icon: Bot }, { id: 'warmup', label: 'Aquecimento', icon: Flame }] },
+  { label: 'AUTOMAÇÃO', items: [{ id: 'autoReply', label: 'Auto Reply', icon: Bot }, { id: 'warmup', label: 'Aquecimento', icon: Flame }, { id: 'aiChat', label: 'Chat IA', icon: Sparkles }] },
   { label: 'FERRAMENTAS', items: [
     { id: 'numberFilter', label: 'Number Filter', icon: FileSearch, advanced: true }, { id: 'extractors', label: 'Google Maps & Extratores', icon: Wrench, advanced: true },
     { id: 'recruiting', label: 'Candidaturas', icon: BriefcaseBusiness, advanced: true },
@@ -127,7 +128,7 @@ export default function App() {
         {view === 'accounts' && <AccountsPage accounts={accounts} reload={reloadAccounts}/>} {view === 'webchat' && <WebChatPage accounts={accounts} reloadAccounts={reloadAccounts}/>} 
         {view === 'contacts' && <ContactsPage/>} {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>} 
         {view === 'groups' && <GroupToolsPage accounts={accounts}/>} {view === 'bulkGroups' && <BulkGroupsPage accounts={accounts}/>} {view === 'autoReply' && <AutoReplyPage accounts={accounts}/>} 
-        {view === 'warmup' && <WarmupPage accounts={accounts}/>} {view === 'extractors' && <ExtractorsPage/>} {view === 'recruiting' && <RecruitingPage/>}
+        {view === 'warmup' && <WarmupPage accounts={accounts}/>} {view === 'aiChat' && <AIChatPage openSettings={() => setView('settings')}/>} {view === 'extractors' && <ExtractorsPage/>} {view === 'recruiting' && <RecruitingPage/>}
         {view === 'health' && <HealthCenterPage/>} {view === 'identities' && <IdentityCenterPage accounts={accounts}/>} 
         {view === 'license' && <LicenseActivationPage/>} {view === 'settings' && <SettingsPage accounts={accounts} uiMode={uiMode} onUiModeChange={changeMode}/>} 
       </div>

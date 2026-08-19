@@ -7,6 +7,19 @@ const accents = [
   { id: 'emerald', label: 'Verde', value: '#10b981' }, { id: 'rose', label: 'Rosa', value: '#ec4899' }, { id: 'amber', label: 'Âmbar', value: '#f59e0b' },
 ];
 
+const aiProviderDefinitions = [
+  { id: 'openai', label: 'OpenAI', keySetting: 'ai_openai_key', modelSetting: 'ai_openai_model', defaultModel: 'gpt-4o-mini' },
+  { id: 'anthropic', label: 'Anthropic', keySetting: 'ai_anthropic_key', modelSetting: 'ai_anthropic_model', defaultModel: 'claude-3-5-haiku-latest' },
+  { id: 'nvidia', label: 'NVIDIA NIM', keySetting: 'ai_nvidia_key', modelSetting: 'ai_nvidia_model', defaultModel: 'meta/llama-3.1-8b-instruct' },
+  { id: 'groq', label: 'Groq', keySetting: 'ai_groq_key', modelSetting: 'ai_groq_model', defaultModel: 'llama-3.3-70b-versatile' },
+  { id: 'openrouter', label: 'OpenRouter', keySetting: 'ai_openrouter_key', modelSetting: 'ai_openrouter_model', defaultModel: 'openai/gpt-4o-mini' },
+  { id: 'poolside', label: 'Poolside', keySetting: 'ai_poolside_key', modelSetting: 'ai_poolside_model', baseSetting: 'ai_poolside_base_url', defaultModel: 'model' },
+  { id: 'xai', label: 'xAI / Grok', keySetting: 'ai_xai_key', modelSetting: 'ai_xai_model', defaultModel: 'grok-4-fast-non-reasoning' },
+];
+type AiConfig = { key: string; model: string; base: string };
+type AiConfigMap = Record<string, AiConfig>;
+const initialAiConfig = (): AiConfigMap => Object.fromEntries(aiProviderDefinitions.map(provider => [provider.id, { key: '', model: provider.defaultModel, base: '' }]));
+
 export function applyUiPreferences(prefs: { fontScale?: string; accent?: string; density?: string }) {
   const root = document.documentElement;
   if (prefs.fontScale) root.style.setProperty('--ui-scale', String(Number(prefs.fontScale) / 100));
@@ -19,8 +32,7 @@ export function SettingsPage({ accounts, uiMode = 'basic', onUiModeChange }: { a
   const [audit, setAudit] = useState<any[]>([]);
   const [fontScale, setFontScale] = useState('112'); const [accent, setAccent] = useState('violet'); const [density, setDensity] = useState('comfortable');
   const [mode, setMode] = useState<UiMode>(uiMode);
-  const [xaiKey, setXaiKey] = useState(''); const [xaiModel, setXaiModel] = useState('grok-4-fast-non-reasoning');
-  const [poolsideKey, setPoolsideKey] = useState(''); const [poolsideBase, setPoolsideBase] = useState(''); const [poolsideModel, setPoolsideModel] = useState('');
+  const [aiConfigs, setAiConfigs] = useState<AiConfigMap>(initialAiConfig);
   const [secureAvailable, setSecureAvailable] = useState(false);
   const [saved, setSaved] = useState('');
 
@@ -28,16 +40,15 @@ export function SettingsPage({ accounts, uiMode = 'basic', onUiModeChange }: { a
   useEffect(() => {
     void reloadAudit();
     void (async () => {
-      const [font, color, space, storedMode, xKey, xModel, pKey, pBase, pModel, secure] = await Promise.all([
+      const [font, color, space, storedMode, secure, storedAi] = await Promise.all([
         window.attozap.settings.get('ui_font_scale'), window.attozap.settings.get('ui_accent'), window.attozap.settings.get('ui_density'), window.attozap.settings.get('ui_mode'),
-        window.attozap.secure.get('ai_xai_key'), window.attozap.settings.get('ai_xai_model'), window.attozap.secure.get('ai_poolside_key'),
-        window.attozap.settings.get('ai_poolside_base_url'), window.attozap.settings.get('ai_poolside_model'), window.attozap.secure.available(),
+        window.attozap.secure.available(), Promise.all(aiProviderDefinitions.map(async provider => ({ id: provider.id, key: await window.attozap.secure.get(provider.keySetting), model: await window.attozap.settings.get(provider.modelSetting), base: provider.baseSetting ? await window.attozap.settings.get(provider.baseSetting) : '' }))),
       ]);
       const prefs = { fontScale: font || '112', accent: color || 'violet', density: space || 'comfortable' };
       setFontScale(prefs.fontScale); setAccent(prefs.accent); setDensity(prefs.density); applyUiPreferences(prefs);
-      setMode(storedMode === 'advanced' ? 'advanced' : 'basic');
-      setXaiKey(xKey || ''); setXaiModel(xModel || 'grok-4-fast-non-reasoning'); setPoolsideKey(pKey || ''); setPoolsideBase(pBase || ''); setPoolsideModel(pModel || ''); setSecureAvailable(Boolean(secure));
-    })();
+      setMode(storedMode === 'advanced' ? 'advanced' : 'basic'); setSecureAvailable(Boolean(secure));
+      setAiConfigs(Object.fromEntries(storedAi.map(item => [item.id, { key: item.key || '', model: item.model || aiProviderDefinitions.find(provider => provider.id === item.id)?.defaultModel || '', base: item.base || '' }])));
+    })().catch(error => setSaved(error?.message ?? String(error)));
   }, []);
 
   async function saveAppearance() {
@@ -45,13 +56,16 @@ export function SettingsPage({ accounts, uiMode = 'basic', onUiModeChange }: { a
     applyUiPreferences({ fontScale, accent, density }); onUiModeChange?.(mode); setSaved('Personalização salva.'); setTimeout(() => setSaved(''), 2500);
   }
   async function saveAi() {
-    if (!secureAvailable && (xaiKey.trim() || poolsideKey.trim())) throw new Error('O armazenamento protegido do sistema não está disponível. Não é seguro salvar API keys neste computador.');
-    await Promise.all([
-      window.attozap.secure.set('ai_xai_key', xaiKey.trim()), window.attozap.settings.set('ai_xai_model', xaiModel.trim()),
-      window.attozap.secure.set('ai_poolside_key', poolsideKey.trim()), window.attozap.settings.set('ai_poolside_base_url', poolsideBase.trim()), window.attozap.settings.set('ai_poolside_model', poolsideModel.trim()),
-    ]);
+    if (!secureAvailable && Object.values(aiConfigs).some(config => config.key.trim())) throw new Error('O armazenamento protegido do sistema não está disponível. Não é seguro salvar novas API keys neste computador.');
+    const writes = aiProviderDefinitions.flatMap(provider => {
+      const config = aiConfigs[provider.id] ?? { key: '', model: provider.defaultModel, base: '' };
+      const baseWrites = provider.baseSetting ? [window.attozap.settings.set(provider.baseSetting, config.base.trim())] : [];
+      return [window.attozap.secure.set(provider.keySetting, config.key.trim()), window.attozap.settings.set(provider.modelSetting, config.model.trim()), ...baseWrites];
+    });
+    await Promise.all(writes);
     setSaved('Provedores de IA salvos no armazenamento protegido do sistema.'); setTimeout(() => setSaved(''), 2500);
   }
+  function updateAi(id: string, patch: Partial<AiConfig>) { setAiConfigs(current => ({ ...current, [id]: { ...(current[id] ?? { key: '', model: '', base: '' }), ...patch } })); }
 
   return <div className="page-stack">
     <div className="page-head"><div><span className="kicker">SETTINGS</span><h2>Configurações & aparência</h2><p>Leitura, navegação, cores, IA e preferências locais.</p></div><button className="button ghost" onClick={() => void reloadAudit()}><RefreshCw size={15}/> Atualizar auditoria</button></div>
@@ -67,9 +81,9 @@ export function SettingsPage({ accounts, uiMode = 'basic', onUiModeChange }: { a
       <section className="card"><div className="card-head"><div><h3>Diagnóstico rápido</h3><p>Resumo do ambiente atual</p></div><Settings size={18}/></div><div className="diagnostic"><div><span>Contas cadastradas</span><b>{accounts.length}</b></div><div><span>Contas online</span><b>{accounts.filter(account => account.status === 'connected').length}</b></div><div><span>Banco</span><b>SQLite WAL</b></div><div><span>Motor</span><b>Baileys v7 / JID-LID</b></div></div><div className="notice info">O Health Center faz a verificação completa de socket, banco, disco, backups e falhas.</div></section>
     </div>
 
-    <section className="card"><div className="card-head"><div><h3>IA para aquecimento</h3><p>As chaves ficam protegidas pelo sistema operacional e não entram nos diagnósticos.</p></div><Bot size={18}/></div>
+    <section className="card"><div className="card-head"><div><h3>Provedores de IA local</h3><p>As chaves ficam protegidas pelo sistema operacional e não entram nos diagnósticos. O chat IA usa uma conexão direta do processo principal.</p></div><Bot size={18}/></div>
       <div className={`notice ${secureAvailable ? 'success' : 'error'}`}><ShieldCheck size={14}/> {secureAvailable ? 'Armazenamento protegido disponível. No Windows, as chaves são vinculadas à proteção do usuário local.' : 'Armazenamento protegido indisponível. O ATTOZAP não permitirá salvar novas API keys.'}</div>
-      <div className="tools-grid"><div><div className="builder-title"><KeyRound size={15}/><b>xAI / Grok</b></div><div className="field"><label>API Key</label><input type="password" value={xaiKey} onChange={e => setXaiKey(e.target.value)} placeholder="xai-..."/></div><div className="field"><label>Modelo</label><input value={xaiModel} onChange={e => setXaiModel(e.target.value)} placeholder="grok-..."/></div></div><div><div className="builder-title"><KeyRound size={15}/><b>Poolside</b></div><div className="field"><label>API Key</label><input type="password" value={poolsideKey} onChange={e => setPoolsideKey(e.target.value)}/></div><div className="field"><label>URL do deployment</label><input value={poolsideBase} onChange={e => setPoolsideBase(e.target.value)} placeholder="https://seu-deployment..."/></div><div className="field"><label>Modelo</label><input value={poolsideModel} onChange={e => setPoolsideModel(e.target.value)}/></div></div></div>
+      <div className="ai-provider-grid">{aiProviderDefinitions.map(provider => { const config = aiConfigs[provider.id] ?? { key: '', model: provider.defaultModel, base: '' }; return <div className="ai-provider-card" key={provider.id}><div className="builder-title"><KeyRound size={15}/><b>{provider.label}</b></div><div className="field"><label>API Key</label><input type="password" value={config.key} onChange={event => updateAi(provider.id, { key: event.target.value })} placeholder="Chave protegida"/></div><div className="field"><label>Modelo</label><input value={config.model} onChange={event => updateAi(provider.id, { model: event.target.value })} placeholder={provider.defaultModel}/></div>{provider.baseSetting && <div className="field"><label>URL do deployment</label><input value={config.base} onChange={event => updateAi(provider.id, { base: event.target.value })} placeholder="https://seu-deployment"/></div>}</div>; })}</div>
       <button className="button primary" onClick={() => void saveAi()}>Salvar provedores de IA</button>
     </section>
 

@@ -22,6 +22,7 @@ import { registerRecruitingIpc } from './recruiting-ipc.js';
 import { applyPendingRestore, registerSystemIpc } from './system-ipc.js';
 import { registerMessageStatusTracking } from './message-status.js';
 import { registerRecoveryIpc } from './recovery-ipc.js';
+import { registerAiIpc } from './ai-ipc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -100,6 +101,7 @@ app.whenReady().then(async () => {
   safeRegister('extractor-ipc', () => registerExtractorIpc(db));
   safeRegister('desktop-ipc', () => registerDesktopIpc(mainWindow!));
   safeRegister('chat-ipc', () => registerChatIpc(chat, license));
+  safeRegister('ai-ipc', () => registerAiIpc(db, license));
   safeRegister('warmup-ipc', () => registerWarmupIpc(warmupEngine!, license));
   safeRegister('campaign-monitor-ipc', () => registerCampaignMonitorIpc(mainWindow!, campaigns));
   safeRegister('browser-hub-ipc', () => registerBrowserHubIpc(mainWindow!));
