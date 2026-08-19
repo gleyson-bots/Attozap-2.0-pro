@@ -1,8 +1,8 @@
 name: Windows CI
 
 on:
-  push:
-    branches: ["feat/foundation-v2"]
+  pull_request:
+    branches: ["main"]
   workflow_dispatch:
 
 concurrency:
