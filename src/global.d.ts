@@ -35,6 +35,7 @@ declare global {
       identities: any;
       audit: any;
       messages: any;
+      delivery: any;
     };
   }
 }

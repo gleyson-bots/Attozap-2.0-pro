@@ -5,6 +5,10 @@ import { getCachedMessageStatus, isConfirmedDelivery, mergeDeliveryStatus, type 
 
 const successRank: Record<string, number> = { sent: 1, delivered: 2, read: 3, played: 4 };
 
+function isReachoutRestriction(error?: string | null) {
+  return /(?:\b463\b|reach.?out|time.?lock|timelock|account[_ ]restriction|message[_ ]account[_ ]restriction)/i.test(error ?? '');
+}
+
 export function recomputeCampaign(db: AttozapDatabase, campaignId: string) {
   const counts = db.prepare(`
     SELECT
@@ -128,11 +132,23 @@ export function applyCampaignDeliveryStatus(
   if (!delivery?.id || !delivery.recipient_id || !delivery.campaign_id) return undefined;
 
   const merged = mergeDeliveryStatus(delivery.status, status);
+  const mergedError = merged === 'failed' ? (error ?? 'WhatsApp rejeitou a mensagem') : null;
   db.prepare(`UPDATE campaign_deliveries SET status=?,error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
     merged,
-    merged === 'failed' ? (error ?? 'WhatsApp rejeitou a mensagem') : null,
+    mergedError,
     delivery.id,
   );
+
+  if (merged === 'failed' && isReachoutRestriction(mergedError)) {
+    const campaign = db.prepare(`SELECT status,circuit_failures,circuit_breaker_cooldown_minutes FROM campaigns WHERE id=? LIMIT 1`).get(delivery.campaign_id) as { status?: string; circuit_failures?: number; circuit_breaker_cooldown_minutes?: number } | undefined;
+    if (campaign) {
+      const failures = Number(campaign.circuit_failures ?? 0) + 1;
+      const cooldownMinutes = Math.max(5, Math.min(1440, Number(campaign.circuit_breaker_cooldown_minutes ?? 60)));
+      const openUntil = new Date(Date.now() + cooldownMinutes * 60_000).toISOString();
+      const nextStatus = ['running', 'awaiting_ack'].includes(String(campaign.status)) ? 'paused' : campaign.status;
+      db.prepare(`UPDATE campaigns SET circuit_state='open',circuit_open_until=?,circuit_failures=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(openUntil, failures, nextStatus, delivery.campaign_id);
+    }
+  }
 
   const recipient = db.prepare(`SELECT status FROM campaign_recipients WHERE id=? LIMIT 1`).get(delivery.recipient_id) as { status?: string } | undefined;
   if (recipient?.status !== 'sending') reconcileCampaignRecipient(db, delivery.recipient_id);

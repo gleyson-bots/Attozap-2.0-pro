@@ -134,6 +134,18 @@ function uniqueStrings(values: Array<string | undefined>) {
   return [...new Set(values.map(value => value?.trim()).filter((value): value is string => Boolean(value)))];
 }
 
+function isReachoutRestriction(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error);
+  return /(?:\b463\b|reach.?out|timelock|time.?lock|account.?restriction|rejected by whatsapp)/i.test(text);
+}
+
+function failureMeta(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error);
+  const match = text.match(/(?:code|status|stub)\s*[:=]?\s*(\d{3})|\b(4\d{2}|5\d{2})\b/i);
+  const failureCode = Number(match?.[1] ?? match?.[2]) || undefined;
+  return { text, failureCode, failureClass: failureCode === 463 || isReachoutRestriction(error) ? 'account_restriction' : 'transport' };
+}
+
 export class CampaignEngine extends EventEmitter {
   private readonly runtime = new Map<string, RuntimeState>();
 
@@ -208,11 +220,18 @@ export class CampaignEngine extends EventEmitter {
   async start(id: string) {
     const campaign = this.db.prepare(`SELECT * FROM campaigns WHERE id = ?`).get(id) as any;
     if (!campaign) throw new Error('Campanha não encontrada');
-    if (this.runtime.has(id) || ['running', 'paused', 'stopping'].includes(String(campaign.status))) throw new Error('Esta campanha já está em execução');
+    if (this.runtime.has(id) || ['running', 'stopping'].includes(String(campaign.status))) throw new Error('Esta campanha já está em execução');
     if (campaign.status === 'awaiting_ack') throw new Error('A campanha ainda aguarda confirmações do WhatsApp');
     if (campaign.status === 'completed') throw new Error('Esta campanha já foi concluída');
 
     const options = normalizeOptions(JSON.parse(campaign.options_json || '{}') as CampaignOptions);
+    const circuitUntil = campaign.circuit_open_until ? Date.parse(String(campaign.circuit_open_until)) : 0;
+    if (campaign.circuit_state === 'open' && circuitUntil > Date.now()) {
+      throw new Error(`Circuit breaker ativo até ${new Date(circuitUntil).toLocaleString()} devido a falhas remotas; aguarde o cooldown antes de retomar.`);
+    }
+    if (campaign.circuit_state === 'open') {
+      this.db.prepare(`UPDATE campaigns SET circuit_state='closed',circuit_open_until=NULL,circuit_failures=0 WHERE id=?`).run(id);
+    }
     const accountIds = uniqueStrings([...(options.accountIds ?? []), campaign.account_id]);
     if (!accountIds.length) throw new Error('Nenhuma conta selecionada para a campanha');
     const messages = uniqueStrings([...(options.messages ?? []), campaign.message_template]);
@@ -304,12 +323,20 @@ export class CampaignEngine extends EventEmitter {
           finalizeRecipientSubmission(this.db, row.id);
           processedRecipients++;
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const meta = failureMeta(error);
+          const message = meta.text;
+          const current = this.db.prepare(`SELECT circuit_failures,circuit_breaker_limit,circuit_breaker_cooldown_minutes FROM campaigns WHERE id=?`).get(id) as any;
+          const failures = Number(current?.circuit_failures ?? 0) + 1;
+          const limit = Math.max(1, Math.min(5, Number(current?.circuit_breaker_limit ?? 3)));
+          const cooldownMinutes = Math.max(5, Math.min(1440, Number(current?.circuit_breaker_cooldown_minutes ?? 60)));
+          const shouldOpen = isReachoutRestriction(error) || failures >= limit;
+          const openUntil = shouldOpen ? new Date(Date.now() + cooldownMinutes * 60_000).toISOString() : null;
           recordCampaignDeliveryFailure(this.db, { campaignId: id, recipientId: row.id, accountId: selectedAccountId, error: message });
           finalizeRecipientSubmission(this.db, row.id);
           this.logMessage(randomUUID(), selectedAccountId, originalTarget, 'out', 'error', '', 'failed', message);
-          this.setRuntime(id, { phase: 'error', lastError: message });
-          this.emit('error', { campaignId: id, recipientId: row.id, target: originalTarget, message });
+          this.db.prepare(`UPDATE campaigns SET circuit_state=?,circuit_open_until=?,circuit_failures=?,status=? WHERE id=?`).run(shouldOpen ? 'open' : 'closed', openUntil, failures, shouldOpen ? 'paused' : 'running', id);
+          this.setRuntime(id, { phase: shouldOpen ? 'paused' : 'error', paused: shouldOpen, lastError: shouldOpen ? `${message} Circuit breaker pausado por ${cooldownMinutes} min; não haverá novas tentativas automáticas.` : message });
+          this.emit('error', { campaignId: id, recipientId: row.id, target: originalTarget, message, failureCode: meta.failureCode, failureClass: meta.failureClass, circuitOpen: shouldOpen });
           processedRecipients++;
         }
 
@@ -352,8 +379,13 @@ export class CampaignEngine extends EventEmitter {
 
   resume(id: string) {
     const state = this.runtime.get(id); if (!state) return false;
+    const campaign = this.db.prepare(`SELECT circuit_state,circuit_open_until FROM campaigns WHERE id=?`).get(id) as any;
+    const circuitUntil = campaign?.circuit_open_until ? Date.parse(String(campaign.circuit_open_until)) : 0;
+    if (campaign?.circuit_state === 'open' && circuitUntil > Date.now()) {
+      throw new Error(`Circuit breaker ativo até ${new Date(circuitUntil).toLocaleString()}; aguarde o cooldown antes de retomar.`);
+    }
     state.paused = false; state.phase = state.nextAt ? 'waiting' : 'preparing';
-    this.db.prepare(`UPDATE campaigns SET status='running' WHERE id=?`).run(id);
+    this.db.prepare(`UPDATE campaigns SET status='running',circuit_state='closed',circuit_open_until=NULL,circuit_failures=0 WHERE id=?`).run(id);
     this.emitProgress(id); this.emitRuntime(id); return true;
   }
 

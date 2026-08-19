@@ -7,6 +7,7 @@ import type { CampaignEngine, CreateCampaignInput } from './campaigns/engine.js'
 import type { AutoReplyEngine, AutoReplyRuleInput } from './automation/auto-reply.js';
 import type { WaSenderTools, ImportedContact } from './tools/wasender-tools.js';
 import type { LicenseService } from './license-service.js';
+import type { DeliveryCenter, DeliveryQuery } from './delivery-center.js';
 
 function send(window: BrowserWindow, channel: string, payload: unknown) {
   if (!window.isDestroyed()) window.webContents.send(channel, payload);
@@ -22,8 +23,9 @@ export function registerIpc(input: {
   autoReply: AutoReplyEngine;
   tools: WaSenderTools;
   license: LicenseService;
+  deliveryCenter: DeliveryCenter;
 }) {
-  const { window, db, accounts, campaigns, autoReply, tools, license } = input;
+  const { window, db, accounts, campaigns, autoReply, tools, license, deliveryCenter } = input;
 
   function requireLicense() {
     const status = license.status();
@@ -57,6 +59,8 @@ export function registerIpc(input: {
     );
     CREATE INDEX IF NOT EXISTS idx_poll_reports_updated ON poll_reports(updated_at DESC);
   `);
+
+  ipcMain.handle('delivery:query', (_event, query: DeliveryQuery = {}) => deliveryCenter.query(query));
 
   ipcMain.handle('accounts:list', () => accounts.list());
   ipcMain.handle('accounts:create', (_event, name: string) => {

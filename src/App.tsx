@@ -8,6 +8,7 @@ import attoLogo from './assets/attozap-logo.svg';
 import { AccountsPage } from './pages/AccountsPage';
 import { SenderPage } from './pages/SenderPage';
 import { CampaignCenterPage } from './pages/CampaignCenterPage';
+import { DeliveryCenterPage } from './pages/DeliveryCenterPage';
 import { NumberFilterPage } from './pages/ToolsPages';
 import { ContactsPage } from './pages/ContactsPage';
 import { ContactGrabberPage } from './pages/ContactGrabberPage';
@@ -29,14 +30,14 @@ import { IdentityCenterPage } from './pages/IdentityCenterPage';
 import { campaignPercent, toLocalDateTime } from './lib';
 
 type UiMode = 'basic'|'advanced';
-type View = 'dashboard'|'sender'|'groupSender'|'campaignCenter'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'aiChat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'recruiting'|'health'|'identities'|'license'|'settings';
+type View = 'dashboard'|'sender'|'groupSender'|'campaignCenter'|'deliveryCenter'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'aiChat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'recruiting'|'health'|'identities'|'license'|'settings';
 type NavItem = { id: View; label: string; icon: any; advanced?: boolean };
 
 const sections: Array<{ label: string; items: NavItem[] }> = [
   { label: 'INÍCIO', items: [{ id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard }] },
   { label: 'ENVIOS', items: [
     { id: 'sender', label: 'Contact Sender', icon: Send }, { id: 'groupSender', label: 'Group Sender', icon: Group },
-    { id: 'campaignCenter', label: 'Campaign Center', icon: ListChecks }, { id: 'scheduler', label: 'Agendamentos', icon: CalendarClock }, { id: 'templates', label: 'Templates', icon: FileText }, { id: 'pollReport', label: 'Poll Report', icon: BarChart3, advanced: true },
+    { id: 'campaignCenter', label: 'Campaign Center', icon: ListChecks }, { id: 'deliveryCenter', label: 'Delivery Center', icon: Activity }, { id: 'scheduler', label: 'Agendamentos', icon: CalendarClock }, { id: 'templates', label: 'Templates', icon: FileText }, { id: 'pollReport', label: 'Poll Report', icon: BarChart3, advanced: true },
   ] },
   { label: 'WHATSAPP', items: [
     { id: 'accounts', label: 'Contas', icon: Wifi }, { id: 'webchat', label: 'WebChat', icon: MessageCircle },
@@ -120,17 +121,18 @@ export default function App() {
         <div className="topbar-actions"><button className="mode-pill" onClick={() => setView('settings')} title="Alterar modo de navegação">{uiMode === 'advanced' ? 'Avançado' : 'Básico'}</button><div className="top-search"><Search size={16}/><span>Ferramentas WASender</span></div><button className="icon-button" onClick={() => void toggleTheme()}>{dark ? <Sun size={17}/> : <Moon size={17}/>}</button><button className="account-pill" onClick={() => setView('accounts')}><span className={connected ? 'online-dot' : 'offline-dot'}/><div><b>{connected ? 'WhatsApp ativo' : 'Desconectado'}</b><small>{connected ? `${connected} sessão(ões)` : 'Conectar conta'}</small></div></button></div>
       </header>
       <div className={`page-content ${fullWorkspace ? 'page-content-full' : ''}`}>
-        {view === 'dashboard' && <Dashboard accounts={accounts} campaigns={campaigns} go={setView} uiMode={uiMode}/>} 
-        {view === 'sender' && <SenderPage mode="contact" accounts={accounts} campaigns={campaigns} reloadCampaigns={reloadCampaigns}/>} 
-        {view === 'groupSender' && <SenderPage mode="group" accounts={accounts} campaigns={campaigns} reloadCampaigns={reloadCampaigns}/>} 
-        {view === 'campaignCenter' && <CampaignCenterPage campaigns={campaigns} accounts={accounts} reloadCampaigns={reloadCampaigns}/>} 
-        {view === 'scheduler' && <SchedulerPage campaigns={campaigns}/>} {view === 'templates' && <TemplatesPage/>} {view === 'pollReport' && <PollReportPage accounts={accounts}/>} 
-        {view === 'accounts' && <AccountsPage accounts={accounts} reload={reloadAccounts}/>} {view === 'webchat' && <WebChatPage accounts={accounts} reloadAccounts={reloadAccounts}/>} 
-        {view === 'contacts' && <ContactsPage/>} {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>} 
-        {view === 'groups' && <GroupToolsPage accounts={accounts}/>} {view === 'bulkGroups' && <BulkGroupsPage accounts={accounts}/>} {view === 'autoReply' && <AutoReplyPage accounts={accounts}/>} 
+        {view === 'dashboard' && <Dashboard accounts={accounts} campaigns={campaigns} go={setView} uiMode={uiMode}/>}
+        {view === 'sender' && <SenderPage mode="contact" accounts={accounts} campaigns={campaigns} reloadCampaigns={reloadCampaigns}/>}
+        {view === 'groupSender' && <SenderPage mode="group" accounts={accounts} campaigns={campaigns} reloadCampaigns={reloadCampaigns}/>}
+        {view === 'campaignCenter' && <CampaignCenterPage campaigns={campaigns} accounts={accounts} reloadCampaigns={reloadCampaigns}/>}
+        {view === 'deliveryCenter' && <DeliveryCenterPage accounts={accounts}/>}
+        {view === 'scheduler' && <SchedulerPage campaigns={campaigns}/>} {view === 'templates' && <TemplatesPage/>} {view === 'pollReport' && <PollReportPage accounts={accounts}/>}
+        {view === 'accounts' && <AccountsPage accounts={accounts} reload={reloadAccounts}/>} {view === 'webchat' && <WebChatPage accounts={accounts} reloadAccounts={reloadAccounts}/>}
+        {view === 'contacts' && <ContactsPage/>} {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>}
+        {view === 'groups' && <GroupToolsPage accounts={accounts}/>} {view === 'bulkGroups' && <BulkGroupsPage accounts={accounts}/>} {view === 'autoReply' && <AutoReplyPage accounts={accounts}/>}
         {view === 'warmup' && <WarmupPage accounts={accounts}/>} {view === 'aiChat' && <AIChatPage openSettings={() => setView('settings')}/>} {view === 'extractors' && <ExtractorsPage/>} {view === 'recruiting' && <RecruitingPage/>}
-        {view === 'health' && <HealthCenterPage/>} {view === 'identities' && <IdentityCenterPage accounts={accounts}/>} 
-        {view === 'license' && <LicenseActivationPage/>} {view === 'settings' && <SettingsPage accounts={accounts} uiMode={uiMode} onUiModeChange={changeMode}/>} 
+        {view === 'health' && <HealthCenterPage/>} {view === 'identities' && <IdentityCenterPage accounts={accounts}/>}
+        {view === 'license' && <LicenseActivationPage/>} {view === 'settings' && <SettingsPage accounts={accounts} uiMode={uiMode} onUiModeChange={changeMode}/>}
       </div>
     </main>
   </div>;

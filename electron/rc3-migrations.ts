@@ -22,6 +22,22 @@ export function applyRc3Migrations(db: AttozapDatabase) {
   ensureColumn(db, 'warmup_logs', 'source', "TEXT NOT NULL DEFAULT 'library'");
   ensureColumn(db, 'warmup_logs', 'sender_account_id', 'TEXT');
   ensureColumn(db, 'warmup_logs', 'recipient_account_id', 'TEXT');
+  ensureColumn(db, 'warmup_logs', 'message_id', 'TEXT');
+  ensureColumn(db, 'warmup_logs', 'simulated', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'warmup_logs', 'failure_code', 'INTEGER');
+  ensureColumn(db, 'warmup_logs', 'failure_class', 'TEXT');
+  ensureColumn(db, 'warmup_profiles', 'simulation_enabled', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'warmup_profiles', 'circuit_state', "TEXT NOT NULL DEFAULT 'closed'");
+  ensureColumn(db, 'warmup_profiles', 'circuit_open_until', 'TEXT');
+  ensureColumn(db, 'warmup_profiles', 'circuit_failures', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'warmup_profiles', 'circuit_breaker_limit', 'INTEGER NOT NULL DEFAULT 3');
+  db.prepare(`UPDATE warmup_profiles SET circuit_breaker_limit=3 WHERE circuit_breaker_limit IS NULL OR circuit_breaker_limit=1`).run();
+  ensureColumn(db, 'warmup_profiles', 'circuit_breaker_cooldown_minutes', 'INTEGER NOT NULL DEFAULT 60');
+  ensureColumn(db, 'campaigns', 'circuit_state', "TEXT NOT NULL DEFAULT 'closed'");
+  ensureColumn(db, 'campaigns', 'circuit_open_until', 'TEXT');
+  ensureColumn(db, 'campaigns', 'circuit_failures', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'campaigns', 'circuit_breaker_limit', 'INTEGER NOT NULL DEFAULT 3');
+  ensureColumn(db, 'campaigns', 'circuit_breaker_cooldown_minutes', 'INTEGER NOT NULL DEFAULT 60');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS recruiting_jobs (

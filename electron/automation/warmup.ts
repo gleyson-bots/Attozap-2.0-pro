@@ -31,6 +31,9 @@ export type WarmupProfileInput = {
   peerAccountIds?: string[];
   mediaItems?: WarmupMediaItem[];
   mediaChance?: number;
+  simulationEnabled?: boolean;
+  circuitBreakerLimit?: number;
+  circuitBreakerCooldownMinutes?: number;
 };
 
 type OwnAccount = { id: string; name: string; phone?: string; status: string };
@@ -51,6 +54,7 @@ type Runtime = {
   lastError?: string;
   roundPosition?: number;
   roundSize?: number;
+  simulated?: boolean;
 };
 
 function unique(values: string[]) { return [...new Set(values.map(value => value.trim()).filter(Boolean))]; }
@@ -68,6 +72,12 @@ function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, m
 function isReachoutRestriction(error: unknown) {
   const text = error instanceof Error ? error.message : String(error);
   return /(?:código|code)\s*463\b|reach.?out|timelock|reachouttimelock/i.test(text);
+}
+function failureMeta(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error);
+  const code = /(?:código|code|status|stub)\s*[:=]?\s*(\d{3})/i.exec(text)?.[1];
+  const failureClass = isReachoutRestriction(error) ? 'account_restriction' : undefined;
+  return { text, failureCode: code ? Number(code) : undefined, failureClass };
 }
 
 function mediaType(item: WarmupMediaItem): 'image' | 'video' | 'document' | 'audio' | 'sticker' {
@@ -166,6 +176,7 @@ export class WarmupEngine {
       lastError: runtime.lastError ?? null,
       roundPosition: runtime.roundPosition ?? null,
       roundSize: runtime.roundSize ?? null,
+      simulated: Boolean(runtime.simulated),
     });
     if (profileId) {
       const runtime = this.runtime.get(profileId);
@@ -254,13 +265,16 @@ export class WarmupEngine {
     const start = clamp(input.activeHourStart, 0, 23, 9);
     const end = clamp(input.activeHourEnd, start + 1, 24, 20);
     const aiDaily = Math.min(daily, clamp(input.aiDailyLimit, 1, 12, 6));
+    const simulationEnabled = Boolean(input.simulationEnabled);
+    const circuitBreakerLimit = clamp(input.circuitBreakerLimit, 1, 5, 3);
+    const circuitBreakerCooldownMinutes = clamp(input.circuitBreakerCooldownMinutes, 5, 1440, 60);
     const id = randomUUID();
 
     this.db.prepare(`
       INSERT INTO warmup_profiles
-      (id,account_id,name,targets_json,messages_json,min_delay_seconds,max_delay_seconds,daily_limit,active_hour_start,active_hour_end,last_reset_date,message_source,ai_provider,ai_model,ai_prompt,ai_daily_limit,mode,peer_account_ids_json,round_robin_index)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
-    `).run(id, accountId, name, JSON.stringify(targets), JSON.stringify(messages), min, max, daily, start, end, todayLocal(), source, input.aiProvider ?? null, input.aiModel?.trim() || null, input.aiPrompt?.trim() || null, aiDaily, mode, JSON.stringify(peers.map(account => account.id)));
+      (id,account_id,name,targets_json,messages_json,min_delay_seconds,max_delay_seconds,daily_limit,active_hour_start,active_hour_end,last_reset_date,message_source,ai_provider,ai_model,ai_prompt,ai_daily_limit,mode,peer_account_ids_json,round_robin_index,simulation_enabled,circuit_state,circuit_open_until,circuit_failures,circuit_breaker_limit,circuit_breaker_cooldown_minutes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,'closed',NULL,0,?,?)
+    `).run(id, accountId, name, JSON.stringify(targets), JSON.stringify(messages), min, max, daily, start, end, todayLocal(), source, input.aiProvider ?? null, input.aiModel?.trim() || null, input.aiPrompt?.trim() || null, aiDaily, mode, JSON.stringify(peers.map(account => account.id)), simulationEnabled ? 1 : 0, circuitBreakerLimit, circuitBreakerCooldownMinutes);
 
     this.saveMedia(id, input.mediaItems ?? [], input.mediaChance ?? 25);
     this.audit('warmup.create', id, { mode, peers: peers.length, media: input.mediaItems?.length ?? 0 });
@@ -287,14 +301,17 @@ export class WarmupEngine {
     const start = clamp(input.activeHourStart ?? current.active_hour_start, 0, 23, 9);
     const end = clamp(input.activeHourEnd ?? current.active_hour_end, start + 1, 24, 20);
     const aiDaily = Math.min(daily, clamp(input.aiDailyLimit ?? current.ai_daily_limit, 1, 12, 6));
+    const simulationEnabled = input.simulationEnabled ?? Boolean(current.simulation_enabled);
+    const circuitBreakerLimit = clamp(input.circuitBreakerLimit ?? current.circuit_breaker_limit, 1, 5, 3);
+    const circuitBreakerCooldownMinutes = clamp(input.circuitBreakerCooldownMinutes ?? current.circuit_breaker_cooldown_minutes, 5, 1440, 60);
 
     this.db.prepare(`
       UPDATE warmup_profiles SET
         account_id=?,name=?,targets_json=?,messages_json=?,min_delay_seconds=?,max_delay_seconds=?,daily_limit=?,
         active_hour_start=?,active_hour_end=?,message_source=?,ai_provider=?,ai_model=?,ai_prompt=?,ai_daily_limit=?,
-        mode=?,peer_account_ids_json=?,round_robin_index=0,updated_at=CURRENT_TIMESTAMP
+        mode=?,peer_account_ids_json=?,round_robin_index=0,simulation_enabled=?,circuit_state='closed',circuit_open_until=NULL,circuit_failures=0,circuit_breaker_limit=?,circuit_breaker_cooldown_minutes=?,updated_at=CURRENT_TIMESTAMP
       WHERE id=?
-    `).run(accountId, String(input.name ?? current.name).trim(), JSON.stringify(targets), JSON.stringify(messages), min, max, daily, start, end, source, input.aiProvider ?? current.ai_provider ?? null, input.aiModel ?? current.ai_model ?? null, input.aiPrompt ?? current.ai_prompt ?? null, aiDaily, mode, JSON.stringify(peers.map(account => account.id)), id);
+    `).run(accountId, String(input.name ?? current.name).trim(), JSON.stringify(targets), JSON.stringify(messages), min, max, daily, start, end, source, input.aiProvider ?? current.ai_provider ?? null, input.aiModel ?? current.ai_model ?? null, input.aiPrompt ?? current.ai_prompt ?? null, aiDaily, mode, JSON.stringify(peers.map(account => account.id)), simulationEnabled ? 1 : 0, circuitBreakerLimit, circuitBreakerCooldownMinutes, id);
 
     this.saveMedia(id, media, input.mediaChance ?? current.media_chance ?? 25);
     return this.get(id);
@@ -318,17 +335,18 @@ export class WarmupEngine {
   async start(id: string) {
     const profile = this.get(id);
     if (!profile) throw new Error('Perfil de aquecimento não encontrado');
+    const simulated = Boolean(profile.simulation_enabled);
 
     if (profile.mode === 'pool') {
       const peers = this.validatePeerAccounts(profile.peer_account_ids);
-      await this.ensureLivePeers(peers);
+      if (!simulated) await this.ensureLivePeers(peers);
     } else {
       this.validateTargets(profile.account_id, profile.targets);
-      await this.ensureLiveAccount(profile.account_id);
+      if (!simulated) await this.ensureLiveAccount(profile.account_id);
     }
 
     if (this.runtime.has(id)) return profile;
-    const runtime: Runtime = { stopped: false, phase: 'starting' };
+    const runtime: Runtime = { stopped: false, phase: 'starting', simulated };
     this.runtime.set(id, runtime);
     this.db.prepare(`UPDATE warmup_profiles SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);
     this.audit('warmup.start', id, { mode: profile.mode });
@@ -416,6 +434,13 @@ export class WarmupEngine {
 
   private async chooseMessage(profile: any, target: string, senderName?: string, recipientName?: string): Promise<{ text: string; source: 'library' | 'ai' }> {
     const messages = profile.messages as string[];
+    if (profile.simulation_enabled && profile.message_source === 'ai') {
+      if (messages.length) {
+        const index = Math.max(0, Number(profile.sent_today ?? 0)) % messages.length;
+        return { text: messages[index], source: 'library' };
+      }
+      return { text: '[SIMULAÇÃO] mensagem IA não gerada offline', source: 'library' };
+    }
     if (profile.message_source === 'ai' && profile.ai_provider && this.aiUsedToday(profile.id) < profile.ai_daily_limit) {
       try {
         const relationship = senderName && recipientName
@@ -445,10 +470,16 @@ export class WarmupEngine {
     runtime.timer = setTimeout(() => void this.tick(id, runtime), safe * 1000);
   }
 
-  private async typing(accountId: string, target: string, text: string, runtime: Runtime) {
+  private async typing(accountId: string, target: string, text: string, runtime: Runtime, simulated = false) {
     const visibleText = text || '...';
-    const ms = Math.max(2500, Math.min(9000, 1800 + visibleText.length * 45 + randomBetween(300, 1400)));
+    const ms = simulated
+      ? randomBetween(250, 800)
+      : Math.max(2500, Math.min(9000, 1800 + visibleText.length * 45 + randomBetween(300, 1400)));
     Object.assign(runtime, { phase: 'typing', nextRunAt: Date.now() + ms });
+    if (simulated) {
+      await sleep(ms);
+      return;
+    }
 
     try {
       const resolved = await this.chats.resolveTarget(accountId, target);
@@ -464,15 +495,26 @@ export class WarmupEngine {
     }
   }
 
+  private logDelivery(id: string, accountId: string, remoteJid: string | undefined, messageType: string, text: string | undefined, status: 'pending' | 'simulated' | 'failed', error: string | undefined, metadata: Record<string, unknown>) {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO message_log
+      (id,account_id,remote_jid,direction,message_type,text,status,error,metadata_json,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
+    `).run(id, accountId, remoteJid ?? 'unknown', 'out', messageType, text || null, status, error || null, JSON.stringify(metadata), new Date().toISOString());
+  }
+
   private registerTurnFailure(id: string, runtime: Runtime, accountId: string, target: string | undefined, recipientAccountId: string | undefined, error: unknown) {
     const text = error instanceof Error ? error.message : String(error);
     runtime.phase = 'error';
     runtime.lastError = text;
+    const meta = failureMeta(error);
+    const messageId = `warmup-failure-${randomUUID()}`;
+    this.logDelivery(messageId, accountId, target, 'error', undefined, 'failed', meta.text, { source: 'warmup', failureCode: meta.failureCode, failureClass: meta.failureClass, simulated: false, profileId: id });
     this.db.prepare(`
       INSERT INTO warmup_logs
-      (profile_id,account_id,target_jid,message,status,error,source,sender_account_id,recipient_account_id)
-      VALUES (?,?,?,?, 'failed',?,?,?,?)
-    `).run(id, accountId, target ?? null, null, text, 'library', accountId, recipientAccountId ?? null);
+      (profile_id,account_id,target_jid,message,status,error,source,sender_account_id,recipient_account_id,message_id,failure_code,failure_class,simulated)
+      VALUES (?,?,?,?, 'failed',?,?,?,?,?,?,?,0)
+    `).run(id, accountId, target ?? null, null, meta.text, 'library', accountId, recipientAccountId ?? null, messageId, meta.failureCode ?? null, meta.failureClass ?? null);
   }
 
   private async tick(id: string, runtime: Runtime) {
@@ -487,6 +529,17 @@ export class WarmupEngine {
     }
 
     const hour = new Date().getHours();
+    const circuitUntil = profile.circuit_open_until ? Date.parse(String(profile.circuit_open_until)) : 0;
+    if (profile.circuit_state === 'open' && circuitUntil > Date.now()) {
+      const seconds = Math.max(30, Math.ceil((circuitUntil - Date.now()) / 1000));
+      runtime.lastError = `Circuit breaker ativo até ${new Date(circuitUntil).toLocaleTimeString()} devido a falhas remotas; novas tentativas estão pausadas`;
+      this.schedule(id, runtime, seconds, 'paused');
+      return;
+    }
+    if (profile.circuit_state === 'open') {
+      this.db.prepare(`UPDATE warmup_profiles SET circuit_state='closed',circuit_open_until=NULL,circuit_failures=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);
+    }
+
     if (hour < profile.active_hour_start || hour >= profile.active_hour_end) {
       const seconds = this.secondsUntilWindow(profile);
       runtime.lastError = `Fora da janela configurada (${this.windowLabel(profile)}); agora ${this.localClock()} no horário local; retoma em ${Math.ceil(seconds / 60)} min`;
@@ -512,7 +565,7 @@ export class WarmupEngine {
     try {
       if (profile.mode === 'pool') {
         const peers = this.validatePeerAccounts(profile.peer_account_ids);
-        await this.ensureLivePeers(peers);
+        if (!profile.simulation_enabled) await this.ensureLivePeers(peers);
         const index = Math.max(0, Number(profile.round_robin_index ?? 0)) % peers.length;
         const sender = peers[index];
         const recipient = peers[(index + 1) % peers.length];
@@ -530,7 +583,7 @@ export class WarmupEngine {
         if (!targets.length) throw new Error('O perfil não possui destinos válidos');
         target = targets[Math.floor(Math.random() * targets.length)];
         senderName = this.ownAccounts().find(account => account.id === senderAccountId)?.name;
-        await this.ensureLiveAccount(senderAccountId);
+        if (!profile.simulation_enabled) await this.ensureLiveAccount(senderAccountId);
       }
     } catch (error) {
       this.registerTurnFailure(id, runtime, senderAccountId, target, recipientAccountId, error);
@@ -571,13 +624,15 @@ export class WarmupEngine {
         lastMediaName: item ? basename(item.path) : undefined,
       });
 
-      await this.typing(senderAccountId, target!, chosen.text, runtime);
+      await this.typing(senderAccountId, target!, chosen.text, runtime, Boolean(profile.simulation_enabled));
       if (runtime.stopped) return;
       runtime.phase = 'sending';
       runtime.nextRunAt = undefined;
 
       let sent: any;
-      if (item) {
+      if (profile.simulation_enabled) {
+        sent = { id: `sim-${randomUUID()}`, resolvedTarget: target, remoteJid: target };
+      } else if (item) {
         const type = mediaType(item);
         sent = await this.chats.sendMedia(senderAccountId, target!, type, {
           path: item.path,
@@ -594,30 +649,47 @@ export class WarmupEngine {
       const logText = item
         ? `[${mediaType(item)}] ${basename(item.path)}${chosen.text ? ` · ${chosen.text}` : ''}`
         : chosen.text;
+      const deliveryId = String(sent.id ?? `warmup-${randomUUID()}`);
+      const deliveryStatus = profile.simulation_enabled ? 'simulated' : 'pending';
+      this.logDelivery(deliveryId, senderAccountId, sent.resolvedTarget ?? target, item ? mediaType(item) : 'text', logText, deliveryStatus, undefined, { source: 'warmup', profileId: id, simulated: Boolean(profile.simulation_enabled), transportJid: sent.remoteJid ?? sent.resolvedTarget ?? target });
       this.db.prepare(`
         INSERT INTO warmup_logs
-        (profile_id,account_id,target_jid,message,status,source,sender_account_id,recipient_account_id)
-        VALUES (?,?,?,?, 'sent',?,?,?)
-      `).run(id, senderAccountId, sent.resolvedTarget ?? target, logText, chosen.source, senderAccountId, recipientAccountId ?? null);
-      this.db.prepare(`UPDATE warmup_profiles SET sent_today=sent_today+1,last_run_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);
+        (profile_id,account_id,target_jid,message,status,source,sender_account_id,recipient_account_id,message_id,simulated)
+        VALUES (?,?,?,?, ?,?,?,?, ?,?)
+      `).run(id, senderAccountId, sent.resolvedTarget ?? target, logText, profile.simulation_enabled ? 'simulated' : 'sent', chosen.source, senderAccountId, recipientAccountId ?? null, deliveryId, profile.simulation_enabled ? 1 : 0);
+      this.db.prepare(`UPDATE warmup_profiles SET sent_today=sent_today+1,last_run_at=CURRENT_TIMESTAMP,circuit_state='closed',circuit_open_until=NULL,circuit_failures=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);
       runtime.phase = 'sent';
       success = true;
     } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
+      const meta = failureMeta(error);
+      const text = meta.text;
       blockedByRestriction = isReachoutRestriction(error);
+      const failures = Number(profile.circuit_failures ?? 0) + 1;
+      const breakerLimit = clamp(profile.circuit_breaker_limit, 1, 5, 3);
+      const shouldOpen = blockedByRestriction || failures >= breakerLimit;
+      const cooldownMinutes = clamp(profile.circuit_breaker_cooldown_minutes, 5, 1440, 60);
+      const openUntil = shouldOpen ? new Date(Date.now() + cooldownMinutes * 60_000).toISOString() : null;
+      const failureId = `warmup-failure-${randomUUID()}`;
+      this.logDelivery(failureId, senderAccountId, target, 'error', chosen?.text, 'failed', text, { source: 'warmup', profileId: id, failureCode: meta.failureCode, failureClass: meta.failureClass, simulated: Boolean(profile.simulation_enabled) });
       this.db.prepare(`
         INSERT INTO warmup_logs
-        (profile_id,account_id,target_jid,message,status,error,source,sender_account_id,recipient_account_id)
-        VALUES (?,?,?,?, 'failed',?,?,?,?)
-      `).run(id, senderAccountId, target, chosen?.text ?? null, text, chosen?.source ?? 'library', senderAccountId, recipientAccountId ?? null);
-      runtime.phase = 'error';
-      runtime.lastError = blockedByRestriction
-        ? `${text} O aquecimento foi pausado para evitar novas tentativas enquanto a restrição estiver ativa.`
+        (profile_id,account_id,target_jid,message,status,error,source,sender_account_id,recipient_account_id,message_id,failure_code,failure_class,simulated)
+        VALUES (?,?,?,?, 'failed',?,?,?,?,?,?,?,?)
+      `).run(id, senderAccountId, target, chosen?.text ?? null, text, chosen?.source ?? 'library', senderAccountId, recipientAccountId ?? null, failureId, meta.failureCode ?? null, meta.failureClass ?? null, profile.simulation_enabled ? 1 : 0);
+      this.db.prepare(`UPDATE warmup_profiles SET circuit_state=?,circuit_open_until=?,circuit_failures=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(shouldOpen ? 'open' : 'closed', openUntil, shouldOpen ? failures : failures, id);
+      runtime.phase = shouldOpen ? 'paused' : 'error';
+      runtime.lastError = shouldOpen
+        ? `${text} Circuit breaker pausado por ${cooldownMinutes} min para evitar novas tentativas.`
         : text;
     }
 
-    if (blockedByRestriction) {
-      runtime.nextRunAt = undefined;
+    if (blockedByRestriction || (profile.circuit_state !== 'open' && (() => {
+      const latest = this.get(id);
+      return latest?.circuit_state === 'open';
+    })())) {
+      const latest = this.get(id);
+      const until = latest?.circuit_open_until ? Date.parse(String(latest.circuit_open_until)) : Date.now() + 60_000;
+      this.schedule(id, runtime, Math.max(30, Math.ceil((until - Date.now()) / 1000)), 'paused');
       return;
     }
 

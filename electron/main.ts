@@ -23,6 +23,7 @@ import { applyPendingRestore, registerSystemIpc } from './system-ipc.js';
 import { registerMessageStatusTracking } from './message-status.js';
 import { registerRecoveryIpc } from './recovery-ipc.js';
 import { registerAiIpc } from './ai-ipc.js';
+import { DeliveryCenter } from './delivery-center.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -90,6 +91,7 @@ app.whenReady().then(async () => {
   warmupEngine = new WarmupEngine(db, chat);
   const licenseResources = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources');
   const license = new LicenseService(db, licenseResources);
+  const deliveryCenter = new DeliveryCenter(db);
 
   ipcMain.handle('app:get-version', () => app.getVersion());
   ipcMain.handle('app:get-platform', () => process.platform);
@@ -97,7 +99,7 @@ app.whenReady().then(async () => {
   mainWindow = createWindow();
 
   safeRegister('recovery-ipc', () => registerRecoveryIpc(db, userData));
-  safeRegister('core-ipc', () => registerIpc({ window: mainWindow!, db, accounts, campaigns, autoReply, tools, license }));
+  safeRegister('core-ipc', () => registerIpc({ window: mainWindow!, db, accounts, campaigns, autoReply, tools, license, deliveryCenter }));
   safeRegister('extractor-ipc', () => registerExtractorIpc(db));
   safeRegister('desktop-ipc', () => registerDesktopIpc(mainWindow!));
   safeRegister('chat-ipc', () => registerChatIpc(chat, license));
