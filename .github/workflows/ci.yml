@@ -1,13 +1,9 @@
 name: Windows CI
 
 on:
-  pull_request:
-    branches: ["main"]
+  push:
+    branches: ["feat/foundation-v2"]
   workflow_dispatch:
-
-concurrency:
-  group: windows-ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
