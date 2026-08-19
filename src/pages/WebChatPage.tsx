@@ -105,12 +105,15 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const [pollOptions, setPollOptions] = useState('Sim\nNão');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [newTargetState, setNewTargetState] = useState<'idle' | 'resolving' | 'resolved' | 'invalid'>('idle');
+  const [resolvedNewTarget, setResolvedNewTarget] = useState<any | null>(null);
   const [restriction, setRestriction] = useState<any>(null);
   const bottom = useRef<HTMLDivElement | null>(null);
   const lastAutoScroll = useRef(0);
   const messageLoadGeneration = useRef(0);
   const localSequence = useRef(0);
   const reconcileTimer = useRef<number | null>(null);
+  const resolveGeneration = useRef(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
@@ -130,6 +133,39 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       setRestriction(result?.restriction ?? null);
     } catch { setRestriction(null); }
   }
+
+  useEffect(() => {
+    const requested = newTarget.trim();
+    const generation = ++resolveGeneration.current;
+    if (!accountId || !requested) {
+      setNewTargetState('idle');
+      setResolvedNewTarget(null);
+      return;
+    }
+    const phone = requested.replace(/\D/g, '');
+    if (!requested.includes('@') && phone.length < 6) {
+      setNewTargetState('invalid');
+      setResolvedNewTarget(null);
+      return;
+    }
+    setNewTargetState('resolving');
+    setResolvedNewTarget(null);
+    const timer = window.setTimeout(() => {
+      void window.attozap.webchat.resolve(accountId, requested).then((identity: any) => {
+        if (generation !== resolveGeneration.current) return;
+        if (!identity?.exists || !identity?.jid) throw new Error('O WhatsApp não devolveu um JID/LID válido');
+        setResolvedNewTarget({ ...identity, query: requested });
+        setNewTargetState('resolved');
+        setError('');
+      }).catch((cause: any) => {
+        if (generation !== resolveGeneration.current) return;
+        setNewTargetState('invalid');
+        setResolvedNewTarget(null);
+        setError(cause?.message ?? String(cause));
+      });
+    }, 420);
+    return () => window.clearTimeout(timer);
+  }, [accountId, newTarget]);
 
   useEffect(() => {
     if (!accountId) { setRestriction(null); return; }
@@ -288,24 +324,27 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
 
   const activeAccount = useMemo(() => accounts.find(account => account.id === accountId), [accounts, accountId]);
   const typedTarget = newTarget.trim();
-  const target = typedTarget || selected?.jid || '';
+  const verifiedNewTarget = typedTarget && newTargetState === 'resolved' && resolvedNewTarget?.query === typedTarget ? resolvedNewTarget : null;
+  const target = verifiedNewTarget?.jid ?? (!typedTarget ? selected?.jid ?? '' : '');
 
   async function openNewTarget() {
     const requested = newTarget.trim();
+    const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
     if (!accountId || !requested) return;
-    setBusy(true); setError('');
-    try {
-      const resolved = await window.attozap.webchat.resolve(accountId, requested);
-      setSelected({ jid: resolved, display_name: requested, last_message_at: new Date().toISOString() });
-      setNewTarget('');
-    } catch (e: any) { setError(e?.message ?? String(e)); }
-    finally { setBusy(false); }
+    if (!identity?.jid) {
+      setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'Digite um número válido e aguarde o JID/LID ser confirmado antes de abrir o chat.');
+      return;
+    }
+    setSelected({ jid: identity.jid, lid: identity.lid, pn_jid: identity.pnJid, phone: identity.phone, display_name: requested });
+    setNewTarget('');
   }
 
   async function sendText() {
     const body = text.trim();
     const requested = newTarget.trim();
-    const sendTarget = requested || selected?.jid || '';
+    const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
+    const sendTarget = identity?.jid ?? (!requested ? selected?.jid ?? '' : '');
+    if (requested && !identity?.jid) { setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'O novo destinatário ainda não foi confirmado; nenhum envio foi realizado.'); return; }
     if (!accountId || !sendTarget || !body) { setError('Selecione uma conversa ou informe um destinatário e digite a mensagem.'); return; }
     setBusy(true); setError('');
     try {
@@ -314,7 +353,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'text', text: body, status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { transportJid: result.transportJid } });
       setText('');
       setSelected((current: any) => requested
-        ? { jid: resolved, display_name: requested, last_message_at: new Date().toISOString() }
+        ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested, last_message_at: new Date().toISOString() }
         : { ...(current ?? {}), jid: resolved, last_message_at: new Date().toISOString() });
       setNewTarget('');
       await loadChats();
@@ -326,7 +365,9 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   async function attach(forceType?: 'sticker') {
     setShowAttachMenu(false);
     const requested = newTarget.trim();
-    const sendTarget = requested || selected?.jid || '';
+    const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
+    const sendTarget = identity?.jid ?? (!requested ? selected?.jid ?? '' : '');
+    if (requested && !identity?.jid) { setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'O novo destinatário ainda não foi confirmado; nenhum envio foi realizado.'); return; }
     if (!accountId || !sendTarget) { setError('Selecione uma conversa ou informe um destinatário.'); return; }
     const filters = forceType === 'sticker' ? [{ name: 'Sticker WebP', extensions: ['webp'] }] : undefined;
     const paths = await window.attozap.files.pick({ multiple: false, filters });
@@ -340,7 +381,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       const result = await window.attozap.webchat.sendMedia(accountId, sendTarget, type, { path, fileName: name, ptt: type === 'audio' });
       const resolved = result.resolvedTarget ?? result.remoteJid ?? sendTarget;
       appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: type, text: name, file_name: name, status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { pendingMediaRefresh: true, transportJid: result.transportJid } });
-      setSelected((current: any) => requested ? { jid: resolved, display_name: requested } : { ...(current ?? {}), jid: resolved });
+      setSelected((current: any) => requested ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested } : { ...(current ?? {}), jid: resolved });
       setNewTarget('');
       await loadChats();
       scheduleReconcile(resolved, 180);
@@ -349,7 +390,10 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   }
 
   async function startRecording() {
-    const recordedTarget = newTarget.trim() || selected?.jid || '';
+    const requested = newTarget.trim();
+    const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
+    const recordedTarget = identity?.jid ?? (!requested ? selected?.jid ?? '' : '');
+    if (requested && !identity?.jid) { setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'O novo destinatário ainda não foi confirmado; a gravação não será enviada.'); return; }
     if (!accountId || !recordedTarget) { setError('Selecione uma conversa ou informe um destinatário antes de gravar.'); return; }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { setError('Este ambiente não oferece gravação de áudio pelo microfone.'); return; }
     try {
@@ -374,7 +418,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
           const result = await window.attozap.webchat.sendMedia(accountId, recordedTarget, 'audio', { path: saved.filePath, fileName: 'mensagem-de-voz.webm', mimetype: blob.type || 'audio/webm', ptt: true });
           const resolved = result.resolvedTarget ?? result.remoteJid ?? recordedTarget;
           appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'audio', text: 'Mensagem de voz', file_name: 'mensagem-de-voz.webm', status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { ptt: true, transportJid: result.transportJid } });
-          setSelected((current: any) => newTarget.trim() ? { jid: resolved, display_name: newTarget.trim() } : { ...(current ?? {}), jid: resolved });
+          setSelected((current: any) => requested ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested } : { ...(current ?? {}), jid: resolved });
           setNewTarget('');
           await loadChats();
           scheduleReconcile(resolved, 180);
@@ -396,7 +440,9 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   async function sendPoll() {
     const options = [...new Set(pollOptions.split(/\r?\n/).map(item => item.trim()).filter(Boolean))];
     const requested = newTarget.trim();
-    const sendTarget = requested || selected?.jid || '';
+    const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
+    const sendTarget = identity?.jid ?? (!requested ? selected?.jid ?? '' : '');
+    if (requested && !identity?.jid) { setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'O novo destinatário ainda não foi confirmado; nenhum envio foi realizado.'); return; }
     if (!accountId || !sendTarget || !pollQuestion.trim() || options.length < 2) { setError('Informe uma pergunta e pelo menos duas opções.'); return; }
     setBusy(true); setError('');
     try {
@@ -404,7 +450,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       const result = await window.attozap.webchat.sendPoll(accountId, sendTarget, { name: question, values: options, selectableCount: 1 });
       const resolved = result.resolvedTarget ?? result.remoteJid ?? sendTarget;
       appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'poll', text: question, status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { question, options, transportJid: result.transportJid } });
-      setSelected((current: any) => requested ? { jid: resolved, display_name: requested } : { ...(current ?? {}), jid: resolved });
+      setSelected((current: any) => requested ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested } : { ...(current ?? {}), jid: resolved });
       setNewTarget(''); setPollQuestion(''); setPollOptions('Sim\nNão'); setShowPoll(false); await loadChats();
       scheduleReconcile(resolved, 60);
     } catch (e: any) { setError(e?.message ?? String(e)); }
@@ -429,7 +475,8 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       <aside className="webchat-list-pane">
         <div className="webchat-account"><span className="wa-avatar online"><Wifi size={16}/></span><div><b>{activeAccount?.name ?? 'Selecione um canal'}</b><small>{activeAccount ? `${String(activeAccount.provider || 'baileys').toUpperCase()}${activeAccount.phone ? ` · +${activeAccount.phone}` : ''}` : 'Nenhuma sessão selecionada'}</small></div></div>
         <div className="webchat-search"><Search size={15}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar conversa..."/></div>
-        <div className="new-chat"><input value={newTarget} onChange={e => setNewTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && void openNewTarget()} placeholder="Novo: número, PN JID ou LID"/><button className="icon-button" disabled={busy || !newTarget.trim()} onClick={() => void openNewTarget()}><MessageCircle size={16}/></button></div>
+        <div className="new-chat"><input value={newTarget} onChange={e => setNewTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && void openNewTarget()} placeholder="Novo número, PN JID ou LID"/><button className="icon-button" disabled={busy || newTargetState !== 'resolved' || !verifiedNewTarget?.jid} onClick={() => void openNewTarget()} title={newTargetState === 'resolved' ? 'Abrir contacto confirmado' : 'Aguarde a confirmação do JID/LID'}><MessageCircle size={16}/></button></div>
+        {typedTarget && <div className={`new-chat-resolution ${newTargetState}`} role="status" aria-live="polite"><span>{newTargetState === 'resolving' ? 'A procurar este contacto no WhatsApp…' : newTargetState === 'resolved' && verifiedNewTarget ? `Contacto confirmado · ${verifiedNewTarget.lid ? 'LID' : 'JID'}` : 'Número não localizado ou identidade inválida'}</span>{newTargetState === 'resolved' && verifiedNewTarget?.jid && <code>{verifiedNewTarget.jid}</code>}</div>}
         <div className="conversation-list">{chats.map(chat => <button key={chat.jid} className={selected && sameIdentity(selected, chat) ? 'active' : ''} onClick={() => { setNewTarget(''); setSelected(chat); }}><Avatar chat={chat} onBroken={() => refreshAvatar(chat)}/><span className="grow"><b>{labelFor(chat)}</b><small>{chat.last_text || (chat.last_message_type && chat.last_message_type !== 'text' ? `[${chat.last_message_type}]` : chat.jid)}</small></span><time>{chat.last_message_at ? new Date(chat.last_message_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : ''}</time></button>)}{!chats.length && <div className="empty mini"><MessageCircle size={25}/><p>Nenhuma conversa observada ainda.</p></div>}</div>
       </aside>
       <section className="webchat-thread-pane">

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { app } from 'electron';
 import type { AttozapDatabase } from '../database.js';
 import type { AccountManager } from './account-manager.js';
-import type { ContactCardInput, LocationInput, MessagingProvider, OutboundContent, PollInput, SendMediaInput } from './provider.js';
+import type { ContactCardInput, ContactPresence, LocationInput, MessagingProvider, OutboundContent, PollInput, SendMediaInput } from './provider.js';
 import { getCachedMessageStatus, mergeDeliveryStatus, type StoredDeliveryStatus } from './status.js';
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
@@ -275,26 +275,68 @@ export class ChatService {
     return cached ? { id: messageId, status: cached.status, error: cached.error ?? null, created_at: cached.updated_at } : undefined;
   }
 
-  private async resolveTargetWithProvider(provider: MessagingProvider, target: string) {
+  private async resolveContactWithProvider(provider: MessagingProvider, target: string): Promise<ContactPresence> {
     const clean = target.trim();
     if (!clean) throw new Error('Informe o destinatário');
-    if (clean.endsWith('@g.us')) return clean;
+    if (clean.endsWith('@g.us')) return { input: clean, jid: clean, exists: true };
+
     if (isJid(clean)) {
+      if (clean.endsWith('@broadcast') || clean.endsWith('@newsletter')) throw new Error('Este identificador não pode ser aberto como conversa direta');
+      if (clean.endsWith('@s.whatsapp.net')) {
+        const pn = clean.split('@', 1)[0]?.split(':', 1)[0] ?? '';
+        const [checked] = await provider.checkNumbers([digits(pn)]);
+        if (!checked?.exists || !checked.jid) throw new Error('O PN JID informado não foi confirmado pelo WhatsApp');
+        return { ...checked, input: clean, exists: true, phone: checked.phone ?? digits(pn) };
+      }
       const resolved = await provider.resolveIdentity(clean).catch(() => undefined);
-      return resolved?.lid ?? resolved?.pnJid ?? resolved?.jid ?? clean;
+      if (!resolved?.exists || !resolved.jid || resolved.jid.endsWith('@broadcast') || resolved.jid.endsWith('@newsletter')) {
+        throw new Error('O JID/LID informado não pôde ser confirmado pelo WhatsApp');
+      }
+      if (clean.endsWith('@lid') && !resolved.pnJid && !resolved.phone) {
+        throw new Error('O LID informado não possui mapeamento PN confirmado pelo WhatsApp');
+      }
+      return { ...resolved, input: clean, exists: true };
     }
+
     const phone = digits(clean);
     if (!phone) throw new Error('Destinatário inválido');
     const [resolved] = await provider.checkNumbers([phone]);
-    if (!resolved?.exists) throw new Error(`O número ${phone} não foi localizado no WhatsApp`);
-    // Para números digitados pela primeira vez, o PN JID é o alvo mais estável.
-    // O provider converte PN -> LID apenas quando possui um mapeamento confirmado.
-    return resolved.pnJid ?? resolved.jid ?? resolved.lid ?? `${phone}@s.whatsapp.net`;
+    // Nunca gerar `${phone}@s.whatsapp.net` como fallback: sem retorno do
+    // WhatsApp não existe identidade segura para abrir ou enviar a conversa.
+    if (!resolved?.exists || !resolved.jid) throw new Error(`O número ${phone} não foi localizado no WhatsApp`);
+    return { ...resolved, input: phone, exists: true, phone: resolved.phone ?? phone };
+  }
+
+  private async resolveTargetWithProvider(provider: MessagingProvider, target: string) {
+    const resolved = await this.resolveContactWithProvider(provider, target);
+    return resolved?.lid ?? resolved?.pnJid ?? resolved?.jid ?? (() => { throw new Error('O WhatsApp não devolveu um JID/LID válido'); })();
+  }
+
+  private persistResolvedIdentity(accountId: string, identity: ContactPresence) {
+    if (!identity.jid || identity.jid.endsWith('@g.us')) return;
+    const existing = this.db.prepare(`
+      SELECT canonical_jid FROM wa_identities
+      WHERE account_id=? AND (canonical_jid=? OR (? IS NOT NULL AND lid=?) OR (? IS NOT NULL AND pn_jid=?))
+      LIMIT 1
+    `).get(accountId, identity.jid, identity.lid ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.pnJid ?? null) as { canonical_jid?: string } | undefined;
+    const canonical = existing?.canonical_jid ?? identity.jid;
+    this.db.prepare(`
+      INSERT INTO wa_identities (account_id,canonical_jid,lid,pn_jid,phone,source,last_seen_at)
+      VALUES (?,?,?,?,?,'webchat.resolve',CURRENT_TIMESTAMP)
+      ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
+        lid=COALESCE(excluded.lid,wa_identities.lid),
+        pn_jid=COALESCE(excluded.pn_jid,wa_identities.pn_jid),
+        phone=COALESCE(excluded.phone,wa_identities.phone),
+        source=excluded.source,
+        last_seen_at=CURRENT_TIMESTAMP
+    `).run(accountId, canonical, identity.lid ?? null, identity.pnJid ?? null, identity.phone ?? null);
   }
 
   async resolveTarget(accountId: string, target: string) {
     const provider = await this.ensureAccountLive(accountId);
-    return this.resolveTargetWithProvider(provider, target);
+    const resolved = await this.resolveContactWithProvider(provider, target);
+    this.persistResolvedIdentity(accountId, resolved);
+    return resolved;
   }
 
   async sendText(accountId: string, target: string, text: string) {
