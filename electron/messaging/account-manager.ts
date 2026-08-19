@@ -178,6 +178,7 @@ export class AccountManager extends EventEmitter {
         WHERE account_id=? AND (jid=? OR (? IS NOT NULL AND lid=?) OR (? IS NOT NULL AND pn_jid=?))
         LIMIT 1
       `).get(accountId, canonical, identity.lid ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.pnJid ?? null) as { jid?: string } | undefined;
+      const now = new Date().toISOString();
       if (existing?.jid) {
         this.db.prepare(`
           UPDATE chat_cache SET
@@ -188,6 +189,11 @@ export class AccountManager extends EventEmitter {
             phone=COALESCE(?,phone)
           WHERE account_id=? AND jid=?
         `).run(event.pushName?.trim() || null, event.profilePictureUrl ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.phone ?? null, accountId, existing.jid);
+      } else {
+        this.db.prepare(`
+          INSERT OR IGNORE INTO chat_cache (account_id,jid,lid,pn_jid,phone,name,profile_url,is_group,message_count,first_message_at,last_message_at)
+          VALUES (?,?,?,?,?,?,?,0,0,?,?)
+        `).run(accountId, canonical, identity.lid ?? null, identity.pnJid ?? null, identity.phone ?? null, event.pushName?.trim() || null, event.profilePictureUrl ?? null, now, now);
       }
       this.emit('contact', { accountId, jid: canonical, pushName: event.pushName, profilePictureUrl: event.profilePictureUrl, identity });
     } catch (error) {

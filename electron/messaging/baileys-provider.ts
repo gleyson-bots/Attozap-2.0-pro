@@ -267,7 +267,10 @@ export class BaileysProvider implements MessagingProvider {
     if (!rawJid || rawJid.endsWith('@g.us') || rawJid.endsWith('@broadcast') || rawJid.includes('@newsletter')) return;
     const jid = normalizeJid(rawJid) ?? rawJid;
     const alternateJid = normalizeJid(item?.lid ?? item?.phoneNumber ?? item?.pnJid);
-    if (typeof item?.imgUrl !== 'undefined') this.pictureCache.delete(jid);
+    if (typeof item?.imgUrl !== 'undefined') {
+      this.pictureCache.delete(jid);
+      if (alternateJid) this.pictureCache.delete(alternateJid);
+    }
     const pushName = String(item?.notify ?? item?.name ?? item?.verifiedName ?? '').trim() || undefined;
     const profilePictureUrl = await this.profilePictureUrl(jid).catch(() => undefined);
     this.events.onContact?.({ jid, alternateJid, pushName, profilePictureUrl });
@@ -342,11 +345,23 @@ export class BaileysProvider implements MessagingProvider {
 
   async profilePictureUrl(jid: string) {
     const normalized = normalizeJid(jid) ?? jid;
-    const cached = this.pictureCache.get(normalized);
-    if (cached && cached.expires > Date.now()) return cached.url;
-    const url = await this.requireSocket().profilePictureUrl(normalized, 'preview').catch(() => undefined);
-    this.pictureCache.set(normalized, { url, expires: Date.now() + 60 * 60 * 1000 });
-    return url;
+    const identity = await this.resolveIdentity(normalized).catch(() => undefined);
+    const candidates = [...new Set([identity?.pnJid, normalized, identity?.lid, identity?.jid].filter(Boolean) as string[])];
+    const now = Date.now();
+    for (const candidate of candidates) {
+      const cached = this.pictureCache.get(candidate);
+      if (cached && cached.expires > now && cached.url) return cached.url;
+    }
+    const socket = this.requireSocket();
+    for (const candidate of candidates) {
+      const url = await socket.profilePictureUrl(candidate, 'preview').catch(() => undefined);
+      this.pictureCache.set(candidate, { url, expires: Date.now() + (url ? 60 * 60 * 1000 : 30 * 1000) });
+      if (url) {
+        for (const alias of candidates) this.pictureCache.set(alias, { url, expires: Date.now() + 60 * 60 * 1000 });
+        return url;
+      }
+    }
+    return undefined;
   }
 
   async sendPresence(remoteJid: string, state: 'composing' | 'paused') {

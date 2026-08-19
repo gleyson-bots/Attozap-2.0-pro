@@ -99,9 +99,9 @@ export class ChatService {
     const term = `%${search.trim()}%`;
     const rows = this.db.prepare(`
       SELECT c.*,
-        i.canonical_jid AS identity_jid,
-        i.lid AS identity_lid,
-        i.pn_jid AS identity_pn_jid,
+        COALESCE(i.canonical_jid, i.lid, i.pn_jid, c.lid, c.pn_jid, c.jid) AS identity_jid,
+        COALESCE(i.lid, c.lid) AS identity_lid,
+        COALESCE(i.pn_jid, c.pn_jid) AS identity_pn_jid,
         i.push_name AS identity_push_name,
         COALESCE(g.subject, i.push_name, c.name) AS display_name,
         (SELECT text FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid OR m.remote_jid=i.canonical_jid OR m.remote_jid=i.lid OR m.remote_jid=i.pn_jid) ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_text,
@@ -148,6 +148,62 @@ export class ChatService {
       });
     }
     return [...merged.values()].sort((a, b) => at(b.last_message_at) - at(a.last_message_at) || String(a.jid).localeCompare(String(b.jid)));
+  }
+
+  async refreshProfile(accountId: string, remoteJid: string) {
+    const provider = await this.ensureAccountLive(accountId);
+    const identity = await provider.resolveIdentity(remoteJid).catch(() => undefined);
+    const aliases = [...new Set([remoteJid, identity?.jid, identity?.lid, identity?.pnJid].filter(Boolean) as string[])];
+    let profileUrl: string | undefined;
+    for (const alias of aliases) {
+      profileUrl = await provider.profilePictureUrl(alias).catch(() => undefined);
+      if (profileUrl) break;
+    }
+    const canonical = identity?.jid ?? remoteJid;
+    const existing = this.db.prepare(`
+      SELECT jid FROM chat_cache
+      WHERE account_id=? AND (jid IN (${aliases.map(() => '?').join(',')}) OR lid IN (${aliases.map(() => '?').join(',')}) OR pn_jid IN (${aliases.map(() => '?').join(',')}))
+      LIMIT 1
+    `).get(accountId, ...aliases, ...aliases, ...aliases) as { jid?: string } | undefined;
+    const now = new Date().toISOString();
+    if (identity?.jid) {
+      const identityRow = this.db.prepare(`
+        SELECT canonical_jid FROM wa_identities
+        WHERE account_id=? AND (canonical_jid=? OR (? IS NOT NULL AND lid=?) OR (? IS NOT NULL AND pn_jid=?))
+        LIMIT 1
+      `).get(accountId, identity.jid, identity.lid ?? null, identity.lid ?? null, identity.pnJid ?? null, identity.pnJid ?? null) as { canonical_jid?: string } | undefined;
+      const identityKey = identityRow?.canonical_jid ?? identity.jid;
+      this.db.prepare(`
+        INSERT INTO wa_identities (account_id,canonical_jid,lid,pn_jid,phone,source,last_seen_at)
+        VALUES (?,?,?,?,?,'webchat.profile',CURRENT_TIMESTAMP)
+        ON CONFLICT(account_id,canonical_jid) DO UPDATE SET
+          lid=COALESCE(excluded.lid,wa_identities.lid),
+          pn_jid=COALESCE(excluded.pn_jid,wa_identities.pn_jid),
+          phone=COALESCE(excluded.phone,wa_identities.phone),
+          source=excluded.source,
+          last_seen_at=CURRENT_TIMESTAMP
+      `).run(accountId, identityKey, identity.lid ?? null, identity.pnJid ?? null, identity.phone ?? null);
+    }
+    if (existing?.jid) {
+      this.db.prepare(`
+        UPDATE chat_cache SET
+          profile_url=COALESCE(?,profile_url),
+          lid=COALESCE(?,lid),
+          pn_jid=COALESCE(?,pn_jid),
+          phone=COALESCE(?,phone)
+        WHERE account_id=? AND jid=?
+      `).run(profileUrl ?? null, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, accountId, existing.jid);
+    } else {
+      this.db.prepare(`
+        INSERT OR IGNORE INTO chat_cache (account_id,jid,lid,pn_jid,phone,name,profile_url,is_group,message_count,first_message_at,last_message_at)
+        VALUES (?,?,?,?,?,?,?,0,0,?,?)
+      `).run(accountId, canonical, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, remoteJid, profileUrl ?? null, now, now);
+    }
+    return {
+      jid: canonical,
+      profilePictureUrl: profileUrl,
+      identity,
+    };
   }
 
   listMessages(accountId: string, remoteJid: string, limit = 250) {

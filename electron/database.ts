@@ -73,6 +73,7 @@ export function openDatabase(path: string) {
       pn_jid TEXT,
       phone TEXT,
       name TEXT,
+      profile_url TEXT,
       is_group INTEGER NOT NULL DEFAULT 0,
       message_count INTEGER NOT NULL DEFAULT 0,
       first_message_at TEXT NOT NULL,
@@ -90,6 +91,10 @@ export function openDatabase(path: string) {
       text TEXT,
       status TEXT NOT NULL DEFAULT 'received',
       error TEXT,
+      media_path TEXT,
+      file_name TEXT,
+      mimetype TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
     );

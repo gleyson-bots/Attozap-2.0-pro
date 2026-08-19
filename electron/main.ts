@@ -113,12 +113,11 @@ app.whenReady().then(async () => {
   catch (error) { console.error('[startup:renderer]', error); await showBootFailure(mainWindow, error); }
 
   const staleOnline = accounts.list().filter(account => ['connected', 'connecting', 'reconnecting', 'qr'].includes(account.status));
-  for (const account of staleOnline) {
-    void accounts.connect(account.id).catch(error => {
-      console.error('[session:restore]', account.id, error);
-      void accounts.disconnect(account.id, false).catch(() => undefined);
-    });
-  }
+  const reconnectTasks = staleOnline.map(account => accounts.connect(account.id).catch(error => {
+    console.error('[session:restore]', account.id, error);
+    return accounts.disconnect(account.id, false).catch(() => undefined);
+  }));
+  void Promise.allSettled(reconnectTasks).then(() => warmupEngine?.resumePersisted());
 
   scheduler = setInterval(() => void campaigns.runDueSchedules().catch(error => console.error('[scheduler]', error)), 30_000);
   app.on('activate', async () => {

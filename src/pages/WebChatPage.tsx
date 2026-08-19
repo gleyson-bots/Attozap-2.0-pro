@@ -4,7 +4,7 @@ import { toLocalDateTime } from '../lib';
 
 function labelFor(chat: any) { return chat?.display_name || chat?.name || (chat?.phone ? `+${chat.phone}` : chat?.jid || 'Conversa'); }
 function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
-function aliases(chat: any) { return new Set([chat?.jid, chat?.lid, chat?.pn_jid].filter(Boolean)); }
+function aliases(chat: any) { return new Set([chat?.jid, chat?.lid, chat?.pn_jid, chat?.remote_jid, chat?.remoteJid].filter(Boolean)); }
 function sameIdentity(a: any, b: any) { const aa = aliases(a); return [...aliases(b)].some(value => aa.has(value)); }
 function epochMs(value: unknown) {
   const numeric = typeof value === 'number' ? value : Number(value);
@@ -59,9 +59,15 @@ function payloadMatchesSelected(payload: any, selected: any) {
   const identity = payload?.identity ?? {};
   return [message.remoteJid, message.remoteJidAlt, identity.jid, identity.lid, identity.pnJid].filter(Boolean).some(value => wanted.has(value));
 }
-function Avatar({ chat, large = false }: { chat: any; large?: boolean }) {
+function Avatar({ chat, large = false, onBroken }: { chat: any; large?: boolean; onBroken?: () => void }) {
   const label = String(labelFor(chat)).slice(0, 1).toUpperCase();
-  return <span className={`conversation-avatar ${large ? 'large' : ''}`}>{chat?.profile_url ? <img src={chat.profile_url} alt=""/> : label}</span>;
+  const [failedUrl, setFailedUrl] = useState('');
+  const profileUrl = String(chat?.profile_url || '');
+  const showImage = Boolean(profileUrl) && failedUrl !== profileUrl;
+  useEffect(() => {
+    if (failedUrl && failedUrl !== profileUrl) setFailedUrl('');
+  }, [failedUrl, profileUrl]);
+  return <span className={`conversation-avatar ${large ? 'large' : ''}`}>{showImage ? <img src={profileUrl} alt="" onError={() => { setFailedUrl(profileUrl); onBroken?.(); }}/> : label}</span>;
 }
 function MessageBody({ message }: { message: any }) {
   const type = message.message_type || 'text';
@@ -140,6 +146,19 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     } catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
+  function refreshAvatar(chat: any) {
+    if (!accountId || !chat?.jid || !window.attozap.webchat.refreshProfile) return;
+    void window.attozap.webchat.refreshProfile(accountId, chat.jid).then((profile: any) => {
+      if (!profile) return;
+      const identity = profile.identity ?? {};
+      const probe = { jid: profile.jid, lid: identity.lid, pn_jid: identity.pnJid };
+      setSelected((current: any) => current && sameIdentity(current, probe)
+        ? { ...current, profile_url: profile.profilePictureUrl || current.profile_url, lid: identity.lid ?? current.lid, pn_jid: identity.pnJid ?? current.pn_jid }
+        : current);
+      void loadChats();
+    }).catch(() => undefined);
+  }
+
   async function loadMessages(jid = selected?.jid, autoScroll = true) {
     if (!accountId || !jid) { setMessages([]); return; }
     const generation = ++messageLoadGeneration.current;
@@ -171,8 +190,23 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   useEffect(() => { void loadChats(); }, [accountId, search]);
   useEffect(() => {
     messageLoadGeneration.current++;
-    setMessages([]);
+    setMessages(current => selected ? current.filter(item => item?.metadata?.optimistic && sameIdentity(item, selected)) : []);
     if (selected?.jid) void loadMessages(selected.jid, true);
+  }, [accountId, selected?.jid]);
+
+  useEffect(() => {
+    if (!accountId || !selected?.jid || !window.attozap.webchat.refreshProfile) return;
+    let cancelled = false;
+    void window.attozap.webchat.refreshProfile(accountId, selected.jid).then((profile: any) => {
+      if (cancelled || !profile) return;
+      const identity = profile.identity ?? {};
+      const probe = { jid: profile.jid, lid: identity.lid, pn_jid: identity.pnJid };
+      setSelected((current: any) => current && sameIdentity(current, probe)
+        ? { ...current, profile_url: profile.profilePictureUrl || current.profile_url, lid: identity.lid ?? current.lid, pn_jid: identity.pnJid ?? current.pn_jid }
+        : current);
+      void loadChats();
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
   }, [accountId, selected?.jid]);
 
   useEffect(() => {
@@ -369,10 +403,10 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
         <div className="webchat-account"><span className="wa-avatar online"><Wifi size={16}/></span><div><b>{activeAccount?.name ?? 'Selecione um canal'}</b><small>{activeAccount ? `${String(activeAccount.provider || 'baileys').toUpperCase()}${activeAccount.phone ? ` · +${activeAccount.phone}` : ''}` : 'Nenhuma sessão selecionada'}</small></div></div>
         <div className="webchat-search"><Search size={15}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar conversa..."/></div>
         <div className="new-chat"><input value={newTarget} onChange={e => setNewTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && void openNewTarget()} placeholder="Novo: número, PN JID ou LID"/><button className="icon-button" disabled={busy || !newTarget.trim()} onClick={() => void openNewTarget()}><MessageCircle size={16}/></button></div>
-        <div className="conversation-list">{chats.map(chat => <button key={chat.jid} className={selected && sameIdentity(selected, chat) ? 'active' : ''} onClick={() => { setNewTarget(''); setSelected(chat); }}><Avatar chat={chat}/><span className="grow"><b>{labelFor(chat)}</b><small>{chat.last_text || (chat.last_message_type && chat.last_message_type !== 'text' ? `[${chat.last_message_type}]` : chat.jid)}</small></span><time>{chat.last_message_at ? new Date(chat.last_message_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : ''}</time></button>)}{!chats.length && <div className="empty mini"><MessageCircle size={25}/><p>Nenhuma conversa observada ainda.</p></div>}</div>
+        <div className="conversation-list">{chats.map(chat => <button key={chat.jid} className={selected && sameIdentity(selected, chat) ? 'active' : ''} onClick={() => { setNewTarget(''); setSelected(chat); }}><Avatar chat={chat} onBroken={() => refreshAvatar(chat)}/><span className="grow"><b>{labelFor(chat)}</b><small>{chat.last_text || (chat.last_message_type && chat.last_message_type !== 'text' ? `[${chat.last_message_type}]` : chat.jid)}</small></span><time>{chat.last_message_at ? new Date(chat.last_message_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : ''}</time></button>)}{!chats.length && <div className="empty mini"><MessageCircle size={25}/><p>Nenhuma conversa observada ainda.</p></div>}</div>
       </aside>
       <section className="webchat-thread-pane">
-        <header><Avatar chat={selected} large/><div className="grow"><b>{typedTarget ? `Nova conversa · ${typedTarget}` : selected ? labelFor(selected) : 'Selecione uma conversa'}</b><small>{typedTarget || selected?.jid || 'Envie para número/JID/LID para iniciar'}</small></div></header>
+        <header><Avatar chat={selected} large onBroken={() => refreshAvatar(selected)}/><div className="grow"><b>{typedTarget ? `Nova conversa · ${typedTarget}` : selected ? labelFor(selected) : 'Selecione uma conversa'}</b><small>{typedTarget || selected?.jid || 'Envie para número/JID/LID para iniciar'}</small></div></header>
         <div className="message-stream">{messages.map(message => <div key={message.id} className={`chat-bubble ${message.direction === 'out' ? 'out' : 'in'} ${message.status === 'failed' ? 'failed' : ''}`}><MessageBody message={message}/><small>{toLocalDateTime(message.created_at)}{message.status === 'failed' ? ` · ${message.error || 'falhou'}` : message.direction === 'out' ? ` · ${messageStatusLabel(message.status)}` : ''}</small></div>)}{selected && !messages.length && <div className="empty mini"><MessageCircle size={26}/><p>Sem mensagens registradas nesta conversa.</p></div>}<div ref={bottom}/></div>
         {showPoll && <div className="poll-composer"><div className="field grow"><label>Pergunta</label><input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} placeholder="Qual opção você prefere?"/></div><div className="field grow"><label>Opções — uma por linha</label><textarea value={pollOptions} onChange={e => setPollOptions(e.target.value)}/></div><button className="button primary" disabled={busy} onClick={() => void sendPoll()}><Vote size={15}/> Enviar enquete</button></div>}
         <div className="webchat-popovers">

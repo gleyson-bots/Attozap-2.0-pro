@@ -332,18 +332,67 @@ export class WarmupEngine {
     return this.get(id);
   }
 
-  stop(id: string) {
+  stop(id: string, persist = true) {
     const runtime = this.runtime.get(id);
     if (runtime?.timer) clearTimeout(runtime.timer);
     if (runtime) runtime.stopped = true;
     this.runtime.delete(id);
-    this.db.prepare(`UPDATE warmup_profiles SET status='stopped',updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);
-    this.audit('warmup.stop', id);
+    if (persist) {
+      this.db.prepare(`UPDATE warmup_profiles SET status='stopped',updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);
+      this.audit('warmup.stop', id);
+    }
     return this.get(id);
   }
 
   shutdown() {
-    for (const id of [...this.runtime.keys()]) this.stop(id);
+    // A normal desktop close must not turn an active profile into `stopped`.
+    // The next launch can then recreate its in-memory timer.
+    for (const id of [...this.runtime.keys()]) this.stop(id, false);
+  }
+
+  /**
+   * Resumes profiles that were running when the desktop process was closed.
+   * The old implementation persisted `status=running` but never recreated the
+   * in-memory timer, leaving the UI apparently active without any future turn.
+   */
+  async resumePersisted() {
+    const profiles = this.list().filter(profile => profile.status === 'running');
+    for (const profile of profiles) {
+      try {
+        await this.start(profile.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const runtime: Runtime = { stopped: false, phase: 'error', lastError: `Retoma pendente: ${message}` };
+        this.runtime.set(profile.id, runtime);
+        this.schedule(profile.id, runtime, 30, 'error');
+        this.audit('warmup.resume-retry', profile.id, { error: message });
+        console.error('[warmup:resume-retry]', profile.id, message);
+      }
+    }
+    return this.runtimeStatus();
+  }
+
+  private secondsUntilWindow(profile: any) {
+    const now = new Date();
+    const start = clamp(profile.active_hour_start, 0, 23, 9);
+    const end = clamp(profile.active_hour_end, start + 1, 24, 20);
+    const next = new Date(now);
+    if (now.getHours() >= end) next.setDate(next.getDate() + 1);
+    next.setHours(start, 0, 0, 0);
+    return Math.max(60, Math.ceil((next.getTime() - now.getTime()) / 1000));
+  }
+
+  private windowLabel(profile: any) {
+    const startValue = clamp(profile.active_hour_start, 0, 23, 9);
+    const start = String(startValue).padStart(2, '0');
+    const endValue = clamp(profile.active_hour_end, startValue + 1, 24, 20);
+    const end = endValue === 24 ? '24' : String(endValue).padStart(2, '0');
+    return `${start}:00–${end}:00`;
+  }
+
+  private localClock() {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   }
 
   private aiUsedToday(profileId: string) {
@@ -435,8 +484,9 @@ export class WarmupEngine {
 
     const hour = new Date().getHours();
     if (hour < profile.active_hour_start || hour >= profile.active_hour_end) {
-      runtime.lastError = 'Fora da janela configurada';
-      this.schedule(id, runtime, 60, 'paused');
+      const seconds = this.secondsUntilWindow(profile);
+      runtime.lastError = `Fora da janela configurada (${this.windowLabel(profile)}); agora ${this.localClock()} no horário local; retoma em ${Math.ceil(seconds / 60)} min`;
+      this.schedule(id, runtime, seconds, 'paused');
       return;
     }
     if (profile.sent_today >= profile.daily_limit) {
