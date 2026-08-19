@@ -1,4 +1,4 @@
-name: Windows Runner Probe 2022
+name: Windows Runner Probe 2025
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   probe:
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 5
     steps:
       - name: Verify runner allocation
@@ -17,4 +17,4 @@ jobs:
         run: |
           Write-Host "RUNNER_OS=$env:RUNNER_OS"
           Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
-          Write-Host "WINDOWS_2022_RUNNER_OK"
+          Write-Host "WINDOWS_2025_RUNNER_OK"
