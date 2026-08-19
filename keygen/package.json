@@ -1,7 +1,8 @@
 {
   "name": "attozap-keygen",
-  "version": "2.0.0-rc.13",
+  "version": "2.0.0-rc.14",
   "private": true,
+  "dependencies": {},
   "description": "ATTOZAP License Authority portable KeyGen",
   "author": "GleysonDevs",
   "main": "main.cjs"

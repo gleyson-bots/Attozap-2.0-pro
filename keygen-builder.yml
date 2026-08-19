@@ -1,16 +1,26 @@
 appId: com.gleysondevs.attozap.keygen
 productName: ATTOZAP KeyGen
+copyright: Copyright © 2026 GleysonDevs
 electronVersion: 43.2.0
 asar: true
+npmRebuild: false
 directories:
   app: keygen
   output: release-keygen
 files:
-  - "**/*"
+  - index.html
+  - renderer.js
+  - styles.css
+  - main.cjs
+  - preload.cjs
+  - package.json
+  - "!**/node_modules/**"
 win:
   icon: build/icon.svg
   target:
     - target: portable
       arch:
         - x64
+  artifactName: ATTOZAP-KeyGen-${version}-${arch}.${ext}
+portable:
   artifactName: ATTOZAP-KeyGen-${version}-${arch}.${ext}
