@@ -8,7 +8,7 @@ export {};
 declare global {
   interface Window {
     attozap: {
-      app: { version(): Promise<string>; platform(): Promise<string> };
+      app: { version(): Promise<string>; platform(): Promise<string>; openExternal(url: string): Promise<boolean> };
       accounts: any;
       campaigns: any;
       contacts: any;

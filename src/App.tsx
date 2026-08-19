@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Activity, BarChart3, Bot, BriefcaseBusiness, CalendarClock, ChevronRight, ContactRound, FileSearch, FileText, Fingerprint, Flame, Gauge, Group, Sparkles,
-  HeartPulse, KeyRound, LayoutDashboard, ListChecks, Menu, MessageCircle, MessageSquareText, Moon, PanelLeftClose, PanelLeftOpen, Search, Send, Settings,
+  HeartPulse, KeyRound, LayoutDashboard, LifeBuoy, ListChecks, Menu, MessageCircle, MessageSquareText, Moon, PanelLeftClose, PanelLeftOpen, Search, Send, Settings,
   Sun, Users, Wifi, Wrench, X,
 } from 'lucide-react';
 import attoLogo from './assets/attozap-logo.svg';
@@ -27,10 +27,11 @@ import { StartupGate } from './pages/StartupGate';
 import { SettingsPage, applyUiPreferences } from './pages/SettingsPage';
 import { HealthCenterPage } from './pages/HealthCenterPage';
 import { IdentityCenterPage } from './pages/IdentityCenterPage';
+import { SupportPage } from './pages/SupportPage';
 import { campaignPercent, toLocalDateTime } from './lib';
 
 type UiMode = 'basic'|'advanced';
-type View = 'dashboard'|'sender'|'groupSender'|'campaignCenter'|'deliveryCenter'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'aiChat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'recruiting'|'health'|'identities'|'license'|'settings';
+type View = 'dashboard'|'sender'|'groupSender'|'campaignCenter'|'deliveryCenter'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'aiChat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'recruiting'|'health'|'identities'|'license'|'settings'|'support';
 type NavItem = { id: View; label: string; icon: any; advanced?: boolean };
 
 const sections: Array<{ label: string; items: NavItem[] }> = [
@@ -51,7 +52,7 @@ const sections: Array<{ label: string; items: NavItem[] }> = [
   ] },
   { label: 'SISTEMA', items: [
     { id: 'health', label: 'Health Center', icon: HeartPulse }, { id: 'identities', label: 'Centro JID / LID', icon: Fingerprint, advanced: true },
-    { id: 'license', label: 'Licença', icon: KeyRound }, { id: 'settings', label: 'Configurações', icon: Settings },
+    { id: 'license', label: 'Licença', icon: KeyRound }, { id: 'settings', label: 'Configurações', icon: Settings }, { id: 'support', label: 'Suporte', icon: LifeBuoy },
   ] },
 ];
 
@@ -132,7 +133,7 @@ export default function App() {
         {view === 'groups' && <GroupToolsPage accounts={accounts}/>} {view === 'bulkGroups' && <BulkGroupsPage accounts={accounts}/>} {view === 'autoReply' && <AutoReplyPage accounts={accounts}/>}
         {view === 'warmup' && <WarmupPage accounts={accounts}/>} {view === 'aiChat' && <AIChatPage openSettings={() => setView('settings')}/>} {view === 'extractors' && <ExtractorsPage/>} {view === 'recruiting' && <RecruitingPage/>}
         {view === 'health' && <HealthCenterPage/>} {view === 'identities' && <IdentityCenterPage accounts={accounts}/>}
-        {view === 'license' && <LicenseActivationPage/>} {view === 'settings' && <SettingsPage accounts={accounts} uiMode={uiMode} onUiModeChange={changeMode}/>}
+        {view === 'license' && <LicenseActivationPage/>} {view === 'settings' && <SettingsPage accounts={accounts} uiMode={uiMode} onUiModeChange={changeMode}/>} {view === 'support' && <SupportPage/>}
       </div>
     </main>
   </div>;

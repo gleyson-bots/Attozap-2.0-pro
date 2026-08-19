@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import QRCode from 'qrcode';
 import { randomUUID } from 'node:crypto';
 import type { AttozapDatabase } from './database.js';
@@ -61,6 +61,12 @@ export function registerIpc(input: {
   `);
 
   ipcMain.handle('delivery:query', (_event, query: DeliveryQuery = {}) => deliveryCenter.query(query));
+  ipcMain.handle('app:open-external', async (_event, rawUrl: string) => {
+    const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+    if (!/^(https:\/\/wa\.me\/|mailto:)/i.test(url)) throw new Error('URL externa não permitida.');
+    await shell.openExternal(url);
+    return true;
+  });
 
   ipcMain.handle('accounts:list', () => accounts.list());
   ipcMain.handle('accounts:create', (_event, name: string) => {

@@ -17,6 +17,7 @@ import './system.css';
 import './ui-polish.css';
 import './ui-pages.css';
 import './delivery-center.css';
+import './support.css';
 
 installGlobalErrorHandlers();
 const rootElement = document.getElementById('root');
