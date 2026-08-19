@@ -160,7 +160,10 @@ function deliveryStatus(raw: unknown): MessageDeliveryStatus | undefined {
   if (value >= 5) return 'played';
   if (value >= 4) return 'read';
   if (value >= 3) return 'delivered';
-  if (value >= 2) return 'sent';
+  // Baileys reports PENDING/SERVER_ACK (1) after WhatsApp accepts the
+  // outbound stanza. It is not a delivery receipt yet, but it must not leave
+  // a local message stuck forever in the renderer's "enviando" state.
+  if (value >= 1) return 'sent';
   return undefined;
 }
 
