@@ -17,8 +17,9 @@ function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
 function previewTemplate(template: string, recipient: any) {
   const hour = new Date().getHours();
   const saudacao = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
-  const firstName = String(recipient?.name ?? '').trim().split(/\s+/)[0] || '';
-  const values: Record<string,string> = { name: recipient?.name ?? '', primeiro_nome: firstName, saudacao, phone: recipient?.variables?.phone ?? '', jid: recipient?.target ?? '', ...(recipient?.variables ?? {}) };
+  const displayName = String(recipient?.pushName ?? recipient?.name ?? '').trim();
+  const firstName = displayName.split(/\s+/)[0] || '';
+  const values: Record<string,string> = { name: displayName, nome: displayName, pushname: displayName, pushName: displayName, push_name: displayName, primeiro_nome: firstName, saudacao, phone: recipient?.variables?.phone ?? '', jid: recipient?.target ?? '', ...(recipient?.variables ?? {}) };
   return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m,key) => values[key] ?? '').replace(/\{([\w.-]+)\}/g, (_m,key) => values[key] ?? '');
 }
 function seconds(ms: number) { return Math.max(0, Math.round(ms / 1000)); }
@@ -106,7 +107,8 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
   async function addFile() {
     const paths = await window.attozap.files.pick({ multiple: true });
     if (!paths?.length) return;
-    setParts(current => [...current, ...paths.map((path: string) => ({ type: fileType, input: { path, fileName: fileName(path), ptt: fileType === 'audio' } }))]);
+    const mimeByExtension: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mp3: 'audio/mpeg', ogg: 'audio/ogg', opus: 'audio/ogg; codecs=opus', wav: 'audio/wav', m4a: 'audio/mp4', pdf: 'application/pdf' };
+    setParts(current => [...current, ...paths.map((path: string) => { const name = fileName(path); const extension = name.split('.').pop()?.toLowerCase() ?? ''; return { type: fileType, input: { path, fileName: name, mimetype: mimeByExtension[extension], ptt: fileType === 'audio' } }; })]);
   }
 
   async function testFirstRecipient() {
@@ -137,6 +139,8 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
     if (!recipients.length) { setError(mode === 'contact' ? 'Cole pelo menos um número.' : 'Selecione pelo menos um grupo.'); return; }
     if (!nonEmptyMessages.length && !parts.length) { setError('Adicione uma mensagem ou anexo.'); return; }
     if (maxDelay < minDelay) { setError('O delay máximo precisa ser maior ou igual ao mínimo.'); return; }
+    const hasAudio = parts.some(part => part.type === 'audio');
+    if (hasAudio && nonEmptyMessages.length) { setError('Áudio/PPG não suporta texto ou legenda. Remova o texto da campanha antes de iniciar o disparo de áudio.'); return; }
     setCreating(true); setError(''); setTestStatus('');
     try {
       const campaign = await window.attozap.campaigns.create({
@@ -170,8 +174,8 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
       <section className="card composer-card">
         <div className="section-title"><div><span>01</span><div><h3>Mensagens & mídia</h3><p>Envie todas as mensagens ou use variações rotativas por destinatário.</p></div></div></div>
         <div className="form-grid two"><div className="field"><label>Nome da campanha</label><input value={name} onChange={e => setName(e.target.value)}/></div><div className="field"><label>Variações de mensagem</label><select value={messageMode} onChange={e => setMessageMode(e.target.value as MessageMode)}><option value="all">Enviar todas para cada destinatário</option><option value="rotate">Escolher uma variação por destinatário</option></select></div></div>
-        <div className="message-variants">{messages.map((message, index) => <div className="message-variant" key={index}><div className="message-variant-head"><b>Mensagem {index + 1}</b>{messages.length > 1 && <button className="icon-button danger" onClick={() => setMessages(current => current.filter((_, i) => i !== index))}><Trash2 size={14}/></button>}</div><textarea className="message-box" value={message} onChange={e => updateMessage(index, e.target.value)} placeholder="Digite a mensagem..."/><div className="variable-row"><span>Variáveis:</span><button onClick={() => addVariable(index, '{name}')}>{'{name}'}</button><button onClick={() => addVariable(index, '{primeiro_nome}')}>{'{primeiro_nome}'}</button><button onClick={() => addVariable(index, '{saudacao}')}>{'{saudacao}'}</button><button onClick={() => addVariable(index, '{phone}')}>{'{phone}'}</button><small>Também aceita {'{{campo}}'} das colunas importadas.</small></div></div>)}<button className="button ghost" onClick={() => setMessages(current => [...current, ''])}><Plus size={15}/> Adicionar outra variação</button></div>
-        <div className="attachment-builder"><div className="field compact"><label>Tipo de mídia/anexo</label><select value={fileType} onChange={e => setFileType(e.target.value as any)}><option value="image">Imagem</option><option value="video">Vídeo</option><option value="document">Documento</option><option value="audio">Áudio / PTT</option><option value="sticker">Sticker</option></select></div><button className="button ghost" onClick={() => void addFile()}><Plus size={16}/> Adicionar arquivos</button></div>
+        <div className="message-variants">{messages.map((message, index) => <div className="message-variant" key={index}><div className="message-variant-head"><b>Mensagem {index + 1}</b><button className="icon-button danger" onClick={() => setMessages(current => current.length > 1 ? current.filter((_, i) => i !== index) : [''])} title="Remover texto"><Trash2 size={14}/></button></div><textarea className="message-box" value={message} onChange={e => updateMessage(index, e.target.value)} placeholder="Digite a mensagem..."/><div className="variable-row"><span>Variáveis:</span><button onClick={() => addVariable(index, '{name}')}>{'{name}'}</button><button onClick={() => addVariable(index, '{primeiro_nome}')}>{'{primeiro_nome}'}</button><button onClick={() => addVariable(index, '{saudacao}')}>{'{saudacao}'}</button><button onClick={() => addVariable(index, '{phone}')}>{'{phone}'}</button><small>Também aceita {'{{campo}}'} das colunas importadas.</small></div></div>)}<button className="button ghost" onClick={() => setMessages(current => [...current, ''])}><Plus size={15}/> Adicionar outra variação</button></div>
+        <div className="attachment-builder"><div className="field compact"><label>Tipo de mídia/anexo</label><select value={fileType} onChange={e => setFileType(e.target.value as any)}><option value="image">Imagem</option><option value="video">Vídeo</option><option value="document">Documento</option><option value="audio">Áudio / PTT</option><option value="sticker">Sticker</option></select></div><button className="button ghost" onClick={() => void addFile()}><Plus size={16}/> Adicionar arquivos</button></div>{parts.some(part => part.type === 'audio') && <div className="notice warning sender-audio-notice"><FileAudio size={16}/><span>Áudio/PPG não aceita texto ou legenda. Para iniciar esta campanha, deixe todas as mensagens de texto vazias.</span></div>}
         {!!parts.length && <div className="parts-list">{parts.map((part, index) => <div key={`${part.input?.path}-${index}`}><span className="part-icon">{part.type === 'image' ? <Image size={15}/> : part.type === 'video' ? <Video size={15}/> : part.type === 'audio' ? <FileAudio size={15}/> : part.type === 'sticker' ? <Sticker size={15}/> : <FileText size={15}/>}</span><span>{fileName(part.input.path)}</span><small>{part.type}</small><button onClick={() => setParts(current => current.filter((_, i) => i !== index))}>×</button></div>)}</div>}
         <details className="advanced"><summary>Adicionar localização, contato ou enquete</summary><AdvancedParts onAdd={part => setParts(current => [...current, part])}/></details>
       </section>

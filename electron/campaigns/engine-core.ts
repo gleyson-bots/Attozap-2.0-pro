@@ -19,6 +19,7 @@ import {
 export type CampaignRecipient = {
   target: string;
   name?: string;
+  pushName?: string;
   variables?: Record<string, string>;
 };
 
@@ -117,9 +118,14 @@ function greeting() {
 
 export function renderTemplate(template: string, recipient: CampaignRecipient) {
   const inferredPhone = isJid(recipient.target) ? '' : digits(recipient.target);
-  const firstName = String(recipient.name ?? '').trim().split(/\s+/)[0] ?? '';
+  const displayName = String(recipient.pushName ?? recipient.name ?? '').trim();
+  const firstName = displayName.split(/\s+/)[0] ?? '';
   const values: Record<string, string> = {
-    name: recipient.name ?? '',
+    name: displayName,
+    nome: displayName,
+    pushname: displayName,
+    pushName: displayName,
+    push_name: displayName,
     primeiro_nome: firstName,
     saudacao: greeting(),
     phone: recipient.variables?.phone ?? inferredPhone,
@@ -195,6 +201,30 @@ export class CampaignEngine extends EventEmitter {
   list() { return this.db.prepare(`SELECT * FROM campaigns ORDER BY created_at DESC LIMIT 200`).all(); }
   get(id: string) { return this.db.prepare(`SELECT * FROM campaigns WHERE id = ?`).get(id); }
   recipients(id: string) { return this.db.prepare(`SELECT * FROM campaign_recipients WHERE campaign_id = ? ORDER BY id ASC`).all(id); }
+
+  delete(id: string) {
+    const campaignId = String(id ?? '').trim();
+    if (!campaignId) throw new Error('Campanha inválida');
+    const campaign = this.db.prepare(`SELECT id,status,name FROM campaigns WHERE id=? LIMIT 1`).get(campaignId) as { id?: string; status?: string; name?: string } | undefined;
+    if (!campaign?.id) throw new Error('Campanha não encontrada');
+    const runtime = this.runtime.get(campaignId);
+    if (runtime && !runtime.stopped) throw new Error('Pare a campanha antes de a excluir');
+    const finalStatuses = new Set(['completed', 'failed', 'cancelled', 'stopped']);
+    if (!finalStatuses.has(String(campaign.status ?? '').toLowerCase())) {
+      throw new Error('Só é possível excluir campanhas concluídas, falhadas, canceladas ou paradas');
+    }
+    const remove = this.db.transaction(() => {
+      this.db.prepare(`DELETE FROM campaign_deliveries WHERE campaign_id=?`).run(campaignId);
+      this.db.prepare(`DELETE FROM schedules WHERE campaign_id=?`).run(campaignId);
+      this.db.prepare(`DELETE FROM campaign_recipients WHERE campaign_id=?`).run(campaignId);
+      const result = this.db.prepare(`DELETE FROM campaigns WHERE id=?`).run(campaignId);
+      return result.changes;
+    });
+    const changes = remove();
+    this.runtime.delete(campaignId);
+    this.audit('campaign.delete', campaignId, { name: campaign.name, status: campaign.status });
+    return { id: campaignId, deleted: changes > 0 };
+  }
 
   runtimeState(id?: string) {
     const snapshot = (campaignId: string, state: RuntimeState) => ({ campaignId, ...state, remainingMs: state.nextAt ? Math.max(0, state.nextAt - Date.now()) : 0 });
@@ -277,10 +307,10 @@ export class CampaignEngine extends EventEmitter {
 
         const originalTarget = String(row.target).trim();
         const normalizedPhone = isJid(originalTarget) ? '' : digits(originalTarget);
-        const recipient: CampaignRecipient = { target: originalTarget, name: row.name ?? undefined, variables: JSON.parse(row.variables_json || '{}') };
         const switchEvery = Math.max(0, Math.floor(options.switchAccountAfterRecipients ?? 0));
         const providerIndex = accountIds.length === 1 || switchEvery === 0 ? 0 : Math.floor(processedRecipients / switchEvery) % accountIds.length;
         const selectedAccountId = accountIds[providerIndex];
+        const recipient: CampaignRecipient = { target: originalTarget, name: row.name ?? undefined, pushName: this.findPushName(selectedAccountId, originalTarget), variables: JSON.parse(row.variables_json || '{}') };
         this.setRuntime(id, { phase: 'checking', index: rowIndex + 1, target: originalTarget, accountId: selectedAccountId, lastError: undefined });
 
         const listState = targetType === 'contact' ? this.contactListState(selectedAccountId, originalTarget) : { blocked: false, friendly: false };
@@ -448,17 +478,35 @@ export class CampaignEngine extends EventEmitter {
 
   private async sendPart(accountId: string, target: string, part: CampaignPart, recipient: CampaignRecipient): Promise<MessageResult> {
     const render = (value?: string) => value ? renderTemplate(value, recipient) : value;
+    const mediaInput = (input: SendMediaInput, caption?: string): SendMediaInput => {
+      const path = String(input.path ?? '').trim();
+      if (!path) throw new Error(`O anexo ${part.type} não possui um caminho local válido`);
+      return { ...input, path, caption };
+    };
     switch (part.type) {
-      case 'image': return this.chats.sendContent(accountId, target, { type: 'image', input: { ...part.input, caption: render(part.input.caption) } });
-      case 'video': return this.chats.sendContent(accountId, target, { type: 'video', input: { ...part.input, caption: render(part.input.caption) } });
-      case 'document': return this.chats.sendContent(accountId, target, { type: 'document', input: { ...part.input, caption: render(part.input.caption) } });
-      case 'audio': return this.chats.sendContent(accountId, target, { type: 'audio', input: part.input });
-      case 'sticker': return this.chats.sendContent(accountId, target, { type: 'sticker', input: part.input });
+      case 'image': return this.chats.sendContent(accountId, target, { type: 'image', input: mediaInput(part.input, render(part.input.caption)) });
+      case 'video': return this.chats.sendContent(accountId, target, { type: 'video', input: mediaInput(part.input, render(part.input.caption)) });
+      case 'document': return this.chats.sendContent(accountId, target, { type: 'document', input: mediaInput(part.input, render(part.input.caption)) });
+      case 'audio': return this.chats.sendContent(accountId, target, { type: 'audio', input: mediaInput(part.input, undefined) });
+      case 'sticker': return this.chats.sendContent(accountId, target, { type: 'sticker', input: mediaInput(part.input, undefined) });
       case 'location': return this.chats.sendContent(accountId, target, { type: 'location', input: part.input });
       case 'contact': return this.chats.sendContent(accountId, target, { type: 'contact', input: { ...part.input, displayName: render(part.input.displayName) ?? part.input.displayName } });
       case 'poll': return this.chats.sendContent(accountId, target, { type: 'poll', input: { ...part.input, name: render(part.input.name) ?? part.input.name, values: part.input.values.map(value => render(value) ?? value) } });
     }
     throw new Error('Tipo de conteúdo não suportado');
+  }
+
+  private findPushName(accountId: string, target: string) {
+    const value = String(target ?? '').trim();
+    const phone = isJid(value) ? '' : digits(value);
+    const row = this.db.prepare(`
+      SELECT push_name FROM wa_identities
+      WHERE account_id=?
+        AND (canonical_jid=? OR lid=? OR pn_jid=? OR (? <> '' AND phone=?))
+        AND TRIM(COALESCE(push_name,'')) <> ''
+      ORDER BY last_seen_at DESC LIMIT 1
+    `).get(accountId, value, value, value, phone, phone) as { push_name?: string | null } | undefined;
+    return row?.push_name?.trim() || undefined;
   }
 
   private contactListState(accountId: string, target: string) {

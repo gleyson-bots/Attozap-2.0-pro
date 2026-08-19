@@ -332,19 +332,20 @@ export class ChatService {
     const provider = await this.ensureAccountLive(accountId);
     const remoteJid = await this.resolveTargetWithProvider(provider, target);
     this.license.reserve('outbound');
+    const outboundInput: SendMediaInput = type === 'audio' ? { ...input, caption: undefined } : input;
     try {
-      const result = type === 'image' ? await provider.sendImage(remoteJid, input)
-        : type === 'video' ? await provider.sendVideo(remoteJid, input)
-        : type === 'document' ? await provider.sendDocument(remoteJid, input)
-        : type === 'audio' ? await provider.sendAudio(remoteJid, input)
-        : await provider.sendSticker(remoteJid, input);
+      const result = type === 'image' ? await provider.sendImage(remoteJid, outboundInput)
+        : type === 'video' ? await provider.sendVideo(remoteJid, outboundInput)
+        : type === 'document' ? await provider.sendDocument(remoteJid, outboundInput)
+        : type === 'audio' ? await provider.sendAudio(remoteJid, outboundInput)
+        : await provider.sendSticker(remoteJid, outboundInput);
       const canonical = await this.canonicalJid(accountId, result.remoteJid || remoteJid);
-      this.log(result.id, accountId, canonical, type, input.caption ?? input.fileName ?? '', 'pending', undefined, input.path, input.fileName, input.mimetype, { ptt: input.ptt ?? false, transportJid: remoteJid });
+      this.log(result.id, accountId, canonical, type, type === 'audio' ? (outboundInput.fileName ?? '') : (outboundInput.caption ?? outboundInput.fileName ?? ''), 'pending', undefined, outboundInput.path, outboundInput.fileName, outboundInput.mimetype, { ptt: outboundInput.ptt ?? false, transportJid: remoteJid });
       await this.touchChat(accountId, canonical);
       return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.log(randomUUID(), accountId, remoteJid, type, input.caption ?? input.fileName ?? '', 'failed', message, input.path, input.fileName, input.mimetype);
+      this.log(randomUUID(), accountId, remoteJid, type, type === 'audio' ? (outboundInput.fileName ?? '') : (outboundInput.caption ?? outboundInput.fileName ?? ''), 'failed', message, outboundInput.path, outboundInput.fileName, outboundInput.mimetype);
       throw new Error(`Falha ao enviar ${type} para ${remoteJid}: ${message}`);
     }
   }

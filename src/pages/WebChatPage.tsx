@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { File, FileUp, MessageCircle, Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings2, Smile, Square, Vote, Wifi, X } from 'lucide-react';
+import { Download, File, FileUp, Maximize2, MessageCircle, Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings2, Smile, Square, Vote, Wifi, X } from 'lucide-react';
 import { toLocalDateTime } from '../lib';
 
 function labelFor(chat: any) { return chat?.display_name || chat?.name || (chat?.phone ? `+${chat.phone}` : chat?.jid || 'Conversa'); }
@@ -69,14 +69,17 @@ function Avatar({ chat, large = false, onBroken }: { chat: any; large?: boolean;
   }, [failedUrl, profileUrl]);
   return <span className={`conversation-avatar ${large ? 'large' : ''}`}>{showImage ? <img src={profileUrl} alt="" onError={() => { setFailedUrl(profileUrl); onBroken?.(); }}/> : label}</span>;
 }
-function MessageBody({ message }: { message: any }) {
+type LightboxMedia = { url: string; type: 'image' | 'video'; name: string };
+
+function MessageBody({ message, onOpenMedia }: { message: any; onOpenMedia: (media: LightboxMedia) => void }) {
   const type = message.message_type || 'text';
   const url = message.media_url;
   const metadata = message.metadata || {};
+  const mediaName = message.file_name || (type === 'video' ? 'Vídeo' : 'Imagem');
   return <>
-    {type === 'image' && url && <img className="chat-image" src={url} alt={message.text || 'Imagem'}/>} 
+    {type === 'image' && url && <div className="chat-media-preview chat-image-preview"><button type="button" className="chat-media-trigger" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName })} title="Abrir imagem em ecrã inteiro"><img className="chat-image" src={url} alt={message.text || 'Imagem'}/></button><button type="button" className="chat-media-expand" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName })} title="Ampliar imagem" aria-label="Ampliar imagem"><Maximize2 size={15}/></button></div>}
     {type === 'sticker' && url && <img className="chat-sticker" src={url} alt="Figurinha"/>}
-    {type === 'video' && url && <video className="chat-video" src={url} controls preload="metadata"/>}
+    {type === 'video' && url && <div className="chat-media-preview chat-video-preview"><video className="chat-video" src={url} controls preload="metadata"/><button type="button" className="chat-media-expand" onClick={() => onOpenMedia({ url, type: 'video', name: mediaName })} title="Abrir vídeo em ecrã inteiro" aria-label="Abrir vídeo em ecrã inteiro"><Maximize2 size={15}/></button></div>}
     {type === 'audio' && url && <audio className="chat-audio" src={url} controls preload="metadata"/>}
     {type === 'document' && <div className="chat-document"><File size={22}/><div><b>{message.file_name || 'Documento'}</b><small>{message.mimetype || 'arquivo'}</small></div>{url && <a href={url} target="_blank" rel="noreferrer">Abrir</a>}</div>}
     {type === 'poll' && <div className="chat-poll"><div><Vote size={18}/><b>{metadata.question || message.text || 'Enquete'}</b></div>{(metadata.options || []).map((option: string) => <span key={option}>{option}</span>)}</div>}
@@ -108,7 +111,9 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const [newTargetState, setNewTargetState] = useState<'idle' | 'resolving' | 'resolved' | 'invalid'>('idle');
   const [resolvedNewTarget, setResolvedNewTarget] = useState<any | null>(null);
   const [restriction, setRestriction] = useState<any>(null);
+  const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
   const bottom = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const lastAutoScroll = useRef(0);
   const messageLoadGeneration = useRef(0);
   const localSequence = useRef(0);
@@ -118,6 +123,25 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingStartedAtRef = useRef(0);
+
+  useEffect(() => {
+    const element = composerRef.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(200, Math.max(72, element.scrollHeight))}px`;
+  }, [text]);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setLightbox(null); };
+    window.addEventListener('keydown', onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [lightbox]);
 
   useEffect(() => {
     const available = connected.find(account => account.id === accountId);
@@ -481,7 +505,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       </aside>
       <section className="webchat-thread-pane">
         <header><Avatar chat={selected} large onBroken={() => refreshAvatar(selected)}/><div className="grow"><b>{typedTarget ? `Nova conversa · ${typedTarget}` : selected ? labelFor(selected) : 'Selecione uma conversa'}</b><small>{typedTarget || selected?.jid || 'Envie para número/JID/LID para iniciar'}</small></div></header>
-        <div className="message-stream">{messages.map(message => <div key={message.id} className={`chat-bubble ${message.direction === 'out' ? 'out' : 'in'} ${message.status === 'failed' ? 'failed' : ''}`}><MessageBody message={message}/><small>{toLocalDateTime(message.created_at)}{message.status === 'failed' ? ` · ${message.error || 'falhou'}` : message.direction === 'out' ? ` · ${messageStatusLabel(message.status)}` : ''}</small></div>)}{selected && !messages.length && <div className="empty mini"><MessageCircle size={26}/><p>Sem mensagens registradas nesta conversa.</p></div>}<div ref={bottom}/></div>
+        <div className="message-stream">{messages.map(message => <div key={message.id} className={`chat-bubble ${message.direction === 'out' ? 'out' : 'in'} ${message.status === 'failed' ? 'failed' : ''}`}><MessageBody message={message} onOpenMedia={setLightbox}/><small>{toLocalDateTime(message.created_at)}{message.status === 'failed' ? ` · ${message.error || 'falhou'}` : message.direction === 'out' ? ` · ${messageStatusLabel(message.status)}` : ''}</small></div>)}{selected && !messages.length && <div className="empty mini"><MessageCircle size={26}/><p>Sem mensagens registradas nesta conversa.</p></div>}<div ref={bottom}/></div>
         {showPoll && <div className="poll-composer"><div className="field grow"><label>Pergunta</label><input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} placeholder="Qual opção você prefere?"/></div><div className="field grow"><label>Opções — uma por linha</label><textarea value={pollOptions} onChange={e => setPollOptions(e.target.value)}/></div><button className="button primary" disabled={busy} onClick={() => void sendPoll()}><Vote size={15}/> Enviar enquete</button></div>}
         <div className="webchat-popovers">
           {showAttachMenu && <div className="webchat-popover attach-popover"><b>Anexar conteúdo</b><div className="popover-actions"><button onClick={() => void attach()}><Paperclip size={15}/> Mídia ou documento</button><button onClick={() => void attach('sticker')}><Smile size={15}/> Figurinha WebP</button><button onClick={() => setShowPoll(true)}><Vote size={15}/> Enquete</button></div></div>}
@@ -492,9 +516,10 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
           <button className={`icon-button ${showEmoji ? 'active' : ''}`} disabled={busy || !target || recording} onClick={() => { setShowEmoji(value => !value); setShowAttachMenu(false); }} title="Emojis"><Smile size={18}/></button>
           <button className={`icon-button ${recording ? 'danger' : ''}`} disabled={busy || !target && !recording} onClick={() => recording ? stopRecording() : void startRecording()} title={recording ? 'Parar gravação' : 'Gravar áudio'}>{recording ? <Square size={17}/> : <Mic size={18}/>}</button>
           {recording && <span className="recording-timer">Gravando {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</span>}
-          <textarea value={text} disabled={recording} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendText(); } }} placeholder={recording ? 'Gravação em andamento…' : 'Digite uma mensagem…'}/><button className="button primary send-chat" disabled={busy || recording || !text.trim() || !target} onClick={() => void sendText()}>{busy ? <FileUp size={17}/> : <Send size={17}/>} Enviar</button>
+          <textarea ref={composerRef} className="webchat-composer-input" value={text} disabled={recording} onChange={e => setText(e.target.value)} onInput={e => { const element = e.currentTarget; element.style.height = 'auto'; element.style.height = `${Math.min(200, Math.max(72, element.scrollHeight))}px`; }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendText(); } }} placeholder={recording ? 'Gravação em andamento…' : 'Digite uma mensagem…'}/><button className="button primary send-chat" disabled={busy || recording || !text.trim() || !target} onClick={() => void sendText()}>{busy ? <FileUp size={17}/> : <Send size={17}/>} Enviar</button>
         </footer>
       </section>
     </div>
+    {lightbox && <div className="media-lightbox" role="dialog" aria-modal="true" aria-label={`Visualizar ${lightbox.name}`} onMouseDown={() => setLightbox(null)}><div className="media-lightbox-panel" onMouseDown={event => event.stopPropagation()}><div className="media-lightbox-toolbar"><strong>{lightbox.name}</strong><div><a className="media-lightbox-download" href={lightbox.url} download={lightbox.name} target="_blank" rel="noreferrer"><Download size={16}/> Descarregar</a><button type="button" className="icon-button" onClick={() => setLightbox(null)} title="Fechar" aria-label="Fechar"><X size={18}/></button></div></div>{lightbox.type === 'image' ? <img className="media-lightbox-content" src={lightbox.url} alt={lightbox.name}/> : <video className="media-lightbox-content" src={lightbox.url} controls autoPlay preload="metadata"/>}</div></div>}
   </div>;
 }

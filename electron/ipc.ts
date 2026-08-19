@@ -119,6 +119,7 @@ export function registerIpc(input: {
   ipcMain.handle('campaigns:list', () => campaigns.list());
   ipcMain.handle('campaigns:get', (_event, id: string) => campaigns.get(id));
   ipcMain.handle('campaigns:recipients', (_event, id: string) => campaigns.recipients(id));
+  ipcMain.handle('campaigns:delete', (_event, id: string) => { requireLicense(); return campaigns.delete(id); });
   ipcMain.handle('campaigns:start', (_event, id: string) => {
     requireLicense();
     void campaigns.start(id).catch(error => send(window, 'campaigns:error', { campaignId: id, message: error instanceof Error ? error.message : String(error) }));
