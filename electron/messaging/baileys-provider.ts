@@ -12,8 +12,8 @@ import makeWASocket, {
   type WASocket,
 } from '@whiskeysockets/baileys';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import P from 'pino';
 import { identityFromPair, mergeIdentity, normalizeJid, phoneFromPnJid } from './identity.js';
@@ -38,6 +38,28 @@ import type {
 const logger = P({ level: 'silent' });
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
+
+async function localMediaBuffer(input: SendMediaInput): Promise<Buffer> {
+  const rawPath = String(input.path ?? '').trim();
+  if (!rawPath) throw new Error('Arquivo de mídia não informado');
+  const filePath = isAbsolute(rawPath) ? rawPath : resolve(rawPath);
+  let details;
+  try {
+    details = await stat(filePath);
+  } catch {
+    throw new Error(`Arquivo de mídia não encontrado: ${basename(filePath)}`);
+  }
+  if (!details.isFile()) throw new Error(`O caminho de mídia não é um arquivo: ${basename(filePath)}`);
+  if (details.size <= 0) throw new Error(`O arquivo de mídia está vazio: ${basename(filePath)}`);
+  if (details.size > 100 * 1024 * 1024) throw new Error(`O arquivo de mídia excede o limite de 100 MiB: ${basename(filePath)}`);
+  try {
+    return await readFile(filePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Não foi possível ler a mídia ${basename(filePath)}: ${message}`);
+  }
+}
+
 function userJid(value: string) {
   if (value.includes('@')) return normalizeJid(value) ?? value;
   return `${digits(value)}@s.whatsapp.net`;
@@ -375,23 +397,28 @@ export class BaileysProvider implements MessagingProvider {
   }
   async sendImage(remoteJid: string, input: SendMediaInput) {
     const jid = await this.outboundJid(remoteJid);
-    return receipt(await this.requireSocket().sendMessage(jid, { image: { url: input.path }, caption: input.caption }));
+    const image = await localMediaBuffer(input);
+    return receipt(await this.requireSocket().sendMessage(jid, { image, caption: input.caption }));
   }
   async sendVideo(remoteJid: string, input: SendMediaInput) {
     const jid = await this.outboundJid(remoteJid);
-    return receipt(await this.requireSocket().sendMessage(jid, { video: { url: input.path }, caption: input.caption, mimetype: input.mimetype }));
+    const video = await localMediaBuffer(input);
+    return receipt(await this.requireSocket().sendMessage(jid, { video, caption: input.caption, mimetype: input.mimetype }));
   }
   async sendDocument(remoteJid: string, input: SendMediaInput) {
     const jid = await this.outboundJid(remoteJid);
-    return receipt(await this.requireSocket().sendMessage(jid, { document: { url: input.path }, caption: input.caption, fileName: input.fileName, mimetype: input.mimetype ?? 'application/octet-stream' }));
+    const document = await localMediaBuffer(input);
+    return receipt(await this.requireSocket().sendMessage(jid, { document, caption: input.caption, fileName: input.fileName, mimetype: input.mimetype ?? 'application/octet-stream' }));
   }
   async sendAudio(remoteJid: string, input: SendMediaInput) {
     const jid = await this.outboundJid(remoteJid);
-    return receipt(await this.requireSocket().sendMessage(jid, { audio: { url: input.path }, mimetype: input.mimetype ?? 'audio/mpeg', ptt: input.ptt ?? false }));
+    const audio = await localMediaBuffer(input);
+    return receipt(await this.requireSocket().sendMessage(jid, { audio, mimetype: input.mimetype ?? 'audio/mpeg', ptt: input.ptt ?? false }));
   }
   async sendSticker(remoteJid: string, input: SendMediaInput) {
     const jid = await this.outboundJid(remoteJid);
-    return receipt(await this.requireSocket().sendMessage(jid, { sticker: { url: input.path } }));
+    const sticker = await localMediaBuffer(input);
+    return receipt(await this.requireSocket().sendMessage(jid, { sticker }));
   }
   async sendLocation(remoteJid: string, input: LocationInput) {
     const jid = await this.outboundJid(remoteJid);
