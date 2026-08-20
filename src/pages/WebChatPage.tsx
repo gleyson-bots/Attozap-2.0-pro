@@ -21,6 +21,16 @@ function messageStatusLabel(status?: string) {
   const labels: Record<string, string> = { pending: 'enviando…', sent: 'enviada', delivered: 'entregue', read: 'lida', played: 'reproduzida', failed: 'falhou' };
   return labels[String(status ?? '')] ?? String(status ?? '');
 }
+function recordingErrorMessage(error: unknown) {
+  const name = String((error as { name?: unknown })?.name ?? '');
+  const message = String((error as { message?: unknown })?.message ?? error ?? '');
+  if (name === 'NotFoundError' || /requested device not found|device not found|no such device/i.test(message)) return 'Nenhum microfone disponível. Conecte um microfone ou selecione um dispositivo de entrada ativo no Windows e tente novamente.';
+  if (name === 'NotAllowedError' || /permission|denied|not allowed/i.test(message)) return 'O acesso ao microfone foi bloqueado. Autorize o microfone para o ATTOZAP nas permissões do Windows e tente novamente.';
+  if (name === 'NotReadableError' || /could not start|in use|busy/i.test(message)) return 'O microfone está ocupado por outro aplicativo ou não pôde ser iniciado. Feche o outro aplicativo e tente novamente.';
+  if (name === 'OverconstrainedError') return 'O microfone selecionado não está disponível. O ATTOZAP tentará usar o dispositivo padrão na próxima tentativa.';
+  return message || 'Não foi possível iniciar a gravação. Verifique o microfone e as permissões do Windows.';
+}
+
 function blobAsBase64(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -583,6 +593,12 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
     catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
+  function releaseRecordingStream() {
+    recordingStreamRef.current?.getTracks().forEach(track => track.stop());
+    recordingStreamRef.current = null;
+    recorderRef.current = null;
+  }
+
   async function startRecording() {
     const requested = newTarget.trim();
     const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
@@ -590,8 +606,20 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
     if (requested && !identity?.jid) { setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'O novo destinatário ainda não foi confirmado; a gravação não será enviada.'); return; }
     if (!accountId || !recordedTarget) { setError('Selecione uma conversa ou informe um destinatário antes de gravar.'); return; }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { setError('Este ambiente não oferece gravação de áudio pelo microfone.'); return; }
+    setError('');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferredConstraints: MediaStreamConstraints = {
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false,
+      };
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(preferredConstraints);
+      } catch (error) {
+        const name = String((error as { name?: unknown })?.name ?? '');
+        if (name === 'OverconstrainedError') stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        else throw error;
+      }
       const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find(value => MediaRecorder.isTypeSupported(value)) ?? '';
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       recordingChunksRef.current = [];
@@ -600,12 +628,22 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
       recordingStartedAtRef.current = Date.now();
       setRecordingSeconds(0);
       recorder.ondataavailable = event => { if (event.data.size > 0) recordingChunksRef.current.push(event.data); };
-      recorder.onerror = () => { setError('O gravador de áudio falhou.'); setRecording(false); };
+      recorder.onerror = event => {
+        console.error('[webchat:recording]', event);
+        releaseRecordingStream();
+        recordingChunksRef.current = [];
+        setRecording(false);
+        setRecordingSeconds(0);
+        setError('O gravador de áudio falhou. Verifique se o microfone continua conectado.');
+      };
       recorder.onstop = () => {
         const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
         recordingChunksRef.current = [];
+        releaseRecordingStream();
+        setRecording(false);
+        setRecordingSeconds(0);
         void (async () => {
-          if (!blob.size) throw new Error('A gravação ficou vazia');
+          if (!blob.size) throw new Error('A gravação ficou vazia. Tente manter o microfone ativo durante alguns segundos.');
           setBusy(true); setError('');
           const base64 = await blobAsBase64(blob);
           const saved = await window.attozap.files.saveTempBinary({ base64, suggestedName: 'mensagem-de-voz.webm', maxBytes: 15 * 1024 * 1024 });
@@ -616,19 +654,38 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
           setNewTarget('');
           void loadChats();
           scheduleReconcile(resolved, 180);
-        })().catch((e: any) => setError(e?.message ?? String(e))).finally(() => setBusy(false));
+        })().catch((e: any) => setError(recordingErrorMessage(e))).finally(() => setBusy(false));
       };
-      recorder.start(250);
+      try {
+        recorder.start(250);
+      } catch (error) {
+        releaseRecordingStream();
+        throw error;
+      }
       setRecording(true);
-    } catch (e: any) { setError(e?.message ?? 'Permissão do microfone negada.'); }
+    } catch (error) {
+      releaseRecordingStream();
+      setRecording(false);
+      setRecordingSeconds(0);
+      setError(recordingErrorMessage(error));
+    }
   }
 
   function stopRecording() {
-    recorderRef.current?.stop();
-    recordingStreamRef.current?.getTracks().forEach(track => track.stop());
-    recorderRef.current = null;
-    recordingStreamRef.current = null;
-    setRecording(false);
+    const recorder = recorderRef.current;
+    if (!recorder) { setRecording(false); return; }
+    if (recorder.state === 'inactive') {
+      releaseRecordingStream();
+      setRecording(false);
+      return;
+    }
+    try { recorder.stop(); }
+    catch (error) {
+      releaseRecordingStream();
+      setRecording(false);
+      setRecordingSeconds(0);
+      setError(recordingErrorMessage(error));
+    }
   }
 
   async function sendPoll() {

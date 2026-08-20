@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, session } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from './database.js';
@@ -31,6 +31,12 @@ let scheduler: NodeJS.Timeout | null = null;
 let warmupEngine: WarmupEngine | null = null;
 
 if (process.platform === 'win32') app.setAppUserModelId('com.gleysondevs.attozap.wasender');
+
+function configureMediaPermissions() {
+  const defaultSession = session.defaultSession;
+  defaultSession.setPermissionCheckHandler((_webContents, permission) => permission === 'media');
+  defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => callback(permission === 'media'));
+}
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -69,6 +75,7 @@ function safeRegister(name: string, action: () => void) {
 
 app.whenReady().then(async () => {
   nativeTheme.themeSource = 'dark';
+  configureMediaPermissions();
   const userData = app.getPath('userData');
   try { applyPendingRestore(userData); }
   catch (error) { console.error('[startup:pending-restore]', error); }
