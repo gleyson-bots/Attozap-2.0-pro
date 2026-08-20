@@ -146,6 +146,7 @@ export function registerIpc(input: {
   ipcMain.handle('contacts:blocked', () => tools.listBlocked());
   ipcMain.handle('contacts:friendly-list', () => tools.listFriendly());
   ipcMain.handle('chats:list', (_event, accountId: string, includeGroups = false) => tools.listObservedChats(accountId, includeGroups));
+  ipcMain.handle('chats:sync-contacts', (_event, accountId: string) => tools.syncContactsFromWhatsApp(accountId));
   ipcMain.handle('chats:grab-contacts', (_event, accountId: string) => tools.grabContactsFromChats(accountId));
 
   ipcMain.handle('tools:filter-numbers', (_event, accountId: string, numbers: string[]) => { requireLicense(); return tools.filterNumbers(accountId, numbers); });

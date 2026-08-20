@@ -41,8 +41,8 @@ const sections: Array<{ label: string; items: NavItem[] }> = [
     { id: 'campaignCenter', label: 'Campaign Center', icon: ListChecks }, { id: 'deliveryCenter', label: 'Delivery Center', icon: Activity }, { id: 'scheduler', label: 'Agendamentos', icon: CalendarClock }, { id: 'templates', label: 'Templates', icon: FileText }, { id: 'pollReport', label: 'Poll Report', icon: BarChart3, advanced: true },
   ] },
   { label: 'WHATSAPP', items: [
-    { id: 'accounts', label: 'Contas', icon: Wifi }, { id: 'webchat', label: 'WebChat', icon: MessageCircle },
-    { id: 'contacts', label: 'Contatos & listas', icon: ContactRound }, { id: 'contactGrabber', label: 'Contact Grabber', icon: MessageSquareText, advanced: true },
+    { id: 'contacts', label: 'Agenda local + sincronização', icon: ContactRound }, { id: 'accounts', label: 'Contas', icon: Wifi }, { id: 'webchat', label: 'WebChat', icon: MessageCircle },
+    { id: 'contactGrabber', label: 'Contact Grabber', icon: MessageSquareText, advanced: true },
     { id: 'groups', label: 'Ferramentas de grupos', icon: Users }, { id: 'bulkGroups', label: 'Bulk Group Tools', icon: Group, advanced: true },
   ] },
   { label: 'AUTOMAÇÃO', items: [{ id: 'autoReply', label: 'Auto Reply', icon: Bot }, { id: 'warmup', label: 'Aquecimento', icon: Flame }, { id: 'aiChat', label: 'Chat IA', icon: Sparkles }] },
@@ -130,7 +130,7 @@ export default function App() {
         {view === 'deliveryCenter' && <DeliveryCenterPage accounts={accounts}/>}
         {view === 'scheduler' && <SchedulerPage campaigns={campaigns}/>} {view === 'templates' && <TemplatesPage/>} {view === 'pollReport' && <PollReportPage accounts={accounts}/>}
         {view === 'accounts' && <AccountsPage accounts={accounts} reload={reloadAccounts}/>} {view === 'webchat' && <WebChatPage accounts={accounts} reloadAccounts={reloadAccounts}/>}
-        {view === 'contacts' && <ContactsPage/>} {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>}
+        {view === 'contacts' && <ContactsPage accounts={accounts}/>} {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>}
         {view === 'groups' && <GroupToolsPage accounts={accounts}/>} {view === 'bulkGroups' && <BulkGroupsPage accounts={accounts}/>} {view === 'autoReply' && <AutoReplyPage accounts={accounts}/>}
         {view === 'warmup' && <WarmupPage accounts={accounts}/>} {view === 'aiChat' && <AIChatPage openSettings={() => setView('settings')}/>} {view === 'extractors' && <ExtractorsPage/>} {view === 'recruiting' && <RecruitingPage/>}
         {view === 'health' && <HealthCenterPage/>} {view === 'identities' && <IdentityCenterPage accounts={accounts}/>}

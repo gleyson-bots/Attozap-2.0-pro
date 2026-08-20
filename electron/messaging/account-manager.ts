@@ -22,6 +22,7 @@ export type AccountRecord = {
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+function digitsOnly(value?: string | null) { return String(value ?? '').replace(/\D/g, ''); }
 
 export class AccountManager extends EventEmitter {
   private readonly providers = new Map<string, MessagingProvider>();
@@ -192,6 +193,19 @@ export class AccountManager extends EventEmitter {
     try {
       const identity = await provider.resolveIdentity(event.jid, event.alternateJid).catch(() => ({ input: event.jid, jid: event.jid, exists: true } as ContactPresence));
       this.persistIdentity(accountId, identity, event.pushName, 'contacts.sync');
+      const resolvedPhone = digitsOnly(identity.phone ?? phoneFromPnJid(identity.pnJid) ?? phoneFromPnJid(identity.jid));
+      const pushName = event.pushName?.trim() || null;
+      if (/^\d{7,15}$/.test(resolvedPhone)) {
+        this.db.prepare(`
+          INSERT INTO contacts(phone,name,wa_exists,last_checked_at,updated_at)
+          VALUES(?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+          ON CONFLICT(phone) DO UPDATE SET
+            name=CASE WHEN contacts.name IS NULL OR trim(contacts.name)='' THEN excluded.name ELSE contacts.name END,
+            wa_exists=1,
+            last_checked_at=CURRENT_TIMESTAMP,
+            updated_at=CURRENT_TIMESTAMP
+        `).run(resolvedPhone, pushName);
+      }
       const canonical = identity.jid ?? event.jid;
       const existing = this.db.prepare(`
         SELECT jid FROM chat_cache

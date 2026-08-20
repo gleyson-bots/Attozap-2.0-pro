@@ -228,7 +228,9 @@ export class WarmupEngine {
         continue;
       }
       if (!target.includes('@')) {
-        if (!ownPhones.has(digits(target))) invalid.push(target);
+        const phone = digits(target);
+        const localContact = this.db.prepare(`SELECT 1 FROM contacts WHERE phone=? AND wa_exists=1 AND is_friendly=1 AND is_blocked=0`).get(phone);
+        if (!ownPhones.has(phone) && !localContact) invalid.push(target);
         continue;
       }
       const targetDigits = target.endsWith('@s.whatsapp.net') ? digits(target.split('@')[0] ?? '') : '';
@@ -237,11 +239,15 @@ export class WarmupEngine {
         SELECT phone FROM wa_identities
         WHERE account_id=? AND (canonical_jid=? OR lid=? OR pn_jid=?) LIMIT 1
       `).get(accountId, target, target, target) as { phone?: string } | undefined;
-      if (!identity?.phone || !ownPhones.has(digits(identity.phone))) invalid.push(target);
+      const resolvedPhone = digits(identity?.phone ?? targetDigits);
+      const localContact = resolvedPhone
+        ? this.db.prepare(`SELECT 1 FROM contacts WHERE phone=? AND wa_exists=1 AND is_friendly=1 AND is_blocked=0`).get(resolvedPhone)
+        : undefined;
+      if (!identity?.phone && !targetDigits || (!ownPhones.has(resolvedPhone) && !localContact)) invalid.push(target);
     }
 
     if (invalid.length) {
-      throw new Error(`Aquecimento aceita somente seus próprios números cadastrados e grupos já sincronizados nesta conta. Destino(s) não autorizado(s): ${invalid.slice(0, 3).join(', ')}${invalid.length > 3 ? '…' : ''}`);
+      throw new Error(`Aquecimento aceita seus próprios números, contactos da Agenda local marcados como “Na lista” e grupos já sincronizados. Confirme o número no WhatsApp, marque-o como “Na lista” e tente novamente. Destino(s) não autorizado(s): ${invalid.slice(0, 3).join(', ')}${invalid.length > 3 ? '…' : ''}`);
     }
     return targets;
   }
@@ -258,7 +264,7 @@ export class WarmupEngine {
     if (!name) throw new Error('Informe um nome para o perfil');
 
     const targets = mode === 'direct' ? this.validateTargets(accountId, input.targets ?? []) : [];
-    if (mode === 'direct' && !targets.length) throw new Error('Selecione pelo menos um número seu ou grupo sincronizado');
+    if (mode === 'direct' && !targets.length) throw new Error('Selecione pelo menos um número seu, contacto da Agenda local marcado como “Na lista” ou grupo sincronizado');
     const messages = unique(input.messages ?? []).slice(0, 30);
     const source = input.messageSource === 'ai' ? 'ai' : 'library';
     if (source === 'library' && !messages.length && !(input.mediaItems?.length)) throw new Error('Informe mensagens ou mídias para o aquecimento');

@@ -230,3 +230,11 @@ pre,code,.identity-values code{max-width:100%}
 .thread-header-actions{display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;margin-left:10px}.thread-header-actions .icon-button{width:36px;height:36px}.thread-header-actions .spin{animation:attozap-spin .8s linear infinite}@keyframes attozap-spin{to{transform:rotate(360deg)}}
 @media(max-width:560px){.thread-header-actions{margin-left:4px}.thread-header-actions .icon-button{width:32px;height:32px}.webchat-thread-pane>header{padding:0 10px}.webchat-thread-pane>header small{max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 @media(prefers-reduced-motion:reduce){.thread-header-actions .spin{animation:none}}
+
+
+/* Local contacts agenda and desktop sidebar collapse. */
+.agenda-sync-card{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:17px 18px;border-color:color-mix(in srgb,var(--accent) 24%,var(--line-soft));background:linear-gradient(110deg,color-mix(in srgb,var(--accent) 7%,var(--surface)),var(--surface))}
+.agenda-sync-card>div:first-child{min-width:0}.agenda-sync-card h3{margin:3px 0 4px;font-size:14px}.agenda-sync-card p{margin:0;color:var(--muted);font-size:10.5px;line-height:1.5}.agenda-sync-actions{display:flex;align-items:center;gap:9px;flex:0 0 auto}.agenda-account-select{min-width:220px;height:40px}.agenda-sync-actions .button{height:40px}
+@media(min-width:821px){.app-shell.sidebar-collapsed .sidebar{width:0;min-width:0;flex-basis:0;overflow:hidden;border-right:0;opacity:0;pointer-events:none}.app-shell.sidebar-collapsed .workspace{width:100%;flex:1 1 100%}.app-shell.sidebar-collapsed .sidebar-toggle{margin-left:0}}
+@media(max-width:760px){.agenda-sync-card{align-items:stretch;flex-direction:column;gap:13px}.agenda-sync-actions{flex-wrap:wrap}.agenda-account-select{min-width:0;flex:1 1 190px}.agenda-sync-actions .button{flex:1 1 190px}}
+@media(max-width:560px){.agenda-sync-card{padding:14px}.agenda-sync-actions{display:grid;grid-template-columns:1fr}.agenda-account-select,.agenda-sync-actions .button{width:100%;min-width:0}}

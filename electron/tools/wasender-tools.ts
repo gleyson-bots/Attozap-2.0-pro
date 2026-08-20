@@ -9,6 +9,11 @@ export type ImportedContact = {
 };
 
 function digits(value: string) { return value.replace(/\D/g, ''); }
+function humanContactName(value?: string | null) {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ');
+  if (!text || /@(lid|s\.whatsapp\.net|g\.us)$/i.test(text) || /^\+?\d{7,}$/.test(text)) return undefined;
+  return text.slice(0, 120);
+}
 
 export class WaSenderTools {
   constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager) {}
@@ -74,6 +79,68 @@ export class WaSenderTools {
       lastMessageAt: row.last_message_at,
       importable: Boolean(row.phone),
     }));
+  }
+
+  async syncContactsFromWhatsApp(accountId: string) {
+    const provider = this.accounts.provider(accountId);
+    if (!provider.isConnected()) throw new Error('Conecte a conta do WhatsApp antes de sincronizar a agenda.');
+
+    const rows = this.db.prepare(`
+      SELECT
+        i.canonical_jid AS jid, i.lid, i.pn_jid, i.phone, i.push_name,
+        c.name AS chat_name, c.phone AS chat_phone
+      FROM wa_identities i
+      LEFT JOIN chat_cache c ON c.account_id=i.account_id AND (
+        c.jid=i.canonical_jid OR c.jid=i.lid OR c.jid=i.pn_jid OR c.lid=i.canonical_jid OR c.pn_jid=i.canonical_jid
+      )
+      WHERE i.account_id=? AND (i.phone IS NOT NULL OR i.pn_jid IS NOT NULL OR i.lid IS NOT NULL)
+      ORDER BY i.last_seen_at DESC LIMIT 5000
+    `).all(accountId) as Array<{ jid: string; lid?: string | null; pn_jid?: string | null; phone?: string | null; push_name?: string | null; chat_name?: string | null; chat_phone?: string | null }>;
+    const observed = this.listObservedChats(accountId, false);
+    const candidates = new Map<string, { jid: string; lid?: string; pnJid?: string; phone?: string; name?: string }>();
+    const add = (row: { jid: string; lid?: string | null; pn_jid?: string | null; phone?: string | null; push_name?: string | null; chat_name?: string | null; chat_phone?: string | null }) => {
+      const phone = digits(row.phone ?? row.chat_phone ?? '');
+      const name = humanContactName(row.chat_name) ?? humanContactName(row.push_name);
+      if (!row.jid || (!phone && !row.pn_jid && !row.lid)) return;
+      candidates.set(row.jid, { jid: row.jid, lid: row.lid ?? undefined, pnJid: row.pn_jid ?? undefined, phone: phone || undefined, name });
+    };
+    rows.forEach(add);
+    observed.forEach(chat => add({ jid: chat.jid, lid: chat.lid, pn_jid: chat.pnJid, phone: chat.phone, chat_name: chat.name }));
+
+    const upsert = this.db.prepare(`
+      INSERT INTO contacts (phone, name, wa_exists, last_checked_at) VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+      ON CONFLICT(phone) DO UPDATE SET
+        name=CASE WHEN excluded.name IS NOT NULL AND excluded.name<>'' THEN excluded.name ELSE contacts.name END,
+        wa_exists=1, last_checked_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+    `);
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+    const tx = this.db.transaction((items: Array<{ phone: string; name?: string }>) => {
+      for (const item of items) {
+        const before = this.db.prepare(`SELECT phone, name FROM contacts WHERE phone=?`).get(item.phone) as { phone: string; name?: string | null } | undefined;
+        upsert.run(item.phone, item.name ?? null);
+        if (before) updated++;
+        else imported++;
+      }
+    });
+    const resolved: Array<{ phone: string; name?: string }> = [];
+    for (const candidate of candidates.values()) {
+      let phone = candidate.phone;
+      if (!phone) {
+        try {
+          const presence = await provider.resolveIdentity(candidate.jid, candidate.lid ?? candidate.pnJid);
+          phone = digits(presence.phone ?? '');
+        } catch {
+          phone = '';
+        }
+      }
+      if (!phone) { skipped++; continue; }
+      resolved.push({ phone, name: candidate.name });
+    }
+    tx([...new Map(resolved.map(item => [item.phone, item])).values()]);
+    this.audit('contacts.sync-whatsapp', accountId, { candidates: candidates.size, imported, updated, skipped });
+    return { imported, updated, skipped, observed: candidates.size };
   }
 
   grabContactsFromChats(accountId: string) {

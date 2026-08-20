@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Ban, CheckCircle2, ClipboardPaste, Download, FileUp, Heart, RefreshCw, Search, Users, XCircle } from 'lucide-react';
 import { downloadCsv, parseRecipients } from '../lib';
 
-export function ContactsPage() {
+export function ContactsPage({ accounts = [] }: { accounts?: any[] }) {
   const [contacts, setContacts] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [raw, setRaw] = useState('');
@@ -10,13 +10,41 @@ export function ContactsPage() {
   const [preview, setPreview] = useState<any | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [accountId, setAccountId] = useState('');
+  const connectedAccounts = accounts.filter(account => account.status === 'connected');
+
+  useEffect(() => {
+    if (accountId && accounts.some(account => account.id === accountId)) return;
+    setAccountId((connectedAccounts[0] ?? accounts[0])?.id ?? '');
+  }, [accounts, accountId, connectedAccounts]);
 
   async function reload(query = search) { setContacts(await window.attozap.contacts.list(query)); }
   useEffect(() => { void reload(''); }, []);
+  useEffect(() => {
+    const off = window.attozap.messages.onContact(() => {
+      void window.attozap.contacts.list(search).then(setContacts).catch(() => undefined);
+    });
+    return () => off?.();
+  }, [search]);
 
   const manualContacts = useMemo(() => parseRecipients(raw)
     .filter(recipient => !recipient.target.includes('@'))
     .map(recipient => ({ phone: recipient.target, name: recipient.name, variables: recipient.variables })), [raw]);
+
+  async function syncWhatsApp() {
+    if (!accountId) { setError('Conecte uma conta do WhatsApp antes de sincronizar.'); return; }
+    setSyncing(true); setError(''); setNotice('');
+    try {
+      const result = await window.attozap.chats.syncContacts(accountId);
+      setNotice(`${result.imported} contato(s) sincronizado(s), ${result.skipped} sem telefone PN e ${result.updated} atualizado(s).`);
+      await reload('');
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   async function importManual() {
     if (!manualContacts.length) return;
@@ -52,7 +80,9 @@ export function ContactsPage() {
   }
 
   return <div className="page-stack">
-    <div className="page-head"><div><span className="kicker">CONTACTS</span><h2>Contatos & listas</h2><p>Base telefônica local; JID/LID técnico permanece separado no cache de identidades.</p></div><div className="head-actions"><button className="button ghost" onClick={exportGoogleContacts}><Download size={16}/> Google CSV</button><button className="button ghost" onClick={() => downloadCsv('contacts.csv',[['phone','name','blocked','friendly','wa_exists'],...contacts.map(contact => [contact.phone,contact.name??'',contact.is_blocked,contact.is_friendly,contact.wa_exists??''])])}><Download size={16}/> CSV</button><button className="button ghost" onClick={() => void pickFile()}><FileUp size={16}/> Arquivo</button><button className="button primary" onClick={() => setShowImport(value => !value)}><ClipboardPaste size={16}/> Colar lista</button></div></div>
+    <div className="page-head"><div><span className="kicker">WHATSAPP / AGENDA</span><h2>Agenda local + sincronização</h2><p>Guarde nomes e números localmente; PN/LID e JID técnico continuam separados da apresentação.</p></div><div className="head-actions"><button className="button ghost" onClick={exportGoogleContacts}><Download size={16}/> Google CSV</button><button className="button ghost" onClick={() => downloadCsv('contacts.csv',[['phone','name','blocked','friendly','wa_exists'],...contacts.map(contact => [contact.phone,contact.name??'',contact.is_blocked,contact.is_friendly,contact.wa_exists??''])])}><Download size={16}/> CSV</button><button className="button ghost" onClick={() => void pickFile()}><FileUp size={16}/> Arquivo</button><button className="button primary" onClick={() => setShowImport(value => !value)}><ClipboardPaste size={16}/> Colar lista</button></div></div>
+
+    <section className="card agenda-sync-card"><div><span className="kicker">BAILEYS / CONTACTS</span><h3>Sincronizar contactos reais</h3><p>Importa para a agenda local nomes, telefones PN e identidades observadas pela conta selecionada.</p></div><div className="agenda-sync-actions"><select className="agenda-account-select" value={accountId} onChange={event => setAccountId(event.target.value)} disabled={!accounts.length}><option value="">Selecione uma conta</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.name}{account.status === 'connected' ? ' · online' : ' · offline'}</option>)}</select><button className="button primary" onClick={() => void syncWhatsApp()} disabled={syncing || !accountId}><RefreshCw size={15} className={syncing ? 'spin' : ''}/> {syncing ? 'Sincronizando…' : 'Sincronizar WhatsApp'}</button></div></section>
 
     {error && <div className="notice error">{error}</div>}
     {notice && <div className="notice info">{notice}</div>}
