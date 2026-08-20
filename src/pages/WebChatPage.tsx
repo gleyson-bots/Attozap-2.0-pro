@@ -95,7 +95,9 @@ function MessageBody({ message, onOpenMedia }: { message: any; onOpenMedia: (med
   </>;
 }
 
-export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; reloadAccounts: () => Promise<void> }) {
+type QuickChatRequest = { target: string; accountId: string; nonce: number };
+
+export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickRequestConsumed }: { accounts: any[]; reloadAccounts: () => Promise<void>; quickRequest?: QuickChatRequest | null; onQuickRequestConsumed?: () => void }) {
   const connected = accounts.filter(account => account.status === 'connected');
   const [accountId, setAccountId] = useState(connected[0]?.id ?? '');
   const [search, setSearch] = useState('');
@@ -128,6 +130,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const reconcileTimer = useRef<number | null>(null);
   const chatRefreshTimer = useRef<number | null>(null);
   const resolveGeneration = useRef(0);
+  const quickOpenNonce = useRef(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
@@ -158,6 +161,17 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
     const current = accounts.find(account => account.id === accountId);
     setProxy(current?.proxy ?? '');
   }, [accounts, accountId]);
+
+  useEffect(() => {
+    if (!quickRequest?.target || !quickRequest.accountId || quickRequest.nonce === quickOpenNonce.current) return;
+    quickOpenNonce.current = quickRequest.nonce;
+    setAccountId(quickRequest.accountId);
+    setSearch('');
+    setSelected(null);
+    setMessages([]);
+    setError('');
+    setNewTarget(quickRequest.target);
+  }, [quickRequest?.nonce]);
 
   async function refreshRestriction() {
     if (!accountId || !window.attozap.accounts.restriction) return;
@@ -310,6 +324,15 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   }, [accountId, selected?.jid]);
 
   useEffect(() => {
+    if (!quickRequest?.target || quickRequest.accountId !== accountId || newTargetState !== 'resolved' || !resolvedNewTarget?.jid || resolvedNewTarget.query !== newTarget.trim()) return;
+    const identity = resolvedNewTarget;
+    setSelected({ jid: identity.jid, lid: identity.lid, pn_jid: identity.pnJid, phone: identity.phone, display_name: identity.displayName || identity.pushName || identity.phone || quickRequest.target });
+    setNewTarget('');
+    setError('');
+    onQuickRequestConsumed?.();
+  }, [accountId, newTarget, newTargetState, quickRequest?.accountId, quickRequest?.target, resolvedNewTarget, onQuickRequestConsumed]);
+
+  useEffect(() => {
     if (!accountId || !selected?.jid || !window.attozap.webchat.refreshProfile) return;
     let cancelled = false;
     void window.attozap.webchat.refreshProfile(accountId, selected.jid).then((profile: any) => {
@@ -402,7 +425,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'Digite um número válido e aguarde o JID/LID ser confirmado antes de abrir o chat.');
       return;
     }
-    setSelected({ jid: identity.jid, lid: identity.lid, pn_jid: identity.pnJid, phone: identity.phone, display_name: requested });
+    setSelected({ jid: identity.jid, lid: identity.lid, pn_jid: identity.pnJid, phone: identity.phone, display_name: identity.displayName || identity.pushName || identity.phone || requested });
     setNewTarget('');
   }
 

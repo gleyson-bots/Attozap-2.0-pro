@@ -33,6 +33,7 @@ import { campaignPercent, toLocalDateTime } from './lib';
 type UiMode = 'basic'|'advanced';
 type View = 'dashboard'|'sender'|'groupSender'|'campaignCenter'|'deliveryCenter'|'scheduler'|'templates'|'pollReport'|'accounts'|'webchat'|'aiChat'|'contacts'|'contactGrabber'|'numberFilter'|'groups'|'bulkGroups'|'autoReply'|'warmup'|'extractors'|'recruiting'|'health'|'identities'|'license'|'settings'|'support';
 type NavItem = { id: View; label: string; icon: any; advanced?: boolean };
+type QuickChatRequest = { target: string; accountId: string; nonce: number };
 
 const sections: Array<{ label: string; items: NavItem[] }> = [
   { label: 'INÍCIO', items: [{ id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard }] },
@@ -65,9 +66,11 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [quickChatRequest, setQuickChatRequest] = useState<QuickChatRequest | null>(null);
   const [version, setVersion] = useState('2.0');
   const reloadAccounts = useCallback(async () => setAccounts(await window.attozap.accounts.list()), []);
   const reloadCampaigns = useCallback(async () => setCampaigns(await window.attozap.campaigns.list()), []);
+  const consumeQuickChatRequest = useCallback(() => setQuickChatRequest(null), []);
 
   useEffect(() => {
     void window.attozap.app.version().then(setVersion);
@@ -99,6 +102,16 @@ export default function App() {
     if (mode === 'basic' && current?.advanced) setView('dashboard');
   }
 
+  function openQuickChat(target: string) {
+    const clean = target.trim();
+    const connected = accounts.filter(account => account.status === 'connected');
+    if (!clean || !connected.length) return false;
+    const account = connected[Math.floor(Math.random() * connected.length)];
+    setQuickChatRequest({ target: clean, accountId: account.id, nonce: Date.now() + Math.floor(Math.random() * 1000) });
+    setView('webchat');
+    return true;
+  }
+
   const visibleSections = sections
     .map(section => ({ ...section, items: section.items.filter(item => uiMode === 'advanced' || !item.advanced) }))
     .filter(section => section.items.length);
@@ -123,13 +136,13 @@ export default function App() {
         <div className="topbar-actions"><button className="mode-pill" onClick={() => setView('settings')} title="Alterar modo de navegação">{uiMode === 'advanced' ? 'Avançado' : 'Básico'}</button><div className="top-search"><Search size={16}/><span>Ferramentas WASender</span></div><button className="icon-button" onClick={() => void toggleTheme()}>{dark ? <Sun size={17}/> : <Moon size={17}/>}</button><button className="account-pill" onClick={() => setView('accounts')}><span className={connected ? 'online-dot' : 'offline-dot'}/><div><b>{connected ? 'WhatsApp ativo' : 'Desconectado'}</b><small>{connected ? `${connected} sessão(ões)` : 'Conectar conta'}</small></div></button></div>
       </header>
       <div className={`page-content ${fullWorkspace ? 'page-content-full' : ''}`}>
-        {view === 'dashboard' && <Dashboard accounts={accounts} campaigns={campaigns} go={setView} uiMode={uiMode}/>}
+        {view === 'dashboard' && <Dashboard accounts={accounts} campaigns={campaigns} go={setView} uiMode={uiMode} onQuickChat={openQuickChat}/>}
         {view === 'sender' && <SenderPage mode="contact" accounts={accounts} campaigns={campaigns} reloadCampaigns={reloadCampaigns}/>}
         {view === 'groupSender' && <SenderPage mode="group" accounts={accounts} campaigns={campaigns} reloadCampaigns={reloadCampaigns}/>}
         {view === 'campaignCenter' && <CampaignCenterPage campaigns={campaigns} accounts={accounts} reloadCampaigns={reloadCampaigns}/>}
         {view === 'deliveryCenter' && <DeliveryCenterPage accounts={accounts}/>}
         {view === 'scheduler' && <SchedulerPage campaigns={campaigns}/>} {view === 'templates' && <TemplatesPage/>} {view === 'pollReport' && <PollReportPage accounts={accounts}/>}
-        {view === 'accounts' && <AccountsPage accounts={accounts} reload={reloadAccounts}/>} {view === 'webchat' && <WebChatPage accounts={accounts} reloadAccounts={reloadAccounts}/>}
+        {view === 'accounts' && <AccountsPage accounts={accounts} reload={reloadAccounts}/>} {view === 'webchat' && <WebChatPage accounts={accounts} reloadAccounts={reloadAccounts} quickRequest={quickChatRequest} onQuickRequestConsumed={consumeQuickChatRequest}/>}
         {view === 'contacts' && <ContactsPage accounts={accounts}/>} {view === 'contactGrabber' && <ContactGrabberPage accounts={accounts}/>} {view === 'numberFilter' && <NumberFilterPage accounts={accounts}/>}
         {view === 'groups' && <GroupToolsPage accounts={accounts}/>} {view === 'bulkGroups' && <BulkGroupsPage accounts={accounts}/>} {view === 'autoReply' && <AutoReplyPage accounts={accounts}/>}
         {view === 'warmup' && <WarmupPage accounts={accounts}/>} {view === 'aiChat' && <AIChatPage openSettings={() => setView('settings')}/>} {view === 'extractors' && <ExtractorsPage/>} {view === 'recruiting' && <RecruitingPage/>}
@@ -140,18 +153,37 @@ export default function App() {
   </div>;
 }
 
-function Dashboard({ accounts, campaigns, go, uiMode }: { accounts: any[]; campaigns: any[]; go: (view: View) => void; uiMode: UiMode }) {
+function Dashboard({ accounts, campaigns, go, uiMode, onQuickChat }: { accounts: any[]; campaigns: any[]; go: (view: View) => void; uiMode: UiMode; onQuickChat: (target: string) => boolean }) {
   const online = accounts.filter(account => account.status === 'connected').length;
   const totalSent = campaigns.reduce((sum, campaign) => sum + Number(campaign.sent ?? 0), 0);
   const totalFailed = campaigns.reduce((sum, campaign) => sum + Number(campaign.failed ?? 0), 0);
   const active = campaigns.filter(campaign => ['running', 'paused', 'scheduled'].includes(campaign.status));
   const rate = totalSent + totalFailed ? Math.round(totalSent / (totalSent + totalFailed) * 1000) / 10 : 100;
   return <div className="page-stack">
+    <QuickStart accounts={accounts} onQuickChat={onQuickChat}/>
     <section className="dashboard-hero"><div><span className="kicker">WASENDER DESKTOP</span><h2>Envie, converse e organize sem complicação.</h2><p>Sender, WebChat, grupos, filtros e automações em uma interface desktop local.</p><div className="hero-actions"><button className="button primary big" onClick={() => go('sender')}><Send size={18}/> Novo envio</button><button className="button ghost big" onClick={() => go('webchat')}><MessageCircle size={18}/> Abrir WebChat</button><button className="button ghost big" onClick={() => go('campaignCenter')}><ListChecks size={18}/> Campaign Center</button></div></div><div className="hero-visual"><img src={attoLogo} alt="ATTOZAP Bot"/><span>{online ? 'Motor conectado' : 'Aguardando conexão'}</span><b>{online} / {accounts.length}</b><small>contas online</small></div></section>
     <section className="metric-grid"><Metric icon={Wifi} label="Contas online" value={`${online}/${accounts.length}`} sub="Sessões persistentes"/><Metric icon={Send} label="Enviadas" value={totalSent.toLocaleString('pt-BR')} sub="Todas as campanhas"/><Metric icon={Gauge} label="Taxa de sucesso" value={`${rate}%`} sub={`${totalFailed} falhas registradas`}/><Metric icon={Activity} label="Em andamento" value={String(active.length)} sub="Rodando, pausadas ou agendadas"/></section>
     <div className="dashboard-grid"><section className="card"><div className="card-head"><div><h3>Campanhas recentes</h3><p>Últimos envios criados</p></div><button className="text-button" onClick={() => go('campaignCenter')}>Acompanhar →</button></div><div className="dash-campaigns">{campaigns.slice(0, 6).map(campaign => <div key={campaign.id}><div className="grow"><b>{campaign.name}</b><span>{campaign.sent}/{campaign.total} enviados · {toLocalDateTime(campaign.created_at)}</span></div><div className="mini-progress"><i style={{ width: `${campaignPercent(campaign)}%` }}/></div><span className={`status-chip ${campaign.status}`}>{campaign.status}</span></div>)}{!campaigns.length && <Empty text="Crie sua primeira campanha no Contact Sender."/>}</div></section><section className="card"><div className="card-head"><div><h3>Contas</h3><p>Status atual das sessões</p></div><button className="text-button" onClick={() => go('accounts')}>Gerenciar →</button></div><div className="dash-accounts">{accounts.map(account => <div key={account.id}><span className={`wa-avatar ${account.status === 'connected' ? 'online' : ''}`}><Wifi size={15}/></span><div className="grow"><b>{account.name}</b><small>{account.phone ? `+${account.phone}` : 'Sem número vinculado'}</small></div><span className={`status-chip ${account.status}`}>{account.status}</span></div>)}{!accounts.length && <Empty text="Adicione uma conta para começar."/>}</div></section></div>
     <section className="quick-tools"><button onClick={() => go('webchat')}><MessageCircle size={19}/><span><b>WebChat</b><small>Conversa direta + mídia</small></span></button><button onClick={() => go('campaignCenter')}><ListChecks size={19}/><span><b>Campaign Center</b><small>Stats e countdown em tempo real</small></span></button><button onClick={() => go('groups')}><Users size={19}/><span><b>Group Tools</b><small>Membros e convites</small></span></button><button onClick={() => go('warmup')}><Flame size={19}/><span><b>Aquecimento</b><small>Cadência controlada</small></span></button><button onClick={() => go('autoReply')}><Bot size={19}/><span><b>Auto Reply</b><small>Respostas automáticas</small></span></button><button onClick={() => go('health')}><HeartPulse size={19}/><span><b>Health Center</b><small>Banco, sockets e backups</small></span></button>{uiMode === 'advanced' && <><button onClick={() => go('extractors')}><Wrench size={19}/><span><b>Google Maps</b><small>Empresas e contatos</small></span></button><button onClick={() => go('numberFilter')}><FileSearch size={19}/><span><b>Number Filter</b><small>Validar números</small></span></button><button onClick={() => go('identities')}><Fingerprint size={19}/><span><b>JID / LID</b><small>Identidades resolvidas</small></span></button></>}</section>
   </div>;
 }
+function QuickStart({ accounts, onQuickChat }: { accounts: any[]; onQuickChat: (target: string) => boolean }) {
+  const [target, setTarget] = useState('');
+  const [error, setError] = useState('');
+  const connected = accounts.filter(account => account.status === 'connected');
+  function submit() {
+    const clean = target.trim();
+    if (!clean) { setError('Informe um número, JID ou LID.'); return; }
+    if (!connected.length) { setError('Conecte pelo menos uma conta WhatsApp antes de abrir uma conversa.'); return; }
+    if (!onQuickChat(clean)) { setError('Não foi possível escolher uma conta conectada.'); return; }
+    setError(''); setTarget('');
+  }
+  return <section className="card quick-start-card">
+    <div className="card-head"><div><h3>Início rápido</h3><p>Digite um número e abra uma conversa numa conta conectada aleatória.</p></div><span className="status-chip connected">{connected.length} conta{connected.length === 1 ? '' : 's'} disponíveis</span></div>
+    <div className="quick-start-row"><div className="field grow"><label>Número, PN JID ou LID</label><input value={target} onChange={event => { setTarget(event.target.value); setError(''); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); submit(); } }} placeholder="Ex.: 5511999999999" autoComplete="off"/><small>O WhatsApp confirma a identidade antes de abrir o chat. Nenhuma mensagem é enviada automaticamente.</small></div><button className="button primary big" onClick={submit} disabled={!target.trim() || !connected.length}><MessageCircle size={17}/> Abrir conversa</button></div>
+    {error && <div className="notice error quick-start-error">{error}</div>}
+  </section>;
+}
+
 function Metric({ icon: Icon, label, value, sub }: { icon: any; label: string; value: string; sub: string }) { return <article className="metric-card"><div className="metric-icon"><Icon size={19}/></div><span>{label}</span><b>{value}</b><small>{sub}</small></article>; }
 function Empty({ text }: { text: string }) { return <div className="empty mini"><MessageSquareText size={23}/><p>{text}</p></div>; }

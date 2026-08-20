@@ -238,3 +238,7 @@ pre,code,.identity-values code{max-width:100%}
 @media(min-width:821px){.app-shell.sidebar-collapsed .sidebar{width:0;min-width:0;flex-basis:0;overflow:hidden;border-right:0;opacity:0;pointer-events:none}.app-shell.sidebar-collapsed .workspace{width:100%;flex:1 1 100%}.app-shell.sidebar-collapsed .sidebar-toggle{margin-left:0}}
 @media(max-width:760px){.agenda-sync-card{align-items:stretch;flex-direction:column;gap:13px}.agenda-sync-actions{flex-wrap:wrap}.agenda-account-select{min-width:0;flex:1 1 190px}.agenda-sync-actions .button{flex:1 1 190px}}
 @media(max-width:560px){.agenda-sync-card{padding:14px}.agenda-sync-actions{display:grid;grid-template-columns:1fr}.agenda-account-select,.agenda-sync-actions .button{width:100%;min-width:0}}
+
+/* Quick start — validated direct chat entry */
+.quick-start-card{padding:18px;display:grid;gap:14px;border-color:color-mix(in srgb,var(--accent) 28%,var(--line))}.quick-start-card .card-head{margin:0}.quick-start-card .card-head p{margin-top:4px}.quick-start-row{display:flex;align-items:flex-end;gap:12px;min-width:0}.quick-start-row .field{min-width:0}.quick-start-row .field small{display:block;margin-top:6px;color:var(--muted);font-size:9px;line-height:1.4}.quick-start-row .button{flex:0 0 auto}.quick-start-error{margin:0;font-size:10px}
+@media(max-width:700px){.quick-start-row{display:grid;grid-template-columns:minmax(0,1fr)}.quick-start-row .button{width:100%}.quick-start-card .card-head{align-items:flex-start;flex-direction:column;gap:8px}}
