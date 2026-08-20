@@ -107,9 +107,35 @@ function unwrapContent(content: any, depth = 0): any {
   return content;
 }
 
+function vcardField(vcard: unknown, field: string) {
+  const value = String(vcard ?? '');
+  const line = value.split(/\r?\n/).find(item => item.toUpperCase().startsWith(`${field.toUpperCase()}:`));
+  return line ? line.slice(line.indexOf(':') + 1).trim() : '';
+}
+
+function vcardPhone(vcard: unknown) {
+  const value = String(vcard ?? '');
+  const line = value.split(/\r?\n/).find(item => /^TEL(?:;[^:]*)?:/i.test(item));
+  const raw = line ? line.slice(line.indexOf(':') + 1).trim() : '';
+  return raw.replace(/[^\d+]/g, '');
+}
+
+function contactMetadata(node: any, fallbackName = '') {
+  const contacts = Array.isArray(node?.contacts) ? node.contacts : [];
+  const first = contacts[0] ?? node;
+  const vcard = first?.vcard ?? node?.vcard ?? '';
+  return {
+    displayName: String(first?.displayName ?? node?.displayName ?? vcardField(vcard, 'FN') ?? fallbackName).trim(),
+    phone: vcardPhone(vcard),
+    organization: vcardField(vcard, 'ORG'),
+    vcard: String(vcard ?? ''),
+  };
+}
+
 function messageText(message: WAMessage): string {
   const content = unwrapContent(message.message);
   if (!content) return '';
+  const contact = content.contactMessage ?? content.contactsArrayMessage?.contacts?.[0];
   return content.conversation
     ?? content.extendedTextMessage?.text
     ?? content.imageMessage?.caption
@@ -118,6 +144,9 @@ function messageText(message: WAMessage): string {
     ?? content.interactiveMessage?.body?.text
     ?? content.interactiveMessage?.header?.imageMessage?.caption
     ?? content.interactiveMessage?.header?.videoMessage?.caption
+    ?? content.locationMessage?.name
+    ?? content.liveLocationMessage?.name
+    ?? contact?.displayName
     ?? '';
 }
 
@@ -130,6 +159,18 @@ function messageInfo(message: WAMessage): { type: IncomingMessageType; fileName?
   if (key === 'audioMessage') return { type: 'audio', mimetype: node?.mimetype ?? 'audio/ogg', metadata: { ptt: Boolean(node?.ptt), seconds: Number(node?.seconds ?? 0) } };
   if (key === 'stickerMessage') return { type: 'sticker', mimetype: node?.mimetype ?? 'image/webp', metadata: { animated: Boolean(node?.isAnimated) } };
   if (key === 'documentMessage') return { type: 'document', mimetype: node?.mimetype ?? 'application/octet-stream', fileName: node?.fileName ?? 'documento' };
+  if (key === 'locationMessage' || key === 'liveLocationMessage') {
+    return {
+      type: 'location',
+      metadata: {
+        latitude: Number(node?.degreesLatitude ?? node?.latitude),
+        longitude: Number(node?.degreesLongitude ?? node?.longitude),
+        name: String(node?.name ?? '').trim(),
+        address: String(node?.address ?? '').trim(),
+      },
+    };
+  }
+  if (key === 'contactMessage' || key === 'contactsArrayMessage') return { type: 'contact', metadata: contactMetadata(node) };
   if (key.startsWith('pollCreationMessage')) {
     const options = Array.isArray(node?.options) ? node.options.map((item: any) => String(item?.optionName ?? item?.name ?? '')).filter(Boolean) : [];
     return { type: 'poll', metadata: { question: String(node?.name ?? ''), options, selectableCount: Number(node?.selectableOptionsCount ?? 1) } };

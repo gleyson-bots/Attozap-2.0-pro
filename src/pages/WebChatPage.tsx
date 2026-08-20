@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, File, FileUp, Maximize2, MessageCircle, Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings2, Smile, Square, Vote, Wifi, X } from 'lucide-react';
+import { ContactRound, Download, File, FileUp, MapPin, Maximize2, MessageCircle, Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings2, Smile, Square, Vote, Wifi, X } from 'lucide-react';
 import { toLocalDateTime } from '../lib';
 
 function labelFor(chat: any) {
@@ -7,7 +7,7 @@ function labelFor(chat: any) {
   const human = candidates.find(value => value && !value.includes('@') && !/^\+?[\d\s().-]{6,}$/.test(value));
   return human || (chat?.phone ? `+${chat.phone}` : chat?.is_group ? (chat?.jid || 'Grupo') : 'Contacto a sincronizar');
 }
-function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
+function fileName(path?: string) { const value = String(path ?? ''); return value.split(/[\\/]/).pop() ?? value; }
 function aliases(chat: any) { return new Set([chat?.jid, chat?.lid, chat?.pn_jid, chat?.remote_jid, chat?.remoteJid].filter(Boolean)); }
 function sameIdentity(a: any, b: any) { const aa = aliases(a); return [...aliases(b)].some(value => aa.has(value)); }
 function epochMs(value: unknown) {
@@ -76,22 +76,32 @@ function Avatar({ chat, large = false, onBroken }: { chat: any; large?: boolean;
 type LightboxMedia = { url: string; type: 'image' | 'video'; name: string };
 
 function MessageBody({ message, onOpenMedia }: { message: any; onOpenMedia: (media: LightboxMedia) => void }) {
-  const type = message.message_type || 'text';
-  const url = message.media_url;
-  const metadata = message.metadata || {};
-  const mediaName = message.file_name || (type === 'video' ? 'Vídeo' : type === 'sticker' ? 'Figurinha.webp' : 'Imagem');
+  const type = String(message?.message_type ?? 'text');
+  const url = message?.media_url;
+  const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
+  const mediaName = String(message?.file_name || (type === 'video' ? 'Vídeo' : type === 'sticker' ? 'Figurinha.webp' : 'Imagem'));
   const pendingMedia = !url && ['image', 'video', 'audio', 'document', 'sticker'].includes(type);
   const pendingLabel = type === 'sticker' ? 'A carregar figurinha…' : type === 'audio' ? 'A preparar áudio…' : type === 'video' ? 'A preparar vídeo…' : type === 'document' ? 'A preparar documento…' : 'A carregar imagem…';
+  const pollOptions = Array.isArray(metadata.options) ? metadata.options.map((option: unknown) => String(option ?? '').trim()).filter(Boolean) : [];
+  const latitude = Number(metadata.latitude ?? metadata.degreesLatitude);
+  const longitude = Number(metadata.longitude ?? metadata.degreesLongitude);
+  const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
+  const mapUrl = hasCoordinates ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}` : '';
+  const contactName = String(metadata.displayName ?? metadata.name ?? message?.text ?? 'Contacto partilhado').trim();
+  const contactPhone = String(metadata.phone ?? '').trim();
+  const contactOrg = String(metadata.organization ?? '').trim();
   return <>
     {pendingMedia && <div className="chat-media-pending" role="status" aria-live="polite"><span>{pendingLabel}</span></div>}
-    {type === 'image' && url && <div className="chat-media-preview chat-image-preview"><button type="button" className="chat-media-trigger" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName })} title="Abrir imagem em ecrã inteiro"><img className="chat-image" src={url} alt={message.text || 'Imagem'}/></button><button type="button" className="chat-media-expand" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName })} title="Ampliar imagem" aria-label="Ampliar imagem"><Maximize2 size={15}/></button></div>}
+    {type === 'image' && url && <div className="chat-media-preview chat-image-preview"><button type="button" className="chat-media-trigger" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName })} title="Abrir imagem em ecrã inteiro"><img className="chat-image" src={url} alt={message?.text || 'Imagem'}/></button><button type="button" className="chat-media-expand" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName })} title="Ampliar imagem" aria-label="Ampliar imagem"><Maximize2 size={15}/></button></div>}
     {type === 'sticker' && url && <button type="button" className="chat-media-trigger chat-sticker-trigger" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName || 'Figurinha.webp' })} title="Ampliar figurinha"><img className="chat-sticker" src={url} alt="Figurinha"/></button>}
     {type === 'video' && url && <div className="chat-media-preview chat-video-preview"><video className="chat-video" src={url} controls preload="metadata"/><button type="button" className="chat-media-expand" onClick={() => onOpenMedia({ url, type: 'video', name: mediaName })} title="Abrir vídeo em ecrã inteiro" aria-label="Abrir vídeo em ecrã inteiro"><Maximize2 size={15}/></button></div>}
     {type === 'audio' && url && <audio className="chat-audio" src={url} controls preload="metadata"/>}
-    {type === 'document' && <div className="chat-document"><File size={22}/><div><b>{message.file_name || 'Documento'}</b><small>{message.mimetype || 'arquivo'}</small></div>{url && <a href={url} target="_blank" rel="noreferrer">Abrir</a>}</div>}
-    {type === 'poll' && <div className="chat-poll"><div><Vote size={18}/><b>{metadata.question || message.text || 'Enquete'}</b></div>{(metadata.options || []).map((option: string) => <span key={option}>{option}</span>)}</div>}
-    {message.text && type !== 'poll' && <div className="chat-text">{message.text}</div>}
-    {!message.text && !url && !pendingMedia && !['document','poll'].includes(type) && <div className="chat-text muted">{metadata.mediaError ? 'Não foi possível carregar esta mídia.' : `[${type}]`}</div>}
+    {type === 'document' && <div className="chat-document"><File size={22}/><div><b>{message?.file_name || 'Documento'}</b><small>{message?.mimetype || 'arquivo'}</small></div>{url && <a href={url} target="_blank" rel="noreferrer">Abrir</a>}</div>}
+    {type === 'location' && <div className="chat-location"><MapPin size={20}/><div><b>{String(metadata.name ?? message?.text ?? 'Localização')}</b>{metadata.address && <small>{String(metadata.address)}</small>}{hasCoordinates && <small>{latitude.toFixed(6)}, {longitude.toFixed(6)}</small>}{mapUrl && <a href={mapUrl} target="_blank" rel="noreferrer">Abrir no mapa</a>}</div></div>}
+    {type === 'contact' && <div className="chat-contact"><ContactRound size={20}/><div><b>{contactName}</b>{contactPhone && <a href={`tel:${contactPhone}`}>{contactPhone}</a>}{contactOrg && <small>{contactOrg}</small>}</div></div>}
+    {type === 'poll' && <div className="chat-poll"><div><Vote size={18}/><b>{String(metadata.question ?? message?.text ?? 'Enquete')}</b></div>{pollOptions.map((option: string, index: number) => <span key={`${option}-${index}`}>{option}</span>)}</div>}
+    {message?.text && !['poll', 'location', 'contact'].includes(type) && <div className="chat-text">{String(message.text)}</div>}
+    {!message?.text && !url && !pendingMedia && !['document','poll','location','contact'].includes(type) && <div className="chat-text muted">{metadata.mediaError ? 'Não foi possível carregar esta mídia.' : `[${type}]`}</div>}
   </>;
 }
 
@@ -109,12 +119,21 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
   const [proxy, setProxy] = useState('');
   const [showProxy, setShowProxy] = useState(false);
   const [showPoll, setShowPoll] = useState(false);
+  const [showLocation, setShowLocation] = useState(false);
+  const [showContact, setShowContact] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState('Sim\nNão');
+  const [locationLat, setLocationLat] = useState('');
+  const [locationLng, setLocationLng] = useState('');
+  const [locationName, setLocationName] = useState('');
+  const [locationAddress, setLocationAddress] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactOrg, setContactOrg] = useState('');
   const [busy, setBusy] = useState(false);
   const [syncingContact, setSyncingContact] = useState(false);
   const [error, setError] = useState('');
@@ -464,7 +483,7 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
     if (!paths?.[0]) return;
     const path = paths[0];
     const name = fileName(path);
-    const ext = name.split('.').pop()?.toLowerCase() ?? '';
+    const ext = String(name ?? '').split('.').pop()?.toLowerCase() ?? '';
     const type: 'image'|'video'|'document'|'audio'|'sticker' = forceType || (['jpg','jpeg','png','webp','gif'].includes(ext) ? 'image' : ['mp4','mov','mkv','webm'].includes(ext) ? 'video' : ['mp3','ogg','wav','m4a','opus'].includes(ext) ? 'audio' : 'document');
     setBusy(true); setError('');
     try {
@@ -528,7 +547,7 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
   }
 
   async function sendPoll() {
-    const options = [...new Set(pollOptions.split(/\r?\n/).map(item => item.trim()).filter(Boolean))];
+    const options = [...new Set(String(pollOptions ?? '').split(/\r?\n/).map(item => item.trim()).filter(Boolean))];
     const requested = newTarget.trim();
     const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
     const sendTarget = identity?.jid ?? (!requested ? selected?.jid ?? '' : '');
@@ -542,6 +561,52 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
       appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'poll', text: question, status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { question, options, transportJid: result.transportJid } });
       setSelected((current: any) => requested ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested } : { ...(current ?? {}), jid: resolved });
       setNewTarget(''); setPollQuestion(''); setPollOptions('Sim\nNão'); setShowPoll(false); await loadChats();
+      scheduleReconcile(resolved, 60);
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function sendLocation() {
+    const requested = newTarget.trim();
+    const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
+    const sendTarget = identity?.jid ?? (!requested ? selected?.jid ?? '' : '');
+    const latitude = Number(String(locationLat ?? '').trim().replace(',', '.'));
+    const longitude = Number(String(locationLng ?? '').trim().replace(',', '.'));
+    if (requested && !identity?.jid) { setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'O novo destinatário ainda não foi confirmado; nenhum envio foi realizado.'); return; }
+    if (!accountId || !sendTarget || !Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      setError('Informe uma latitude entre -90 e 90 e uma longitude entre -180 e 180.');
+      return;
+    }
+    setBusy(true); setError('');
+    try {
+      const name = String(locationName ?? '').trim();
+      const address = String(locationAddress ?? '').trim();
+      const result = await window.attozap.webchat.sendLocation(accountId, sendTarget, { latitude, longitude, name: name || undefined, address: address || undefined });
+      const resolved = result.resolvedTarget ?? result.remoteJid ?? sendTarget;
+      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'location', text: name || 'Localização', status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { latitude, longitude, name: name || undefined, address: address || undefined, transportJid: result.transportJid } });
+      setSelected((current: any) => requested ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested } : { ...(current ?? {}), jid: resolved });
+      setNewTarget(''); setLocationLat(''); setLocationLng(''); setLocationName(''); setLocationAddress(''); setShowLocation(false); setShowAttachMenu(false); await loadChats();
+      scheduleReconcile(resolved, 60);
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function sendContact() {
+    const requested = newTarget.trim();
+    const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
+    const sendTarget = identity?.jid ?? (!requested ? selected?.jid ?? '' : '');
+    const displayName = String(contactName ?? '').trim();
+    const phone = String(contactPhone ?? '').replace(/[^\d]/g, '');
+    const organization = String(contactOrg ?? '').trim();
+    if (requested && !identity?.jid) { setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'O novo destinatário ainda não foi confirmado; nenhum envio foi realizado.'); return; }
+    if (!accountId || !sendTarget || displayName.length < 2 || phone.length < 6 || phone.length > 15) { setError('Informe o nome e um telefone válido para o contacto.'); return; }
+    setBusy(true); setError('');
+    try {
+      const result = await window.attozap.webchat.sendContact(accountId, sendTarget, { displayName, phone, organization: organization || undefined });
+      const resolved = result.resolvedTarget ?? result.remoteJid ?? sendTarget;
+      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: 'contact', text: displayName, status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { displayName, phone, organization: organization || undefined, transportJid: result.transportJid } });
+      setSelected((current: any) => requested ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested } : { ...(current ?? {}), jid: resolved });
+      setNewTarget(''); setContactName(''); setContactPhone(''); setContactOrg(''); setShowContact(false); setShowAttachMenu(false); await loadChats();
       scheduleReconcile(resolved, 60);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
@@ -572,9 +637,11 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
       <section className="webchat-thread-pane">
         <header><Avatar chat={selected} large onBroken={() => refreshAvatar(selected)}/><div className="grow"><b>{typedTarget ? `Nova conversa · ${typedTarget}` : selected ? labelFor(selected) : 'Selecione uma conversa'}</b><small>{typedTarget || (selected?.phone ? `+${selected.phone}` : selected?.jid) || 'Envie para número/JID/LID para iniciar'}</small></div>{selected && !typedTarget && <div className="thread-header-actions"><button className="icon-button" type="button" disabled={syncingContact} onClick={() => void syncSelectedContact()} title="Sincronizar contacto do WhatsApp" aria-label="Sincronizar contacto do WhatsApp"><RefreshCw size={16} className={syncingContact ? 'spin' : ''}/></button></div>}</header>
         <div className="message-stream">{messages.map(message => <div key={message.id} className={`chat-bubble ${message.direction === 'out' ? 'out' : 'in'} ${message.status === 'failed' ? 'failed' : ''}`}><MessageBody message={message} onOpenMedia={setLightbox}/><small>{toLocalDateTime(message.created_at)}{message.status === 'failed' ? ` · ${message.error || 'falhou'}` : message.direction === 'out' ? ` · ${messageStatusLabel(message.status)}` : ''}</small></div>)}{selected && !messages.length && <div className="empty mini"><MessageCircle size={26}/><p>Sem mensagens registradas nesta conversa.</p></div>}<div ref={bottom}/></div>
-        {showPoll && <div className="poll-composer"><div className="field grow"><label>Pergunta</label><input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} placeholder="Qual opção você prefere?"/></div><div className="field grow"><label>Opções — uma por linha</label><textarea value={pollOptions} onChange={e => setPollOptions(e.target.value)}/></div><button className="button primary" disabled={busy} onClick={() => void sendPoll()}><Vote size={15}/> Enviar enquete</button></div>}
+        {showPoll && <div className="rich-composer poll-composer"><div className="rich-composer-header"><b>Enviar enquete</b><button type="button" className="icon-button" onClick={() => setShowPoll(false)} title="Fechar enquete"><X size={15}/></button></div><div className="field grow"><label>Pergunta</label><input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} placeholder="Qual opção você prefere?"/></div><div className="field grow"><label>Opções — uma por linha</label><textarea value={pollOptions ?? ''} onChange={e => setPollOptions(e.target.value)}/></div><button className="button primary" disabled={busy} onClick={() => void sendPoll()}><Vote size={15}/> Enviar enquete</button></div>}
+        {showLocation && <div className="rich-composer location-composer"><div className="rich-composer-header"><b><MapPin size={16}/> Enviar localização</b><button type="button" className="icon-button" onClick={() => setShowLocation(false)} title="Fechar localização"><X size={15}/></button></div><div className="rich-grid"><div className="field"><label>Latitude</label><input inputMode="decimal" value={locationLat} onChange={e => setLocationLat(e.target.value)} placeholder="-23.550520"/></div><div className="field"><label>Longitude</label><input inputMode="decimal" value={locationLng} onChange={e => setLocationLng(e.target.value)} placeholder="-46.633308"/></div></div><div className="rich-grid"><div className="field"><label>Nome do local <small>(opcional)</small></label><input value={locationName} onChange={e => setLocationName(e.target.value)} placeholder="Escritório"/></div><div className="field"><label>Endereço <small>(opcional)</small></label><input value={locationAddress} onChange={e => setLocationAddress(e.target.value)} placeholder="Av. Paulista, 1000"/></div></div><button className="button primary" disabled={busy} onClick={() => void sendLocation()}><MapPin size={15}/> Enviar localização</button></div>}
+        {showContact && <div className="rich-composer contact-composer"><div className="rich-composer-header"><b><ContactRound size={16}/> Partilhar contacto</b><button type="button" className="icon-button" onClick={() => setShowContact(false)} title="Fechar contacto"><X size={15}/></button></div><div className="rich-grid"><div className="field"><label>Nome</label><input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Nome completo" autoFocus/></div><div className="field"><label>Telefone</label><input inputMode="tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="5511999999999"/></div></div><div className="field"><label>Organização <small>(opcional)</small></label><input value={contactOrg} onChange={e => setContactOrg(e.target.value)} placeholder="Empresa"/></div><button className="button primary" disabled={busy} onClick={() => void sendContact()}><ContactRound size={15}/> Enviar contacto</button></div>}
         <div className="webchat-popovers">
-          {showAttachMenu && <div className="webchat-popover attach-popover"><b>Anexar conteúdo</b><div className="popover-actions"><button onClick={() => void attach()}><Paperclip size={15}/> Mídia ou documento</button><button onClick={() => void attach('sticker')}><Smile size={15}/> Figurinha WebP</button><button onClick={() => setShowPoll(true)}><Vote size={15}/> Enquete</button></div></div>}
+          {showAttachMenu && <div className="webchat-popover attach-popover"><b>Anexar conteúdo</b><div className="popover-actions"><button onClick={() => void attach()}><Paperclip size={15}/> Mídia ou documento</button><button onClick={() => void attach('sticker')}><Smile size={15}/> Figurinha WebP</button><button onClick={() => { setShowPoll(true); setShowLocation(false); setShowContact(false); setShowAttachMenu(false); }}><Vote size={15}/> Enquete</button><button onClick={() => { setShowLocation(true); setShowPoll(false); setShowContact(false); setShowAttachMenu(false); }}><MapPin size={15}/> Localização</button><button onClick={() => { setShowContact(true); setShowPoll(false); setShowLocation(false); setShowAttachMenu(false); }}><ContactRound size={15}/> Contacto</button></div></div>}
           {showEmoji && <div className="webchat-popover emoji-popover"><b>Emojis rápidos</b><div className="emoji-grid">{['😀','😂','😍','👍','🙏','🔥','✅','🎉','👋','💬','❤️','😅'].map(emoji => <button key={emoji} onClick={() => { setText(current => `${current}${emoji}`); setShowEmoji(false); }}>{emoji}</button>)}</div></div>}
         </div>
         <footer className={recording ? 'recording' : ''}>

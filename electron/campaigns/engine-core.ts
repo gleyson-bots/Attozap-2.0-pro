@@ -477,21 +477,24 @@ export class CampaignEngine extends EventEmitter {
   private emitRuntime(id: string) { this.emit('runtime', this.runtimeState(id)); }
 
   private async sendPart(accountId: string, target: string, part: CampaignPart, recipient: CampaignRecipient): Promise<MessageResult> {
-    const render = (value?: string) => value ? renderTemplate(value, recipient) : value;
+    const render = (value?: unknown) => value == null ? value : renderTemplate(String(value), recipient);
     const mediaInput = (input: SendMediaInput, caption?: string): SendMediaInput => {
-      const path = String(input.path ?? '').trim();
+      const path = String(input?.path ?? '').trim();
       if (!path) throw new Error(`O anexo ${part.type} não possui um caminho local válido`);
       return { ...input, path, caption };
     };
     switch (part.type) {
-      case 'image': return this.chats.sendContent(accountId, target, { type: 'image', input: mediaInput(part.input, render(part.input.caption)) });
-      case 'video': return this.chats.sendContent(accountId, target, { type: 'video', input: mediaInput(part.input, render(part.input.caption)) });
-      case 'document': return this.chats.sendContent(accountId, target, { type: 'document', input: mediaInput(part.input, render(part.input.caption)) });
+      case 'image': return this.chats.sendContent(accountId, target, { type: 'image', input: mediaInput(part.input, render(part.input?.caption) as string | undefined) });
+      case 'video': return this.chats.sendContent(accountId, target, { type: 'video', input: mediaInput(part.input, render(part.input?.caption) as string | undefined) });
+      case 'document': return this.chats.sendContent(accountId, target, { type: 'document', input: mediaInput(part.input, render(part.input?.caption) as string | undefined) });
       case 'audio': return this.chats.sendContent(accountId, target, { type: 'audio', input: mediaInput(part.input, undefined) });
       case 'sticker': return this.chats.sendContent(accountId, target, { type: 'sticker', input: mediaInput(part.input, undefined) });
-      case 'location': return this.chats.sendContent(accountId, target, { type: 'location', input: part.input });
-      case 'contact': return this.chats.sendContent(accountId, target, { type: 'contact', input: { ...part.input, displayName: render(part.input.displayName) ?? part.input.displayName } });
-      case 'poll': return this.chats.sendContent(accountId, target, { type: 'poll', input: { ...part.input, name: render(part.input.name) ?? part.input.name, values: part.input.values.map(value => render(value) ?? value) } });
+      case 'location': return this.chats.sendContent(accountId, target, { type: 'location', input: { ...part.input, name: render(part.input?.name) as string | undefined, address: render(part.input?.address) as string | undefined } });
+      case 'contact': return this.chats.sendContent(accountId, target, { type: 'contact', input: { ...part.input, displayName: String(render(part.input?.displayName) ?? part.input?.displayName ?? ''), phone: String(render(part.input?.phone) ?? part.input?.phone ?? ''), organization: render(part.input?.organization) as string | undefined } });
+      case 'poll': {
+        const values = Array.isArray(part.input?.values) ? part.input.values.map(value => String(render(value) ?? value ?? '').trim()).filter(Boolean) : [];
+        return this.chats.sendContent(accountId, target, { type: 'poll', input: { ...part.input, name: String(render(part.input?.name) ?? part.input?.name ?? ''), values } });
+      }
     }
     throw new Error('Tipo de conteúdo não suportado');
   }

@@ -443,12 +443,12 @@ export class ChatService {
     try {
       const result = await provider.sendLocation(remoteJid, input);
       const canonical = result.remoteJid || remoteJid;
-      this.log(result.id, accountId, canonical, 'location', input.name ?? input.address ?? '', 'pending', undefined, undefined, undefined, undefined, { transportJid: remoteJid });
+      this.log(result.id, accountId, canonical, 'location', input.name ?? input.address ?? '', 'pending', undefined, undefined, undefined, undefined, { latitude: input.latitude, longitude: input.longitude, name: input.name, address: input.address, transportJid: remoteJid });
       void this.touchChat(accountId, canonical).catch(error => console.warn('[webchat:touch-chat]', error instanceof Error ? error.message : String(error)));
       return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.log(randomUUID(), accountId, remoteJid, 'location', input.name ?? input.address ?? '', 'failed', message);
+      this.log(randomUUID(), accountId, remoteJid, 'location', input.name ?? input.address ?? '', 'failed', message, undefined, undefined, undefined, { latitude: input.latitude, longitude: input.longitude, name: input.name, address: input.address });
       throw new Error(`Falha ao enviar localização para ${remoteJid}: ${message}`);
     }
   }
@@ -460,12 +460,12 @@ export class ChatService {
     try {
       const result = await provider.sendContact(remoteJid, input);
       const canonical = result.remoteJid || remoteJid;
-      this.log(result.id, accountId, canonical, 'contact', input.displayName, 'pending', undefined, undefined, undefined, undefined, { transportJid: remoteJid });
+      this.log(result.id, accountId, canonical, 'contact', input.displayName, 'pending', undefined, undefined, undefined, undefined, { displayName: input.displayName, phone: input.phone, organization: input.organization, transportJid: remoteJid });
       void this.touchChat(accountId, canonical).catch(error => console.warn('[webchat:touch-chat]', error instanceof Error ? error.message : String(error)));
       return { ...result, remoteJid: canonical, resolvedTarget: canonical, transportJid: remoteJid };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.log(randomUUID(), accountId, remoteJid, 'contact', input.displayName, 'failed', message);
+      this.log(randomUUID(), accountId, remoteJid, 'contact', input.displayName, 'failed', message, undefined, undefined, undefined, { displayName: input.displayName, phone: input.phone, organization: input.organization });
       throw new Error(`Falha ao enviar contato para ${remoteJid}: ${message}`);
     }
   }

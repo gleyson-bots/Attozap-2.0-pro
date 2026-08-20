@@ -13,15 +13,20 @@ const cadenceProfiles: Record<CadenceProfile, { label: string; description: stri
   custom: { label: 'Personalizado', description: 'Defina manualmente os intervalos.', min: 20_000, max: 45_000, switchAfter: 8 },
 };
 
-function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
+function fileName(path?: string) {
+  const value = String(path ?? '');
+  return value.split(/[\\/]/).pop() ?? value;
+}
 const TESTABLE_MEDIA_TYPES = new Set(['image', 'video', 'document', 'audio', 'sticker']);
+const TESTABLE_RICH_TYPES = new Set(['location', 'contact', 'poll']);
 function previewTemplate(template: string, recipient: any) {
   const hour = new Date().getHours();
   const saudacao = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
   const displayName = String(recipient?.pushName ?? recipient?.name ?? '').trim();
   const firstName = displayName.split(/\s+/)[0] || '';
-  const values: Record<string,string> = { name: displayName, nome: displayName, pushname: displayName, pushName: displayName, push_name: displayName, primeiro_nome: firstName, saudacao, phone: recipient?.variables?.phone ?? '', jid: recipient?.target ?? '', ...(recipient?.variables ?? {}) };
-  return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m,key) => values[key] ?? '').replace(/\{([\w.-]+)\}/g, (_m,key) => values[key] ?? '');
+  const variables = Object.fromEntries(Object.entries(recipient?.variables ?? {}).map(([key, value]) => [key, String(value ?? '')]));
+  const values: Record<string,string> = { name: displayName, nome: displayName, pushname: displayName, pushName: displayName, push_name: displayName, primeiro_nome: firstName, saudacao, phone: String(recipient?.variables?.phone ?? ''), jid: String(recipient?.target ?? ''), ...variables };
+  return String(template ?? '').replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m,key) => values[key] ?? '').replace(/\{([\w.-]+)\}/g, (_m,key) => values[key] ?? '');
 }
 function seconds(ms: number) { return Math.max(0, Math.round(ms / 1000)); }
 function sleep(ms: number) { return new Promise(resolve => window.setTimeout(resolve, ms)); }
@@ -109,24 +114,31 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
     const paths = await window.attozap.files.pick({ multiple: true });
     if (!paths?.length) return;
     const mimeByExtension: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mp3: 'audio/mpeg', ogg: 'audio/ogg', opus: 'audio/ogg; codecs=opus', wav: 'audio/wav', m4a: 'audio/mp4', pdf: 'application/pdf' };
-    setParts(current => [...current, ...paths.map((path: string) => { const name = fileName(path); const extension = name.split('.').pop()?.toLowerCase() ?? ''; return { type: fileType, input: { path, fileName: name, mimetype: mimeByExtension[extension], ptt: fileType === 'audio' } }; })]);
+    setParts(current => [...current, ...paths.map((path: string) => { const name = fileName(path); const extension = String(name ?? '').split('.').pop()?.toLowerCase() ?? ''; return { type: fileType, input: { path, fileName: name, mimetype: mimeByExtension[extension], ptt: fileType === 'audio' } }; })]);
   }
 
   async function testFirstRecipient() {
     if (!accountId) { setError('Conecte e selecione uma conta.'); return; }
     if (!recipients[0]) { setError(mode === 'contact' ? 'Informe pelo menos um destinatário para testar.' : 'Selecione um grupo para testar.'); return; }
-    const testPart = parts.find(part => TESTABLE_MEDIA_TYPES.has(String(part.type)));
-    if (!nonEmptyMessages[0] && !testPart) { setError('Digite uma mensagem ou adicione um ficheiro de mídia para o teste.'); return; }
-    if (testPart?.type === 'audio' && nonEmptyMessages.length) { setError('Áudio/PPG não suporta texto ou legenda. Deixe a mensagem vazia para testar o áudio.'); return; }
+    const testPart = parts.find(part => TESTABLE_MEDIA_TYPES.has(String(part.type)) || TESTABLE_RICH_TYPES.has(String(part.type)));
+    if (!nonEmptyMessages[0] && !testPart) { setError('Digite uma mensagem ou adicione um conteúdo para o teste.'); return; }
+    if (testPart?.type === 'audio' && nonEmptyMessages.length) { setError('Áudio/PTT não suporta texto ou legenda. Deixe a mensagem vazia para testar o áudio.'); return; }
     setTesting(true); setError(''); setTestStatus(''); setTestKind('info');
     try {
       const recipient = recipients[0];
       const text = nonEmptyMessages[0] ? previewTemplate(nonEmptyMessages[0], recipient) : '';
-      const receipt = testPart
-        ? await window.attozap.webchat.sendMedia(accountId, recipient.target, testPart.type, { ...testPart.input, ...(testPart.type === 'audio' || testPart.type === 'sticker' || !text ? {} : { caption: text }) })
-        : await window.attozap.webchat.sendText(accountId, recipient.target, text);
+      let receipt: any;
+      if (!testPart) receipt = await window.attozap.webchat.sendText(accountId, recipient.target, text);
+      else if (TESTABLE_MEDIA_TYPES.has(String(testPart.type))) receipt = await window.attozap.webchat.sendMedia(accountId, recipient.target, testPart.type, { ...testPart.input, ...(testPart.type === 'audio' || testPart.type === 'sticker' || !text ? {} : { caption: text }) });
+      else if (testPart.type === 'location') receipt = await window.attozap.webchat.sendLocation(accountId, recipient.target, { ...testPart.input, latitude: Number(testPart.input?.latitude), longitude: Number(testPart.input?.longitude), name: previewTemplate(String(testPart.input?.name ?? ''), recipient) || undefined, address: previewTemplate(String(testPart.input?.address ?? ''), recipient) || undefined });
+      else if (testPart.type === 'contact') receipt = await window.attozap.webchat.sendContact(accountId, recipient.target, { ...testPart.input, displayName: previewTemplate(String(testPart.input?.displayName ?? ''), recipient), phone: previewTemplate(String(testPart.input?.phone ?? ''), recipient), organization: previewTemplate(String(testPart.input?.organization ?? ''), recipient) || undefined });
+      else {
+        const values = Array.isArray(testPart.input?.values) ? testPart.input.values.map((value: unknown) => previewTemplate(String(value ?? ''), recipient)).filter(Boolean) : [];
+        receipt = await window.attozap.webchat.sendPoll(accountId, recipient.target, { ...testPart.input, name: previewTemplate(String(testPart.input?.name ?? ''), recipient), values });
+      }
       const target = receipt.resolvedTarget ?? receipt.remoteJid ?? recipient.target;
-      setTestStatus(`${testPart ? 'Mídia' : 'Mensagem'} submetida para ${target}. Aguardando confirmação do WhatsApp…`);
+      const contentLabel = testPart?.type === 'location' ? 'Localização' : testPart?.type === 'contact' ? 'Contacto' : testPart?.type === 'poll' ? 'Enquete' : testPart ? 'Mídia' : 'Mensagem';
+      setTestStatus(`${contentLabel} submetida para ${target}. Aguardando confirmação do WhatsApp…`);
       const confirmation = await waitForDelivery(accountId, receipt.id);
       if (isConfirmed(confirmation?.status)) {
         setTestKind('success');
@@ -162,8 +174,8 @@ export function SenderPage({ mode, accounts, campaigns, reloadCampaigns }: { mod
   }
 
   const relevantCampaigns = campaigns.filter(item => item.target_type === mode).slice(0, 12);
-  const hasTestableMedia = parts.some(part => TESTABLE_MEDIA_TYPES.has(String(part.type)));
-  const canTest = Boolean(accountId && recipients.length && (nonEmptyMessages.length || hasTestableMedia) && !(parts.some(part => part.type === 'audio') && nonEmptyMessages.length));
+  const hasTestablePart = parts.some(part => TESTABLE_MEDIA_TYPES.has(String(part.type)) || TESTABLE_RICH_TYPES.has(String(part.type)));
+  const canTest = Boolean(accountId && recipients.length && (nonEmptyMessages.length || hasTestablePart) && !(parts.some(part => part.type === 'audio') && nonEmptyMessages.length));
 
   return <div className="page-stack">
     <div className="page-head"><div><span className="kicker">{mode === 'contact' ? 'CONTACT SENDER' : 'GROUP SENDER'}</span><h2>{mode === 'contact' ? 'Envio para contatos' : 'Envio para grupos'}</h2><p>Campanhas com perfis de cadência, múltiplas mensagens, contas, mídia, documentos e resolução JID/LID.</p></div><span className="safety-pill"><ShieldCheck size={15}/> Blocklist sempre respeitada</span></div>
@@ -209,12 +221,12 @@ function CampaignRow({ campaign, reload }: { campaign: any; reload: () => Promis
 }
 
 function AdvancedParts({ onAdd }: { onAdd: (part: any) => void }) {
-  const [lat, setLat] = useState(''); const [lng, setLng] = useState(''); const [locationName, setLocationName] = useState('');
-  const [contactName, setContactName] = useState(''); const [contactPhone, setContactPhone] = useState('');
+  const [lat, setLat] = useState(''); const [lng, setLng] = useState(''); const [locationName, setLocationName] = useState(''); const [locationAddress, setLocationAddress] = useState('');
+  const [contactName, setContactName] = useState(''); const [contactPhone, setContactPhone] = useState(''); const [contactOrg, setContactOrg] = useState('');
   const [pollName, setPollName] = useState(''); const [pollValues, setPollValues] = useState('');
   return <div className="advanced-grid">
-    <div className="mini-builder"><div className="builder-title"><MapPin size={15}/><b>Localização</b></div><input placeholder="Nome do local" value={locationName} onChange={e=>setLocationName(e.target.value)}/><div className="inline-inputs"><input placeholder="Latitude" value={lat} onChange={e=>setLat(e.target.value)}/><input placeholder="Longitude" value={lng} onChange={e=>setLng(e.target.value)}/></div><button className="button tiny" onClick={()=>{const latitude=Number(lat),longitude=Number(lng);if(Number.isFinite(latitude)&&Number.isFinite(longitude)) onAdd({type:'location',input:{latitude,longitude,name:locationName}})}}>Adicionar</button></div>
-    <div className="mini-builder"><div className="builder-title"><Users size={15}/><b>Contato</b></div><input placeholder="Nome" value={contactName} onChange={e=>setContactName(e.target.value)}/><input placeholder="Telefone" value={contactPhone} onChange={e=>setContactPhone(e.target.value)}/><button className="button tiny" onClick={()=>contactPhone && onAdd({type:'contact',input:{displayName:contactName||contactPhone,phone:contactPhone}})}>Adicionar</button></div>
-    <div className="mini-builder"><div className="builder-title"><Plus size={15}/><b>Enquete</b></div><input placeholder="Pergunta" value={pollName} onChange={e=>setPollName(e.target.value)}/><textarea placeholder={'Opção 1\nOpção 2'} value={pollValues} onChange={e=>setPollValues(e.target.value)}/><button className="button tiny" onClick={()=>{const values=pollValues.split(/\r?\n/).map(v=>v.trim()).filter(Boolean);if(pollName&&values.length>=2)onAdd({type:'poll',input:{name:pollName,values,selectableCount:1}})}}>Adicionar</button></div>
+    <div className="mini-builder"><div className="builder-title"><MapPin size={15}/><b>Localização</b></div><input placeholder="Nome do local" value={locationName} onChange={e=>setLocationName(e.target.value)}/><input placeholder="Endereço (opcional)" value={locationAddress} onChange={e=>setLocationAddress(e.target.value)}/><div className="inline-inputs"><input inputMode="decimal" placeholder="Latitude" value={lat} onChange={e=>setLat(e.target.value)}/><input inputMode="decimal" placeholder="Longitude" value={lng} onChange={e=>setLng(e.target.value)}/></div><button className="button tiny" onClick={()=>{const latitude=Number(String(lat ?? '').replace(',', '.')),longitude=Number(String(lng ?? '').replace(',', '.'));if(Number.isFinite(latitude)&&latitude>=-90&&latitude<=90&&Number.isFinite(longitude)&&longitude>=-180&&longitude<=180) onAdd({type:'location',input:{latitude,longitude,name:locationName || undefined,address:locationAddress || undefined}})}}>Adicionar</button></div>
+    <div className="mini-builder"><div className="builder-title"><Users size={15}/><b>Contacto</b></div><input placeholder="Nome" value={contactName} onChange={e=>setContactName(e.target.value)}/><input inputMode="tel" placeholder="Telefone" value={contactPhone} onChange={e=>setContactPhone(e.target.value)}/><input placeholder="Organização (opcional)" value={contactOrg} onChange={e=>setContactOrg(e.target.value)}/><button className="button tiny" onClick={()=>{const phone=String(contactPhone ?? '').replace(/[^\d]/g,'');if(phone.length>=6) onAdd({type:'contact',input:{displayName:contactName||phone,phone,organization:contactOrg || undefined}})}}>Adicionar</button></div>
+    <div className="mini-builder"><div className="builder-title"><Plus size={15}/><b>Enquete</b></div><input placeholder="Pergunta" value={pollName} onChange={e=>setPollName(e.target.value)}/><textarea placeholder={'Opção 1\nOpção 2'} value={pollValues ?? ''} onChange={e=>setPollValues(e.target.value)}/><button className="button tiny" onClick={()=>{const values=String(pollValues ?? '').split(/\r?\n/).map(v=>v.trim()).filter(Boolean);if(String(pollName ?? '').trim()&&values.length>=2)onAdd({type:'poll',input:{name:String(pollName).trim(),values,selectableCount:1}})}}>Adicionar</button></div>
   </div>;
 }

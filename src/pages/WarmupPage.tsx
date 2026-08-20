@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Activity, Bot, FileAudio, FileText, Film, Flame, Image, MessageCircleMore, Paperclip, Play, RefreshCw, Save, Sparkles, Square, Timer, Trash2, Users, X } from 'lucide-react';
 import { toLocalDateTime } from '../lib';
 
-function lines(value: string) { return [...new Set(value.split(/\r?\n/).map(item => item.trim()).filter(Boolean))]; }
-function fileName(path: string) { return path.split(/[\\/]/).pop() || path; }
-function mediaType(path: string) {
-  const ext = (path.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
+function lines(value?: string) { return [...new Set(String(value ?? '').split(/\r?\n/).map(item => item.trim()).filter(Boolean))]; }
+function fileName(path?: string) { const value = String(path ?? ''); return value.split(/[\\/]/).pop() || value; }
+function mediaType(path?: string) {
+  const ext = (String(path ?? '').match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
   if (['jpg','jpeg','png','gif'].includes(ext)) return 'image';
   if (['mp4','mov','mkv','webm'].includes(ext)) return 'video';
   if (['mp3','ogg','opus','wav','m4a','aac'].includes(ext)) return 'audio';

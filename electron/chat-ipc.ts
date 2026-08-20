@@ -27,4 +27,12 @@ export function registerChatIpc(chat: ChatService, license: LicenseService) {
     requireWebChat();
     return chat.sendPoll(accountId, target, input);
   });
+  ipcMain.handle('webchat:send-location', (_event, accountId: string, target: string, input: { latitude: number; longitude: number; name?: string; address?: string }) => {
+    requireWebChat();
+    return chat.sendContent(accountId, target, { type: 'location', input });
+  });
+  ipcMain.handle('webchat:send-contact', (_event, accountId: string, target: string, input: { displayName: string; phone: string; organization?: string }) => {
+    requireWebChat();
+    return chat.sendContent(accountId, target, { type: 'contact', input });
+  });
 }

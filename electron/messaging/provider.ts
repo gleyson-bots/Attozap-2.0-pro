@@ -56,7 +56,7 @@ export type ProviderEvents = {
   onPollUpdate?: (event: PollUpdateEvent) => void;
 };
 
-export type IncomingMessageType = 'text' | 'image' | 'video' | 'document' | 'audio' | 'sticker' | 'poll' | 'unknown';
+export type IncomingMessageType = 'text' | 'image' | 'video' | 'document' | 'audio' | 'sticker' | 'location' | 'contact' | 'poll' | 'unknown';
 
 export type IncomingMessage = {
   id: string;
