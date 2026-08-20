@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ContactRound, Download, File, FileUp, MapPin, Maximize2, MessageCircle, Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings2, Smile, Square, Vote, Wifi, X } from 'lucide-react';
+import { Bot, Check, ClipboardPaste, ContactRound, Download, File as FileIcon, FileUp, ImagePlus, MapPin, Maximize2, MessageCircle, Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings2, Smile, Sparkles, Square, Vote, Wand2, Wifi, X } from 'lucide-react';
 import { toLocalDateTime } from '../lib';
 
 function labelFor(chat: any) {
@@ -74,6 +74,8 @@ function Avatar({ chat, large = false, onBroken }: { chat: any; large?: boolean;
   return <span className={`conversation-avatar ${large ? 'large' : ''}`}>{showImage ? <img src={profileUrl} alt="" onError={() => { setFailedUrl(profileUrl); onBroken?.(); }}/> : label}</span>;
 }
 type LightboxMedia = { url: string; type: 'image' | 'video'; name: string };
+type PendingMedia = { path: string; fileName: string; type: 'image' | 'video' | 'document' | 'audio' | 'sticker'; mimetype: string; dataUrl: string; size: number };
+type MediaDimensions = { width: number; height: number };
 
 function MessageBody({ message, onOpenMedia }: { message: any; onOpenMedia: (media: LightboxMedia) => void }) {
   const type = String(message?.message_type ?? 'text');
@@ -96,7 +98,7 @@ function MessageBody({ message, onOpenMedia }: { message: any; onOpenMedia: (med
     {type === 'sticker' && url && <button type="button" className="chat-media-trigger chat-sticker-trigger" onClick={() => onOpenMedia({ url, type: 'image', name: mediaName || 'Figurinha.webp' })} title="Ampliar figurinha"><img className="chat-sticker" src={url} alt="Figurinha"/></button>}
     {type === 'video' && url && <div className="chat-media-preview chat-video-preview"><video className="chat-video" src={url} controls preload="metadata"/><button type="button" className="chat-media-expand" onClick={() => onOpenMedia({ url, type: 'video', name: mediaName })} title="Abrir vídeo em ecrã inteiro" aria-label="Abrir vídeo em ecrã inteiro"><Maximize2 size={15}/></button></div>}
     {type === 'audio' && url && <audio className="chat-audio" src={url} controls preload="metadata"/>}
-    {type === 'document' && <div className="chat-document"><File size={22}/><div><b>{message?.file_name || 'Documento'}</b><small>{message?.mimetype || 'arquivo'}</small></div>{url && <a href={url} target="_blank" rel="noreferrer">Abrir</a>}</div>}
+    {type === 'document' && <div className="chat-document"><FileIcon size={22}/><div><b>{message?.file_name || 'Documento'}</b><small>{message?.mimetype || 'arquivo'}</small></div>{url && <a href={url} target="_blank" rel="noreferrer">Abrir</a>}</div>}
     {type === 'location' && <div className="chat-location"><MapPin size={20}/><div><b>{String(metadata.name ?? message?.text ?? 'Localização')}</b>{metadata.address && <small>{String(metadata.address)}</small>}{hasCoordinates && <small>{latitude.toFixed(6)}, {longitude.toFixed(6)}</small>}{mapUrl && <a href={mapUrl} target="_blank" rel="noreferrer">Abrir no mapa</a>}</div></div>}
     {type === 'contact' && <div className="chat-contact"><ContactRound size={20}/><div><b>{contactName}</b>{contactPhone && <a href={`tel:${contactPhone}`}>{contactPhone}</a>}{contactOrg && <small>{contactOrg}</small>}</div></div>}
     {type === 'poll' && <div className="chat-poll"><div><Vote size={18}/><b>{String(metadata.question ?? message?.text ?? 'Enquete')}</b></div>{pollOptions.map((option: string, index: number) => <span key={`${option}-${index}`}>{option}</span>)}</div>}
@@ -115,6 +117,14 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
   const [selected, setSelected] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
+  const [pendingMedia, setPendingMedia] = useState<PendingMedia | null>(null);
+  const [pendingDimensions, setPendingDimensions] = useState<MediaDimensions | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [showAiMenu, setShowAiMenu] = useState(false);
+  const [aiProviders, setAiProviders] = useState<AttozapAiProvider[]>([]);
+  const [aiAction, setAiAction] = useState<'correct' | 'shorten' | 'expand' | 'context'>('correct');
+  const [aiContext, setAiContext] = useState('');
   const [newTarget, setNewTarget] = useState('');
   const [proxy, setProxy] = useState('');
   const [showProxy, setShowProxy] = useState(false);
@@ -161,6 +171,10 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
     element.style.height = 'auto';
     element.style.height = `${Math.min(200, Math.max(72, element.scrollHeight))}px`;
   }, [text]);
+
+  useEffect(() => {
+    void window.attozap.ai.providers().then(rows => setAiProviders(Array.isArray(rows) ? rows : [])).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -448,6 +462,21 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
     setNewTarget('');
   }
 
+  async function improveText(action = aiAction) {
+    const body = text.trim();
+    const selectedProvider = aiProviders.find(item => item.configured) ?? aiProviders[0];
+    if (!body) { setError('Escreva um texto antes de pedir ajuda à IA.'); return; }
+    if (!selectedProvider?.configured) { setError('Configure pelo menos um provedor de texto IA em Configurações.'); return; }
+    setAiBusy(true); setError('');
+    try {
+      const result = await window.attozap.ai.rewrite({ provider: selectedProvider.id, model: selectedProvider.model, action, text: body, context: aiContext.trim() || undefined });
+      setText(String(result?.text ?? body));
+      setShowAiMenu(false);
+      setAiContext('');
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setAiBusy(false); }
+  }
+
   async function sendText() {
     const body = text.trim();
     const requested = newTarget.trim();
@@ -471,6 +500,35 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
     finally { setBusy(false); }
   }
 
+  function mediaKind(fileNameValue: string, mimeType: string, forceType?: 'sticker'): PendingMedia['type'] {
+    if (forceType) return forceType;
+    const ext = String(fileNameValue ?? '').split('.').pop()?.toLowerCase() ?? '';
+    if (mimeType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].includes(ext)) return 'image';
+    if (mimeType.startsWith('video/') || ['mp4', 'mov', 'mkv', 'webm'].includes(ext)) return 'video';
+    if (mimeType.startsWith('audio/') || ['mp3', 'ogg', 'wav', 'm4a', 'opus'].includes(ext)) return 'audio';
+    return 'document';
+  }
+
+  async function stagePath(path: string, forceType?: 'sticker') {
+    const preview = await window.attozap.files.readPreview(path);
+    const type = mediaKind(preview.fileName || fileName(path), preview.mimeType, forceType);
+    setPendingMedia({ path: preview.filePath, fileName: preview.fileName || fileName(path), type, mimetype: preview.mimeType, dataUrl: preview.dataUrl, size: preview.size });
+    setPendingDimensions(null);
+    setError('');
+  }
+
+  async function stageBrowserFile(file: File, forceType?: 'sticker') {
+    if (!file || file.size <= 0 || file.size > 25 * 1024 * 1024) throw new Error('A mídia deve ter entre 1 byte e 25 MiB.');
+    const base64 = await blobAsBase64(file);
+    const mimeType = String(file.type || 'application/octet-stream').split(';')[0];
+    const name = file.name || `media-${Date.now()}`;
+    const saved = await window.attozap.files.saveTempBinary({ base64, suggestedName: name, maxBytes: 25 * 1024 * 1024 });
+    const type = mediaKind(name, mimeType, forceType);
+    setPendingMedia({ path: saved.filePath, fileName: name, type, mimetype: mimeType, dataUrl: `data:${mimeType};base64,${base64}`, size: file.size });
+    setPendingDimensions(null);
+    setError('');
+  }
+
   async function attach(forceType?: 'sticker') {
     setShowAttachMenu(false);
     const requested = newTarget.trim();
@@ -481,21 +539,48 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
     const filters = forceType === 'sticker' ? [{ name: 'Sticker WebP', extensions: ['webp'] }] : undefined;
     const paths = await window.attozap.files.pick({ multiple: false, filters });
     if (!paths?.[0]) return;
-    const path = paths[0];
-    const name = fileName(path);
-    const ext = String(name ?? '').split('.').pop()?.toLowerCase() ?? '';
-    const type: 'image'|'video'|'document'|'audio'|'sticker' = forceType || (['jpg','jpeg','png','webp','gif'].includes(ext) ? 'image' : ['mp4','mov','mkv','webm'].includes(ext) ? 'video' : ['mp3','ogg','wav','m4a','opus'].includes(ext) ? 'audio' : 'document');
+    try { await stagePath(paths[0], forceType); }
+    catch (e: any) { setError(e?.message ?? String(e)); }
+  }
+
+  async function sendPendingMedia() {
+    const media = pendingMedia;
+    if (!media || busy) return;
+    const requested = newTarget.trim();
+    const identity = requested && newTargetState === 'resolved' && resolvedNewTarget?.query === requested ? resolvedNewTarget : null;
+    const sendTarget = identity?.jid ?? (!requested ? selected?.jid ?? '' : '');
+    if (requested && !identity?.jid) { setError(newTargetState === 'resolving' ? 'Aguarde a confirmação do contacto pelo WhatsApp.' : 'O novo destinatário ainda não foi confirmado; nenhum envio foi realizado.'); return; }
+    if (!accountId || !sendTarget) { setError('Selecione uma conversa ou informe um destinatário.'); return; }
     setBusy(true); setError('');
     try {
-      const result = await window.attozap.webchat.sendMedia(accountId, sendTarget, type, { path, fileName: name, ptt: type === 'audio' });
+      const result = await window.attozap.webchat.sendMedia(accountId, sendTarget, media.type, { path: media.path, fileName: media.fileName, mimetype: media.mimetype, ptt: media.type === 'audio' });
       const resolved = result.resolvedTarget ?? result.remoteJid ?? sendTarget;
-      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: type, text: name, file_name: name, status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { pendingMediaRefresh: true, transportJid: result.transportJid } });
+      appendOptimistic({ id: result.id, account_id: accountId, remote_jid: resolved, direction: 'out', message_type: media.type, text: media.fileName, file_name: media.fileName, mimetype: media.mimetype, status: 'pending', created_at: new Date(epochMs(result.timestamp || Date.now())).toISOString(), metadata: { pendingMediaRefresh: true, originalSize: media.size, transportJid: result.transportJid } });
       setSelected((current: any) => requested ? { jid: resolved, lid: identity?.lid, pn_jid: identity?.pnJid, phone: identity?.phone, display_name: requested } : { ...(current ?? {}), jid: resolved });
-      setNewTarget('');
+      setNewTarget(''); setPendingMedia(null); setPendingDimensions(null);
       void loadChats();
       scheduleReconcile(resolved, 180);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
+  }
+
+  async function handleDrop(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setDragOver(false);
+    const file = Array.from(event.dataTransfer.files || [])[0];
+    if (!file) return;
+    try { await stageBrowserFile(file); }
+    catch (e: any) { setError(e?.message ?? String(e)); }
+  }
+
+  async function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const item = Array.from(event.clipboardData.items || []).find(candidate => candidate.type.startsWith('image/'));
+    if (!item) return;
+    const file = item.getAsFile();
+    if (!file) return;
+    event.preventDefault();
+    try { await stageBrowserFile(new File([file], `imagem-colada-${Date.now()}.${file.type.split('/')[1] || 'png'}`, { type: file.type })); }
+    catch (e: any) { setError(e?.message ?? String(e)); }
   }
 
   async function startRecording() {
@@ -634,22 +719,26 @@ export function WebChatPage({ accounts, reloadAccounts, quickRequest, onQuickReq
         {typedTarget && <div className={`new-chat-resolution ${newTargetState}`} role="status" aria-live="polite"><span>{newTargetState === 'resolving' ? 'A procurar este contacto no WhatsApp…' : newTargetState === 'resolved' && verifiedNewTarget ? `Contacto confirmado · ${verifiedNewTarget.lid ? 'LID' : 'JID'}` : 'Número não localizado ou identidade inválida'}</span>{newTargetState === 'resolved' && verifiedNewTarget?.jid && <code>{verifiedNewTarget.jid}</code>}</div>}
         <div className="conversation-list">{chats.map(chat => <button key={chat.jid} className={selected && sameIdentity(selected, chat) ? 'active' : ''} onClick={() => { setNewTarget(''); setSelected(chat); }}><Avatar chat={chat} onBroken={() => refreshAvatar(chat)}/><span className="grow"><b>{labelFor(chat)}</b><small>{chat.last_text || (chat.last_message_type && chat.last_message_type !== 'text' ? `[${chat.last_message_type}]` : chat.jid)}</small></span><time>{chat.last_message_at ? new Date(chat.last_message_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : ''}</time></button>)}{!chats.length && <div className="empty mini"><MessageCircle size={25}/><p>Nenhuma conversa observada ainda.</p></div>}</div>
       </aside>
-      <section className="webchat-thread-pane">
+      <section className={`webchat-thread-pane ${dragOver ? 'drag-over' : ''}`} onDragOver={event => { event.preventDefault(); setDragOver(true); }} onDragLeave={event => { if (event.currentTarget === event.target) setDragOver(false); }} onDrop={event => void handleDrop(event)}>
         <header><Avatar chat={selected} large onBroken={() => refreshAvatar(selected)}/><div className="grow"><b>{typedTarget ? `Nova conversa · ${typedTarget}` : selected ? labelFor(selected) : 'Selecione uma conversa'}</b><small>{typedTarget || (selected?.phone ? `+${selected.phone}` : selected?.jid) || 'Envie para número/JID/LID para iniciar'}</small></div>{selected && !typedTarget && <div className="thread-header-actions"><button className="icon-button" type="button" disabled={syncingContact} onClick={() => void syncSelectedContact()} title="Sincronizar contacto do WhatsApp" aria-label="Sincronizar contacto do WhatsApp"><RefreshCw size={16} className={syncingContact ? 'spin' : ''}/></button></div>}</header>
+        {dragOver && <div className="webchat-drop-hint" role="status"><ImagePlus size={20}/><b>Solte a mídia para analisar antes de enviar</b><small>Imagens, vídeos, áudios e documentos até 25 MiB</small></div>}
         <div className="message-stream">{messages.map(message => <div key={message.id} className={`chat-bubble ${message.direction === 'out' ? 'out' : 'in'} ${message.status === 'failed' ? 'failed' : ''}`}><MessageBody message={message} onOpenMedia={setLightbox}/><small>{toLocalDateTime(message.created_at)}{message.status === 'failed' ? ` · ${message.error || 'falhou'}` : message.direction === 'out' ? ` · ${messageStatusLabel(message.status)}` : ''}</small></div>)}{selected && !messages.length && <div className="empty mini"><MessageCircle size={26}/><p>Sem mensagens registradas nesta conversa.</p></div>}<div ref={bottom}/></div>
+        {pendingMedia && <div className="media-confirm-panel"><div className="media-confirm-preview">{['image', 'sticker'].includes(pendingMedia.type) && <img src={pendingMedia.dataUrl} alt={pendingMedia.fileName} onLoad={event => setPendingDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}/>} {pendingMedia.type === 'video' && <video src={pendingMedia.dataUrl} controls preload="metadata"/>}{pendingMedia.type === 'audio' && <audio src={pendingMedia.dataUrl} controls/>}{pendingMedia.type === 'document' && <div className="media-confirm-document"><FileIcon size={24}/><b>{pendingMedia.fileName}</b></div>}</div><div className="media-confirm-info"><b>{pendingMedia.fileName}</b><small>{(pendingMedia.size / 1024 / 1024).toFixed(2)} MiB{pendingDimensions ? ` · ${pendingDimensions.width} × ${pendingDimensions.height}px · proporção original preservada` : ''}</small></div><div className="media-confirm-actions"><button type="button" className="button ghost" disabled={busy} onClick={() => { setPendingMedia(null); setPendingDimensions(null); }}><X size={15}/> Cancelar</button><button type="button" className="button primary" disabled={busy || !target} onClick={() => void sendPendingMedia()}><Check size={15}/> Confirmar envio</button></div></div>}
         {showPoll && <div className="rich-composer poll-composer"><div className="rich-composer-header"><b>Enviar enquete</b><button type="button" className="icon-button" onClick={() => setShowPoll(false)} title="Fechar enquete"><X size={15}/></button></div><div className="field grow"><label>Pergunta</label><input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} placeholder="Qual opção você prefere?"/></div><div className="field grow"><label>Opções — uma por linha</label><textarea value={pollOptions ?? ''} onChange={e => setPollOptions(e.target.value)}/></div><button className="button primary" disabled={busy} onClick={() => void sendPoll()}><Vote size={15}/> Enviar enquete</button></div>}
         {showLocation && <div className="rich-composer location-composer"><div className="rich-composer-header"><b><MapPin size={16}/> Enviar localização</b><button type="button" className="icon-button" onClick={() => setShowLocation(false)} title="Fechar localização"><X size={15}/></button></div><div className="rich-grid"><div className="field"><label>Latitude</label><input inputMode="decimal" value={locationLat} onChange={e => setLocationLat(e.target.value)} placeholder="-23.550520"/></div><div className="field"><label>Longitude</label><input inputMode="decimal" value={locationLng} onChange={e => setLocationLng(e.target.value)} placeholder="-46.633308"/></div></div><div className="rich-grid"><div className="field"><label>Nome do local <small>(opcional)</small></label><input value={locationName} onChange={e => setLocationName(e.target.value)} placeholder="Escritório"/></div><div className="field"><label>Endereço <small>(opcional)</small></label><input value={locationAddress} onChange={e => setLocationAddress(e.target.value)} placeholder="Av. Paulista, 1000"/></div></div><button className="button primary" disabled={busy} onClick={() => void sendLocation()}><MapPin size={15}/> Enviar localização</button></div>}
         {showContact && <div className="rich-composer contact-composer"><div className="rich-composer-header"><b><ContactRound size={16}/> Partilhar contacto</b><button type="button" className="icon-button" onClick={() => setShowContact(false)} title="Fechar contacto"><X size={15}/></button></div><div className="rich-grid"><div className="field"><label>Nome</label><input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Nome completo" autoFocus/></div><div className="field"><label>Telefone</label><input inputMode="tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="5511999999999"/></div></div><div className="field"><label>Organização <small>(opcional)</small></label><input value={contactOrg} onChange={e => setContactOrg(e.target.value)} placeholder="Empresa"/></div><button className="button primary" disabled={busy} onClick={() => void sendContact()}><ContactRound size={15}/> Enviar contacto</button></div>}
         <div className="webchat-popovers">
           {showAttachMenu && <div className="webchat-popover attach-popover"><b>Anexar conteúdo</b><div className="popover-actions"><button onClick={() => void attach()}><Paperclip size={15}/> Mídia ou documento</button><button onClick={() => void attach('sticker')}><Smile size={15}/> Figurinha WebP</button><button onClick={() => { setShowPoll(true); setShowLocation(false); setShowContact(false); setShowAttachMenu(false); }}><Vote size={15}/> Enquete</button><button onClick={() => { setShowLocation(true); setShowPoll(false); setShowContact(false); setShowAttachMenu(false); }}><MapPin size={15}/> Localização</button><button onClick={() => { setShowContact(true); setShowPoll(false); setShowLocation(false); setShowAttachMenu(false); }}><ContactRound size={15}/> Contacto</button></div></div>}
           {showEmoji && <div className="webchat-popover emoji-popover"><b>Emojis rápidos</b><div className="emoji-grid">{['😀','😂','😍','👍','🙏','🔥','✅','🎉','👋','💬','❤️','😅'].map(emoji => <button key={emoji} onClick={() => { setText(current => `${current}${emoji}`); setShowEmoji(false); }}>{emoji}</button>)}</div></div>}
+          {showAiMenu && <div className="webchat-popover ai-edit-popover"><div className="rich-composer-header"><b><Sparkles size={15}/> Assistente de texto</b><button type="button" className="icon-button" onClick={() => setShowAiMenu(false)} title="Fechar assistência IA"><X size={14}/></button></div><p>Escolha uma ação para transformar o texto atual. O texto original só é substituído depois que a IA responder.</p><div className="field"><label>Contexto opcional</label><input value={aiContext} onChange={event => setAiContext(event.target.value)} placeholder="Ex.: resposta profissional para um cliente"/></div><div className="ai-edit-actions"><button type="button" onClick={() => void improveText('correct')} disabled={aiBusy || !text.trim()}><Check size={14}/> Corrigir</button><button type="button" onClick={() => void improveText('shorten')} disabled={aiBusy || !text.trim()}>Encurtar</button><button type="button" onClick={() => void improveText('expand')} disabled={aiBusy || !text.trim()}>Aumentar</button><button type="button" onClick={() => void improveText('context')} disabled={aiBusy || !text.trim()}><Wand2 size={14}/> Dar contexto</button></div>{aiBusy && <small className="muted">A IA está a preparar a nova versão…</small>}</div>}
         </div>
         <footer className={recording ? 'recording' : ''}>
           <button className={`icon-button ${showAttachMenu ? 'active' : ''}`} disabled={busy || !target || recording} onClick={() => { setShowAttachMenu(value => !value); setShowEmoji(false); }} title="Anexar"><Plus size={18}/></button>
-          <button className={`icon-button ${showEmoji ? 'active' : ''}`} disabled={busy || !target || recording} onClick={() => { setShowEmoji(value => !value); setShowAttachMenu(false); }} title="Emojis"><Smile size={18}/></button>
+          <button className={`icon-button ${showEmoji ? 'active' : ''}`} disabled={busy || !target || recording} onClick={() => { setShowEmoji(value => !value); setShowAttachMenu(false); setShowAiMenu(false); }} title="Emojis"><Smile size={18}/></button>
+          <button className={`icon-button ${showAiMenu ? 'active' : ''}`} disabled={busy || !target || recording} onClick={() => { setShowAiMenu(value => !value); setShowAttachMenu(false); setShowEmoji(false); }} title="Melhorar texto com IA"><Bot size={18}/></button>
           <button className={`icon-button ${recording ? 'danger' : ''}`} disabled={busy || !target && !recording} onClick={() => recording ? stopRecording() : void startRecording()} title={recording ? 'Parar gravação' : 'Gravar áudio'}>{recording ? <Square size={17}/> : <Mic size={18}/>}</button>
           {recording && <span className="recording-timer">Gravando {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</span>}
-          <textarea ref={composerRef} className="webchat-composer-input" value={text} disabled={recording} onChange={e => setText(e.target.value)} onInput={e => { const element = e.currentTarget; element.style.height = 'auto'; element.style.height = `${Math.min(200, Math.max(72, element.scrollHeight))}px`; }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendText(); } }} placeholder={recording ? 'Gravação em andamento…' : 'Digite uma mensagem…'}/><button className="button primary send-chat" disabled={busy || recording || !text.trim() || !target} onClick={() => void sendText()}>{busy ? <FileUp size={17}/> : <Send size={17}/>} Enviar</button>
+          <textarea ref={composerRef} className="webchat-composer-input" value={text} disabled={recording || aiBusy} onChange={e => setText(e.target.value)} onPaste={handlePaste} onInput={e => { const element = e.currentTarget; element.style.height = 'auto'; element.style.height = `${Math.min(200, Math.max(72, element.scrollHeight))}px`; }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendText(); } }} placeholder={recording ? 'Gravação em andamento…' : 'Digite uma mensagem… Pode colar uma imagem ou arrastá-la para o chat'}/><button className="button primary send-chat" disabled={busy || aiBusy || recording || !text.trim() || !target} onClick={() => void sendText()}>{busy ? <FileUp size={17}/> : <Send size={17}/>} Enviar</button>
         </footer>
       </section>
     </div>

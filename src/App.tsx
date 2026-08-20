@@ -117,7 +117,7 @@ export default function App() {
     .filter(section => section.items.length);
   const active = sections.flatMap(section => section.items).find(item => item.id === view);
   const connected = accounts.filter(account => account.status === 'connected').length;
-  const fullWorkspace = view === 'webchat';
+  const fullWorkspace = view === 'webchat' || view === 'aiChat';
 
   return <div className={`app-shell ${dark ? 'theme-dark' : 'theme-light'} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>

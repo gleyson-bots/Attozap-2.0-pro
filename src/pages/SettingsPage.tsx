@@ -8,17 +8,19 @@ const accents = [
 ];
 
 const aiProviderDefinitions = [
-  { id: 'openai', label: 'OpenAI', keySetting: 'ai_openai_key', modelSetting: 'ai_openai_model', defaultModel: 'gpt-4o-mini' },
+  { id: 'openai', label: 'OpenAI', keySetting: 'ai_openai_key', modelSetting: 'ai_openai_model', imageModelSetting: 'ai_openai_image_model', defaultModel: 'gpt-4o-mini', defaultImageModel: 'gpt-image-1' },
   { id: 'anthropic', label: 'Anthropic', keySetting: 'ai_anthropic_key', modelSetting: 'ai_anthropic_model', defaultModel: 'claude-3-5-haiku-latest' },
   { id: 'nvidia', label: 'NVIDIA NIM', keySetting: 'ai_nvidia_key', modelSetting: 'ai_nvidia_model', defaultModel: 'meta/llama-3.1-8b-instruct' },
   { id: 'groq', label: 'Groq', keySetting: 'ai_groq_key', modelSetting: 'ai_groq_model', defaultModel: 'llama-3.3-70b-versatile' },
-  { id: 'openrouter', label: 'OpenRouter', keySetting: 'ai_openrouter_key', modelSetting: 'ai_openrouter_model', defaultModel: 'openai/gpt-4o-mini' },
+  { id: 'openrouter', label: 'OpenRouter', keySetting: 'ai_openrouter_key', modelSetting: 'ai_openrouter_model', imageModelSetting: 'ai_openrouter_image_model', defaultModel: 'openai/gpt-4o-mini', defaultImageModel: 'openai/gpt-image-1' },
   { id: 'poolside', label: 'Poolside', keySetting: 'ai_poolside_key', modelSetting: 'ai_poolside_model', baseSetting: 'ai_poolside_base_url', defaultModel: 'model' },
   { id: 'xai', label: 'xAI / Grok', keySetting: 'ai_xai_key', modelSetting: 'ai_xai_model', defaultModel: 'grok-4-fast-non-reasoning' },
+  { id: 'pollinations', label: 'Pollinations AI', keySetting: 'ai_pollinations_key', modelSetting: 'ai_pollinations_model', imageModelSetting: 'ai_pollinations_image_model', defaultModel: 'openai', defaultImageModel: 'flux' },
+  { id: 'huggingface', label: 'Hugging Face Inference', keySetting: 'ai_huggingface_key', modelSetting: 'ai_huggingface_model', imageModelSetting: 'ai_huggingface_image_model', defaultModel: 'meta-llama/Llama-3.1-8B-Instruct', defaultImageModel: 'black-forest-labs/FLUX.1-dev' },
 ];
-type AiConfig = { key: string; model: string; base: string };
+type AiConfig = { key: string; model: string; base: string; imageModel: string };
 type AiConfigMap = Record<string, AiConfig>;
-const initialAiConfig = (): AiConfigMap => Object.fromEntries(aiProviderDefinitions.map(provider => [provider.id, { key: '', model: provider.defaultModel, base: '' }]));
+const initialAiConfig = (): AiConfigMap => Object.fromEntries(aiProviderDefinitions.map(provider => [provider.id, { key: '', model: provider.defaultModel, base: '', imageModel: provider.defaultImageModel || '' }]));
 
 export function applyUiPreferences(prefs: { fontScale?: string; accent?: string; density?: string }) {
   const root = document.documentElement;
@@ -42,12 +44,12 @@ export function SettingsPage({ accounts, uiMode = 'basic', onUiModeChange }: { a
     void (async () => {
       const [font, color, space, storedMode, secure, storedAi] = await Promise.all([
         window.attozap.settings.get('ui_font_scale'), window.attozap.settings.get('ui_accent'), window.attozap.settings.get('ui_density'), window.attozap.settings.get('ui_mode'),
-        window.attozap.secure.available(), Promise.all(aiProviderDefinitions.map(async provider => ({ id: provider.id, key: await window.attozap.secure.get(provider.keySetting), model: await window.attozap.settings.get(provider.modelSetting), base: provider.baseSetting ? await window.attozap.settings.get(provider.baseSetting) : '' }))),
+        window.attozap.secure.available(), Promise.all(aiProviderDefinitions.map(async provider => ({ id: provider.id, key: await window.attozap.secure.get(provider.keySetting), model: await window.attozap.settings.get(provider.modelSetting), imageModel: provider.imageModelSetting ? await window.attozap.settings.get(provider.imageModelSetting) : '', base: provider.baseSetting ? await window.attozap.settings.get(provider.baseSetting) : '' }))),
       ]);
       const prefs = { fontScale: font || '112', accent: color || 'violet', density: space || 'comfortable' };
       setFontScale(prefs.fontScale); setAccent(prefs.accent); setDensity(prefs.density); applyUiPreferences(prefs);
       setMode(storedMode === 'advanced' ? 'advanced' : 'basic'); setSecureAvailable(Boolean(secure));
-      setAiConfigs(Object.fromEntries(storedAi.map(item => [item.id, { key: item.key || '', model: item.model || aiProviderDefinitions.find(provider => provider.id === item.id)?.defaultModel || '', base: item.base || '' }])));
+      setAiConfigs(Object.fromEntries(storedAi.map(item => { const provider = aiProviderDefinitions.find(row => row.id === item.id); return [item.id, { key: item.key || '', model: item.model || provider?.defaultModel || '', imageModel: item.imageModel || provider?.defaultImageModel || '', base: item.base || '' }]; })));
     })().catch(error => setSaved(error?.message ?? String(error)));
   }, []);
 
@@ -58,9 +60,9 @@ export function SettingsPage({ accounts, uiMode = 'basic', onUiModeChange }: { a
   async function saveAi() {
     if (!secureAvailable && Object.values(aiConfigs).some(config => config.key.trim())) throw new Error('O armazenamento protegido do sistema não está disponível. Não é seguro salvar novas API keys neste computador.');
     const writes = aiProviderDefinitions.flatMap(provider => {
-      const config = aiConfigs[provider.id] ?? { key: '', model: provider.defaultModel, base: '' };
+      const config = aiConfigs[provider.id] ?? { key: '', model: provider.defaultModel, imageModel: provider.defaultImageModel || '', base: '' };
       const baseWrites = provider.baseSetting ? [window.attozap.settings.set(provider.baseSetting, config.base.trim())] : [];
-      return [window.attozap.secure.set(provider.keySetting, config.key.trim()), window.attozap.settings.set(provider.modelSetting, config.model.trim()), ...baseWrites];
+      return [window.attozap.secure.set(provider.keySetting, config.key.trim()), window.attozap.settings.set(provider.modelSetting, config.model.trim()), ...(provider.imageModelSetting ? [window.attozap.settings.set(provider.imageModelSetting, config.imageModel.trim())] : []), ...baseWrites];
     });
     await Promise.all(writes);
     setSaved('Provedores de IA salvos no armazenamento protegido do sistema.'); setTimeout(() => setSaved(''), 2500);
@@ -83,7 +85,7 @@ export function SettingsPage({ accounts, uiMode = 'basic', onUiModeChange }: { a
 
     <section className="card"><div className="card-head"><div><h3>Provedores de IA local</h3><p>As chaves ficam protegidas pelo sistema operacional e não entram nos diagnósticos. O chat IA usa uma conexão direta do processo principal.</p></div><Bot size={18}/></div>
       <div className={`notice ${secureAvailable ? 'success' : 'error'}`}><ShieldCheck size={14}/> {secureAvailable ? 'Armazenamento protegido disponível. No Windows, as chaves são vinculadas à proteção do usuário local.' : 'Armazenamento protegido indisponível. O ATTOZAP não permitirá salvar novas API keys.'}</div>
-      <div className="ai-provider-grid">{aiProviderDefinitions.map(provider => { const config = aiConfigs[provider.id] ?? { key: '', model: provider.defaultModel, base: '' }; return <div className="ai-provider-card" key={provider.id}><div className="builder-title"><KeyRound size={15}/><b>{provider.label}</b></div><div className="field"><label>API Key</label><input type="password" value={config.key} onChange={event => updateAi(provider.id, { key: event.target.value })} placeholder="Chave protegida"/></div><div className="field"><label>Modelo</label><input value={config.model} onChange={event => updateAi(provider.id, { model: event.target.value })} placeholder={provider.defaultModel}/></div>{provider.baseSetting && <div className="field"><label>URL do deployment</label><input value={config.base} onChange={event => updateAi(provider.id, { base: event.target.value })} placeholder="https://seu-deployment"/></div>}</div>; })}</div>
+      <div className="ai-provider-grid">{aiProviderDefinitions.map(provider => { const config = aiConfigs[provider.id] ?? { key: '', model: provider.defaultModel, imageModel: provider.defaultImageModel || '', base: '' }; return <div className="ai-provider-card" key={provider.id}><div className="builder-title"><KeyRound size={15}/><b>{provider.label}</b></div><div className="field"><label>API Key</label><input type="password" value={config.key} onChange={event => updateAi(provider.id, { key: event.target.value })} placeholder="Chave protegida"/></div><div className="field"><label>Modelo de texto</label><input value={config.model} onChange={event => updateAi(provider.id, { model: event.target.value })} placeholder={provider.defaultModel}/></div>{provider.imageModelSetting && <div className="field"><label>Modelo de imagem</label><input value={config.imageModel} onChange={event => updateAi(provider.id, { imageModel: event.target.value })} placeholder={provider.defaultImageModel}/></div>}{provider.baseSetting && <div className="field"><label>URL do deployment</label><input value={config.base} onChange={event => updateAi(provider.id, { base: event.target.value })} placeholder="https://seu-deployment"/></div>}</div>; })}</div>
       <button className="button primary" onClick={() => void saveAi()}>Salvar provedores de IA</button>
     </section>
 

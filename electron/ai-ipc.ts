@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import type { AttozapDatabase } from './database.js';
 import type { LicenseService } from './license-service.js';
-import { chatWithAi, listAiProviders, type AiChatInput } from './ai-service.js';
+import { chatWithAi, generateAiImage, listAiProviders, rewriteAiText, type AiChatInput, type AiImageInput, type AiRewriteInput } from './ai-service.js';
 
 export function registerAiIpc(db: AttozapDatabase, license: LicenseService) {
   const requireLicense = () => {
@@ -13,5 +13,15 @@ export function registerAiIpc(db: AttozapDatabase, license: LicenseService) {
     requireLicense();
     if (!input || typeof input !== 'object') throw new Error('Pedido IA inválido');
     return chatWithAi(db, input);
+  });
+  ipcMain.handle('ai:rewrite', (_event, input: AiRewriteInput) => {
+    requireLicense();
+    if (!input || typeof input !== 'object') throw new Error('Pedido de edição IA inválido');
+    return rewriteAiText(db, input);
+  });
+  ipcMain.handle('ai:image', (_event, input: AiImageInput) => {
+    requireLicense();
+    if (!input || typeof input !== 'object') throw new Error('Pedido de imagem IA inválido');
+    return generateAiImage(db, input);
   });
 }
