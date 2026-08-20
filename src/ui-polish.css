@@ -225,3 +225,8 @@ pre,code,.identity-values code{max-width:100%}
 
 /* Keep the main WebChat viewport from growing beyond the desktop window. */
 @media(min-width:821px){.page-content-full{min-height:0}.webchat-full{min-height:0}.webchat-workspace{min-height:0}}
+
+/* Contact sync — keeps the LID visible as a technical alias only when no public name exists. */
+.thread-header-actions{display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;margin-left:10px}.thread-header-actions .icon-button{width:36px;height:36px}.thread-header-actions .spin{animation:attozap-spin .8s linear infinite}@keyframes attozap-spin{to{transform:rotate(360deg)}}
+@media(max-width:560px){.thread-header-actions{margin-left:4px}.thread-header-actions .icon-button{width:32px;height:32px}.webchat-thread-pane>header{padding:0 10px}.webchat-thread-pane>header small{max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+@media(prefers-reduced-motion:reduce){.thread-header-actions .spin{animation:none}}

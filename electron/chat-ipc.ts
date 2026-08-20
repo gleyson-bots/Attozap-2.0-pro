@@ -11,6 +11,7 @@ export function registerChatIpc(chat: ChatService, license: LicenseService) {
   ipcMain.handle('webchat:list', (_event, accountId: string, search = '') => chat.listChats(accountId, search));
   ipcMain.handle('webchat:messages', (_event, accountId: string, remoteJid: string, limit = 250) => chat.listMessages(accountId, remoteJid, limit));
   ipcMain.handle('webchat:refresh-profile', (_event, accountId: string, remoteJid: string) => chat.refreshProfile(accountId, remoteJid));
+  ipcMain.handle('webchat:sync-contact', (_event, accountId: string, remoteJid: string, localName?: string) => chat.syncContact(accountId, remoteJid, localName));
   ipcMain.handle('webchat:message-status', (_event, accountId: string, messageId: string) => chat.messageStatus(accountId, messageId));
   const requireWebChat = () => {
     requireLicense();

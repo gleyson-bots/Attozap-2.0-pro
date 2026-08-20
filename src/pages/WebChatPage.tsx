@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, File, FileUp, Maximize2, MessageCircle, Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings2, Smile, Square, Vote, Wifi, X } from 'lucide-react';
 import { toLocalDateTime } from '../lib';
 
-function labelFor(chat: any) { return chat?.display_name || chat?.name || (chat?.phone ? `+${chat.phone}` : chat?.jid || 'Conversa'); }
+function labelFor(chat: any) {
+  const candidates = [chat?.display_name, chat?.contact_name, chat?.name].map(value => String(value ?? '').trim());
+  const human = candidates.find(value => value && !value.includes('@') && !/^\+?[\d\s().-]{6,}$/.test(value));
+  return human || (chat?.phone ? `+${chat.phone}` : chat?.is_group ? (chat?.jid || 'Grupo') : 'Contacto a sincronizar');
+}
 function fileName(path: string) { return path.split(/[\\/]/).pop() ?? path; }
 function aliases(chat: any) { return new Set([chat?.jid, chat?.lid, chat?.pn_jid, chat?.remote_jid, chat?.remoteJid].filter(Boolean)); }
 function sameIdentity(a: any, b: any) { const aa = aliases(a); return [...aliases(b)].some(value => aa.has(value)); }
@@ -110,6 +114,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState('Sim\nNão');
   const [busy, setBusy] = useState(false);
+  const [syncingContact, setSyncingContact] = useState(false);
   const [error, setError] = useState('');
   const [newTargetState, setNewTargetState] = useState<'idle' | 'resolving' | 'resolved' | 'invalid'>('idle');
   const [resolvedNewTarget, setResolvedNewTarget] = useState<any | null>(null);
@@ -238,10 +243,26 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       const identity = profile.identity ?? {};
       const probe = { jid: profile.jid, lid: identity.lid, pn_jid: identity.pnJid };
       setSelected((current: any) => current && sameIdentity(current, probe)
-        ? { ...current, profile_url: profile.profilePictureUrl || current.profile_url, lid: identity.lid ?? current.lid, pn_jid: identity.pnJid ?? current.pn_jid }
+        ? { ...current, display_name: profile.displayName || current.display_name, profile_url: profile.profilePictureUrl || current.profile_url, phone: profile.phone || current.phone, lid: identity.lid ?? current.lid, pn_jid: identity.pnJid ?? current.pn_jid }
         : current);
       void loadChats();
     }).catch(() => undefined);
+  }
+
+  async function syncSelectedContact() {
+    if (!accountId || !selected?.jid || !window.attozap.webchat.syncContact) return;
+    setSyncingContact(true); setError('');
+    try {
+      const profile = await window.attozap.webchat.syncContact(accountId, selected.jid);
+      const identity = profile?.identity ?? {};
+      const probe = { jid: profile?.jid, lid: identity.lid, pn_jid: identity.pnJid };
+      setSelected((current: any) => current && sameIdentity(current, probe)
+        ? { ...current, display_name: profile?.displayName || current.display_name, profile_url: profile?.profilePictureUrl || current.profile_url, phone: profile?.phone || current.phone, lid: identity.lid ?? current.lid, pn_jid: identity.pnJid ?? current.pn_jid }
+        : current);
+      await loadChats();
+      if (!profile?.synced && profile?.syncReason) setError(profile.syncReason);
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setSyncingContact(false); }
   }
 
   async function loadMessages(jid = selected?.jid, autoScroll = true) {
@@ -296,7 +317,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       const identity = profile.identity ?? {};
       const probe = { jid: profile.jid, lid: identity.lid, pn_jid: identity.pnJid };
       setSelected((current: any) => current && sameIdentity(current, probe)
-        ? { ...current, profile_url: profile.profilePictureUrl || current.profile_url, lid: identity.lid ?? current.lid, pn_jid: identity.pnJid ?? current.pn_jid }
+        ? { ...current, display_name: profile.displayName || current.display_name, profile_url: profile.profilePictureUrl || current.profile_url, phone: profile.phone || current.phone, lid: identity.lid ?? current.lid, pn_jid: identity.pnJid ?? current.pn_jid }
         : current);
       void loadChats();
     }).catch(() => undefined);
@@ -345,7 +366,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
       if (!selected) return;
       const identity = payload?.identity ?? {};
       const probe = { jid: payload?.jid ?? identity.jid, lid: identity.lid, pn_jid: identity.pnJid };
-      if (sameIdentity(selected, probe)) setSelected((current: any) => ({ ...current, display_name: payload?.pushName || current?.display_name, profile_url: payload?.profilePictureUrl || current?.profile_url, lid: identity.lid ?? current?.lid, pn_jid: identity.pnJid ?? current?.pn_jid }));
+      if (sameIdentity(selected, probe)) setSelected((current: any) => ({ ...current, display_name: payload?.pushName || current?.display_name, profile_url: payload?.profilePictureUrl || current?.profile_url, phone: identity.phone || current?.phone, lid: identity.lid ?? current?.lid, pn_jid: identity.pnJid ?? current?.pn_jid }));
     });
     return () => {
       offIncoming?.(); offStatus?.(); offProfile?.();
@@ -526,7 +547,7 @@ export function WebChatPage({ accounts, reloadAccounts }: { accounts: any[]; rel
         <div className="conversation-list">{chats.map(chat => <button key={chat.jid} className={selected && sameIdentity(selected, chat) ? 'active' : ''} onClick={() => { setNewTarget(''); setSelected(chat); }}><Avatar chat={chat} onBroken={() => refreshAvatar(chat)}/><span className="grow"><b>{labelFor(chat)}</b><small>{chat.last_text || (chat.last_message_type && chat.last_message_type !== 'text' ? `[${chat.last_message_type}]` : chat.jid)}</small></span><time>{chat.last_message_at ? new Date(chat.last_message_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : ''}</time></button>)}{!chats.length && <div className="empty mini"><MessageCircle size={25}/><p>Nenhuma conversa observada ainda.</p></div>}</div>
       </aside>
       <section className="webchat-thread-pane">
-        <header><Avatar chat={selected} large onBroken={() => refreshAvatar(selected)}/><div className="grow"><b>{typedTarget ? `Nova conversa · ${typedTarget}` : selected ? labelFor(selected) : 'Selecione uma conversa'}</b><small>{typedTarget || selected?.jid || 'Envie para número/JID/LID para iniciar'}</small></div></header>
+        <header><Avatar chat={selected} large onBroken={() => refreshAvatar(selected)}/><div className="grow"><b>{typedTarget ? `Nova conversa · ${typedTarget}` : selected ? labelFor(selected) : 'Selecione uma conversa'}</b><small>{typedTarget || (selected?.phone ? `+${selected.phone}` : selected?.jid) || 'Envie para número/JID/LID para iniciar'}</small></div>{selected && !typedTarget && <div className="thread-header-actions"><button className="icon-button" type="button" disabled={syncingContact} onClick={() => void syncSelectedContact()} title="Sincronizar contacto do WhatsApp" aria-label="Sincronizar contacto do WhatsApp"><RefreshCw size={16} className={syncingContact ? 'spin' : ''}/></button></div>}</header>
         <div className="message-stream">{messages.map(message => <div key={message.id} className={`chat-bubble ${message.direction === 'out' ? 'out' : 'in'} ${message.status === 'failed' ? 'failed' : ''}`}><MessageBody message={message} onOpenMedia={setLightbox}/><small>{toLocalDateTime(message.created_at)}{message.status === 'failed' ? ` · ${message.error || 'falhou'}` : message.direction === 'out' ? ` · ${messageStatusLabel(message.status)}` : ''}</small></div>)}{selected && !messages.length && <div className="empty mini"><MessageCircle size={26}/><p>Sem mensagens registradas nesta conversa.</p></div>}<div ref={bottom}/></div>
         {showPoll && <div className="poll-composer"><div className="field grow"><label>Pergunta</label><input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} placeholder="Qual opção você prefere?"/></div><div className="field grow"><label>Opções — uma por linha</label><textarea value={pollOptions} onChange={e => setPollOptions(e.target.value)}/></div><button className="button primary" disabled={busy} onClick={() => void sendPoll()}><Vote size={15}/> Enviar enquete</button></div>}
         <div className="webchat-popovers">

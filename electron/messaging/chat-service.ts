@@ -14,6 +14,13 @@ function digits(value: string) { return value.replace(/\D/g, ''); }
 function isJid(value: string) { return value.includes('@'); }
 function at(value: unknown) { const parsed = Date.parse(String(value ?? '')); return Number.isFinite(parsed) ? parsed : 0; }
 function jsonObject(value: unknown) { try { const parsed = JSON.parse(String(value ?? '{}')); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } }
+function usableName(value: unknown) {
+  const text = String(value ?? '').trim();
+  if (!text || text.includes('@')) return '';
+  if (/^\+?[\d\s().-]{6,}$/.test(text)) return '';
+  return text;
+}
+function firstUsableName(...values: unknown[]) { return values.map(usableName).find(Boolean) ?? ''; }
 
 export class ChatService {
   constructor(private readonly db: AttozapDatabase, private readonly accounts: AccountManager, private readonly license: LicenseService) {
@@ -144,7 +151,8 @@ export class ChatService {
         COALESCE(i.lid, c.lid) AS identity_lid,
         COALESCE(i.pn_jid, c.pn_jid) AS identity_pn_jid,
         i.push_name AS identity_push_name,
-        COALESCE(g.subject, i.push_name, c.name) AS display_name,
+        lc.name AS contact_name,
+        COALESCE(g.subject, NULLIF(lc.name,''), NULLIF(i.push_name,''), NULLIF(c.name,''), NULLIF(c.phone,''), c.jid) AS display_name,
         (SELECT text FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid OR m.remote_jid=i.canonical_jid OR m.remote_jid=i.lid OR m.remote_jid=i.pn_jid) ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_text,
         (SELECT message_type FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid OR m.remote_jid=i.canonical_jid OR m.remote_jid=i.lid OR m.remote_jid=i.pn_jid) ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_message_type,
         (SELECT direction FROM message_log m WHERE m.account_id=c.account_id AND (m.remote_jid=c.jid OR m.remote_jid=c.lid OR m.remote_jid=c.pn_jid OR m.remote_jid=i.canonical_jid OR m.remote_jid=i.lid OR m.remote_jid=i.pn_jid) ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_direction,
@@ -152,7 +160,8 @@ export class ChatService {
       FROM chat_cache c
       LEFT JOIN group_cache g ON g.account_id=c.account_id AND g.group_id=c.jid
       LEFT JOIN wa_identities i ON i.account_id=c.account_id AND (i.canonical_jid=c.jid OR i.lid=c.jid OR i.pn_jid=c.jid)
-      WHERE c.account_id=? AND (?='' OR COALESCE(g.subject,i.push_name,c.name,'') LIKE ? OR c.jid LIKE ? OR COALESCE(c.phone,'') LIKE ?)
+      LEFT JOIN contacts lc ON lc.phone = c.phone AND c.is_group=0
+      WHERE c.account_id=? AND (?='' OR COALESCE(g.subject,lc.name,i.push_name,c.name,c.phone,'') LIKE ? OR c.jid LIKE ? OR COALESCE(c.phone,'') LIKE ?)
       ORDER BY c.last_message_at DESC, c.jid ASC
       LIMIT 500
     `).all(accountId, search.trim(), term, term, term) as any[];
@@ -165,7 +174,8 @@ export class ChatService {
         jid: key,
         lid: row.identity_lid ?? row.lid ?? (String(row.jid).endsWith('@lid') ? row.jid : null),
         pn_jid: row.identity_pn_jid ?? row.pn_jid ?? (String(row.jid).endsWith('@s.whatsapp.net') ? row.jid : null),
-        display_name: row.display_name || row.identity_push_name || row.name || row.phone || key,
+        contact_name: usableName(row.contact_name) || null,
+        display_name: firstUsableName(row.contact_name, row.identity_push_name, row.name) || (row.phone ? `+${row.phone}` : key),
       };
       delete normalized.identity_jid;
       delete normalized.identity_lid;
@@ -183,7 +193,8 @@ export class ChatService {
         pn_jid: latest.pn_jid ?? older.pn_jid,
         phone: latest.phone ?? older.phone,
         name: latest.name ?? older.name,
-        display_name: latest.display_name ?? older.display_name,
+        contact_name: latest.contact_name ?? older.contact_name,
+        display_name: firstUsableName(latest.display_name, older.display_name, latest.contact_name, older.contact_name) || (latest.phone ? `+${latest.phone}` : older.phone ? `+${older.phone}` : key),
         profile_url: latest.profile_url ?? older.profile_url,
         message_count: Number(previous.message_count || 0) + Number(normalized.message_count || 0),
       });
@@ -203,32 +214,68 @@ export class ChatService {
     const canonical = identity?.jid ?? remoteJid;
     profileUrl = await this.cacheProfilePicture(profileUrl);
     const existing = this.db.prepare(`
-      SELECT jid FROM chat_cache
+      SELECT jid, name, phone FROM chat_cache
       WHERE account_id=? AND (jid IN (${aliases.map(() => '?').join(',')}) OR lid IN (${aliases.map(() => '?').join(',')}) OR pn_jid IN (${aliases.map(() => '?').join(',')}))
       LIMIT 1
-    `).get(accountId, ...aliases, ...aliases, ...aliases) as { jid?: string } | undefined;
+    `).get(accountId, ...aliases, ...aliases, ...aliases) as { jid?: string; name?: string | null; phone?: string | null } | undefined;
+    const identityRow = this.db.prepare(`
+      SELECT push_name FROM wa_identities
+      WHERE account_id=? AND (canonical_jid IN (${aliases.map(() => '?').join(',')}) OR lid IN (${aliases.map(() => '?').join(',')}) OR pn_jid IN (${aliases.map(() => '?').join(',')}))
+      ORDER BY CASE WHEN canonical_jid=? THEN 0 WHEN lid=? THEN 1 WHEN pn_jid=? THEN 2 ELSE 3 END, rowid DESC
+      LIMIT 1
+    `).get(accountId, ...aliases, ...aliases, ...aliases, remoteJid, remoteJid, remoteJid) as { push_name?: string | null } | undefined;
+    const resolvedPhone = identity?.phone ?? existing?.phone ?? undefined;
+    const localContact = resolvedPhone ? this.db.prepare(`SELECT name FROM contacts WHERE phone=? LIMIT 1`).get(resolvedPhone) as { name?: string | null } | undefined : undefined;
+    const displayName = firstUsableName(localContact?.name, identityRow?.push_name, existing?.name) || (resolvedPhone ? `+${resolvedPhone}` : undefined);
     const now = new Date().toISOString();
     if (identity?.jid) upsertWaIdentity(this.db, accountId, identity, 'webchat.profile');
     if (existing?.jid) {
       this.db.prepare(`
         UPDATE chat_cache SET
+          name=COALESCE(?,name),
           profile_url=COALESCE(?,profile_url),
           lid=COALESCE(?,lid),
           pn_jid=COALESCE(?,pn_jid),
           phone=COALESCE(?,phone)
         WHERE account_id=? AND jid=?
-      `).run(profileUrl ?? null, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, accountId, existing.jid);
+      `).run(displayName ?? null, profileUrl ?? null, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, accountId, existing.jid);
     } else {
       this.db.prepare(`
         INSERT OR IGNORE INTO chat_cache (account_id,jid,lid,pn_jid,phone,name,profile_url,is_group,message_count,first_message_at,last_message_at)
         VALUES (?,?,?,?,?,?,?,0,0,?,?)
-      `).run(accountId, canonical, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, remoteJid, profileUrl ?? null, now, now);
+      `).run(accountId, canonical, identity?.lid ?? null, identity?.pnJid ?? null, identity?.phone ?? null, displayName ?? remoteJid, profileUrl ?? null, now, now);
+    }
+    if (resolvedPhone && usableName(displayName)) {
+      this.db.prepare(`
+        INSERT INTO contacts (phone, name, variables_json) VALUES (?, ?, '{}')
+        ON CONFLICT(phone) DO UPDATE SET name=COALESCE(excluded.name, contacts.name), updated_at=CURRENT_TIMESTAMP
+      `).run(resolvedPhone, displayName);
     }
     return {
       jid: canonical,
       profilePictureUrl: profileUrl,
+      displayName,
+      phone: resolvedPhone,
+      synced: Boolean(resolvedPhone && usableName(displayName)),
       identity,
     };
+  }
+
+  async syncContact(accountId: string, remoteJid: string, localName?: string) {
+    const profile = await this.refreshProfile(accountId, remoteJid);
+    const name = firstUsableName(localName, profile.displayName);
+    if (!profile.phone || !name) {
+      return { ...profile, synced: false, syncReason: 'O WhatsApp não forneceu um nome público para este contacto. Pode definir um nome local no gestor de contactos.' };
+    }
+    this.db.prepare(`
+      INSERT INTO contacts (phone, name, variables_json) VALUES (?, ?, '{}')
+      ON CONFLICT(phone) DO UPDATE SET name=excluded.name, updated_at=CURRENT_TIMESTAMP
+    `).run(profile.phone, name);
+    this.db.prepare(`
+      UPDATE chat_cache SET name=?
+      WHERE account_id=? AND (jid=? OR lid=? OR pn_jid=? OR phone=?)
+    `).run(name, accountId, profile.jid, profile.identity?.lid ?? null, profile.identity?.pnJid ?? null, profile.phone);
+    return { ...profile, displayName: name, synced: true, syncReason: undefined };
   }
 
   listMessages(accountId: string, remoteJid: string, limit = 250) {
