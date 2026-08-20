@@ -216,12 +216,13 @@ pre,code,.identity-values code{max-width:100%}
 .chat-sticker-trigger:hover{background:color-mix(in srgb,var(--accent) 10%,var(--surface-2))}
 .chat-text.muted{min-height:18px}
 .chat-media-pending{display:flex;align-items:center;justify-content:center;min-width:150px;min-height:72px;padding:12px 16px;border:1px dashed color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:11px;background:color-mix(in srgb,var(--accent) 5%,var(--surface-2));color:var(--muted);font-size:10px;line-height:1.4;text-align:center}
-.webchat-thread-pane>footer{display:grid;grid-template-columns:auto auto auto minmax(0,1fr) auto;align-items:end}
-.webchat-thread-pane>footer .webchat-composer-input{width:100%;min-width:0;box-sizing:border-box}
-.webchat-thread-pane>footer .send-chat{min-width:86px;justify-content:center}
-.webchat-thread-pane>footer.recording{grid-template-columns:auto auto auto auto minmax(0,1fr) auto}
-@media(max-width:820px){.webchat-thread-pane>footer{grid-template-columns:auto auto auto minmax(0,1fr) auto}.webchat-thread-pane>footer.recording{grid-template-columns:auto auto auto auto minmax(0,1fr) auto}.webchat-thread-pane>footer .webchat-composer-input{min-height:64px}}
-@media(max-width:560px){.webchat-thread-pane>footer{grid-template-columns:auto auto auto minmax(0,1fr);gap:7px}.webchat-thread-pane>footer .webchat-composer-input{grid-column:1 / -1;grid-row:2;min-height:64px}.webchat-thread-pane>footer .send-chat{grid-column:4;grid-row:1;min-width:0;padding-inline:11px}.webchat-thread-pane>footer.recording{grid-template-columns:auto auto auto auto minmax(0,1fr)}.webchat-thread-pane>footer.recording .webchat-composer-input{grid-column:1 / -1;grid-row:2}.chat-sticker-trigger{min-width:100px;min-height:100px}.chat-sticker{width:min(180px,100%);max-height:180px}}
+.webchat-thread-pane>footer{display:grid;grid-template-columns:auto auto auto auto minmax(0,1fr) auto;align-items:end;gap:8px;width:100%;box-sizing:border-box}
+.webchat-thread-pane>footer .webchat-composer-input{width:100%;min-width:0;min-height:72px;max-height:200px;box-sizing:border-box;resize:none;overflow-y:auto}
+.webchat-thread-pane>footer .send-chat{grid-column:6;min-width:86px;justify-content:center;white-space:nowrap}
+.webchat-thread-pane>footer.recording{grid-template-columns:auto auto auto auto auto minmax(0,1fr) auto}
+.webchat-thread-pane>footer.recording .send-chat{grid-column:7}
+@media(max-width:820px){.webchat-thread-pane>footer{grid-template-columns:auto auto auto auto minmax(0,1fr) auto}.webchat-thread-pane>footer.recording{grid-template-columns:auto auto auto auto auto minmax(0,1fr) auto}.webchat-thread-pane>footer .webchat-composer-input{min-height:64px}}
+@media(max-width:560px){.webchat-thread-pane>footer{grid-template-columns:repeat(4,minmax(34px,auto)) minmax(0,1fr);gap:7px}.webchat-thread-pane>footer .webchat-composer-input{grid-column:1 / -1;grid-row:2;min-height:64px}.webchat-thread-pane>footer .send-chat{grid-column:5;grid-row:1;min-width:0;padding-inline:11px}.webchat-thread-pane>footer.recording{grid-template-columns:repeat(4,minmax(34px,auto)) minmax(0,1fr)}.webchat-thread-pane>footer.recording .webchat-composer-input{grid-column:1 / -1;grid-row:2}.webchat-thread-pane>footer.recording .send-chat{grid-column:5;grid-row:1}.webchat-thread-pane>footer .recording-timer{grid-column:1 / -1;grid-row:3;justify-self:start}.chat-sticker-trigger{min-width:100px;min-height:100px}.chat-sticker{width:min(180px,100%);max-height:180px}}
 
 /* Keep the main WebChat viewport from growing beyond the desktop window. */
 @media(min-width:821px){.page-content-full{min-height:0}.webchat-full{min-height:0}.webchat-workspace{min-height:0}}
