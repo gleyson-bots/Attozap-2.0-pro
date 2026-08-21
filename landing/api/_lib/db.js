@@ -5,7 +5,7 @@ let schemaPromise;
 
 export function db() {
   if (!client) {
-    if (!process.env.TURSO_DATABASE_URL) throw new Error('TURSO_DATABASE_URL não configurada');
+    if (!process.env.TURSO_DATABASE_URL) throw Object.assign(new Error('Banco de dados do portal não configurado'), { statusCode: 503 });
     client = createClient({
       url: process.env.TURSO_DATABASE_URL,
       authToken: process.env.TURSO_AUTH_TOKEN || undefined,
@@ -96,9 +96,16 @@ const schema = [
     metadata_json TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS stripe_events (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    event_created INTEGER,
+    processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
   `CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id,status)`,
   `CREATE INDEX IF NOT EXISTS idx_licenses_user ON licenses(user_id,status)`,
+  `CREATE INDEX IF NOT EXISTS idx_licenses_subscription ON licenses(subscription_id)`,
   `CREATE INDEX IF NOT EXISTS idx_releases_channel ON releases(channel,active,published_at DESC)`,
 ];
 
