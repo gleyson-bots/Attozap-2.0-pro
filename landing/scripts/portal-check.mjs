@@ -10,9 +10,9 @@ const read = path => readFileSync(resolve(root, path), 'utf8');
 const requiredFiles = [
   'index.html', 'login.html', 'cadastro.html', 'portal.html', 'admin.html',
   'login/index.html', 'cadastro/index.html', 'portal/index.html', 'admin/index.html',
-  'src/entry.jsx', 'src/portal.jsx', 'src/portal.css', 'src/portal-theme.css', 'src/portal-enhance.js', 'src/portal-enhance.css',
+  'src/entry.jsx', 'src/portal.jsx', 'src/portal.css', 'src/portal-theme.css', 'src/portal-enhance.js', 'src/portal-enhance.css', 'src/recaptcha.js', 'src/recaptcha.css',
   'api/auth.js', 'api/customer.js', 'api/admin.js', 'api/stripe-webhook.js', 'api/mercadopago-webhook.js', 'api/health.js',
-  'api/_lib/auth.js', 'api/_lib/db.js', 'api/_lib/email.js', 'api/_lib/http.js', 'api/_lib/license.js', 'api/_lib/mercadopago.js',
+  'api/_lib/auth.js', 'api/_lib/db.js', 'api/_lib/email.js', 'api/_lib/http.js', 'api/_lib/license.js', 'api/_lib/mercadopago.js', 'api/_lib/recaptcha.js',
   '../api/auth.js', '../api/customer.js', '../api/admin.js', '../api/stripe-webhook.js', '../api/mercadopago-webhook.js', '../api/health.js',
   'vercel.json', '../vercel.json',
 ];
@@ -25,12 +25,19 @@ assert(entry.includes("pathname.startsWith('/admin/')"), 'Bootstrap não normali
 assert(entry.includes("replace(/\\.html$/i"), 'Bootstrap não normaliza páginas físicas .html.');
 assert(entry.indexOf("await import('./portal.jsx')") < entry.indexOf("await import('./portal-theme.css')"), 'portal-theme.css deve carregar depois do CSS estrutural.');
 assert(entry.includes("await import('./portal-enhance.js')"), 'Bootstrap precisa aplicar a navegação comercial pós-cadastro.');
+assert(entry.includes("await import('./recaptcha.js')"), 'Rotas de autenticação precisam carregar o reCAPTCHA.');
 
 const portal = read('src/portal.jsx');
 assert(portal.includes("onBuy(plan,'mercadopago')"), 'Portal precisa oferecer Mercado Pago nos planos.');
 assert(portal.includes("['admin','support'].includes(session.user.role)"), 'Control Center precisa aceitar admin e suporte.');
 assert(portal.includes("action:'issueExternalLicense'"), 'Admin precisa emitir licença para cliente externo.');
 assert(portal.includes("action:'createStaff'"), 'Admin precisa criar contas de admin/suporte.');
+
+const recaptchaFront = read('src/recaptcha.js');
+assert(recaptchaFront.includes('VITE_RECAPTCHA_SITE_KEY'), 'Frontend precisa usar VITE_RECAPTCHA_SITE_KEY.');
+assert(recaptchaFront.includes("theme: 'dark'"), 'reCAPTCHA visual deve usar tema escuro.');
+assert(recaptchaFront.includes('recaptchaToken'), 'Frontend precisa anexar token ao /api/auth.');
+assert(recaptchaFront.includes('Não sou um robô'), 'Frontend deve orientar o checkbox do reCAPTCHA.');
 
 const enhance = read('src/portal-enhance.js');
 assert(enhance.includes("['plus','pro','ultra']"), 'Fluxo de plano selecionado precisa reconhecer Plus, Pro e Ultra.');
@@ -59,6 +66,12 @@ assert(mp.includes("createHmac('sha256'"), 'Webhook Mercado Pago precisa validar
 const auth = read('api/_lib/auth.js');
 assert(auth.includes("new Set(['admin', 'support'])"), 'RBAC precisa reconhecer suporte.');
 assert(auth.includes('requireStaff'), 'Backend precisa de guarda de staff.');
+const authRoute = read('api/auth.js');
+assert(authRoute.includes('verifyRecaptcha(req, input.recaptchaToken)'), 'Login e cadastro precisam validar reCAPTCHA server-side.');
+const recaptchaServer = read('api/_lib/recaptcha.js');
+assert(recaptchaServer.includes('https://www.google.com/recaptcha/api/siteverify'), 'Backend precisa validar token no Google siteverify.');
+assert(recaptchaServer.includes('RECAPTCHA_SECRET_KEY'), 'Backend precisa usar RECAPTCHA_SECRET_KEY.');
+
 const admin = read('api/admin.js');
 assert(admin.includes("new Set(['customer','support','admin'])"), 'Admin precisa permitir customer/support/admin.');
 assert(admin.includes('assertAdmin(staff)'), 'Ações sensíveis precisam exigir administrador.');
@@ -68,6 +81,7 @@ assert(license.includes('issueExternalLicense'), 'Licenciamento externo precisa 
 const health = read('api/health.js');
 assert(health.includes("SELECT 1 AS healthy"), 'Health endpoint deve testar conexão real com o Turso.');
 assert(health.includes('mercadoPago:'), 'Health endpoint precisa reportar Mercado Pago.');
+assert(health.includes('recaptcha:'), 'Health endpoint precisa reportar reCAPTCHA.');
 
 const rootVercel = JSON.parse(read('../vercel.json'));
 const landingVercel = JSON.parse(read('vercel.json'));
@@ -80,7 +94,7 @@ for (const route of ['/login','/cadastro','/portal','/admin']) {
 
 const serverFiles = [
   'api/auth.js','api/customer.js','api/admin.js','api/stripe-webhook.js','api/mercadopago-webhook.js','api/health.js',
-  'api/_lib/auth.js','api/_lib/db.js','api/_lib/email.js','api/_lib/http.js','api/_lib/license.js','api/_lib/mercadopago.js',
+  'api/_lib/auth.js','api/_lib/db.js','api/_lib/email.js','api/_lib/http.js','api/_lib/license.js','api/_lib/mercadopago.js','api/_lib/recaptcha.js',
   '../api/auth.js','../api/customer.js','../api/admin.js','../api/stripe-webhook.js','../api/mercadopago-webhook.js','../api/health.js',
 ];
 for (const file of serverFiles) {
