@@ -9,5 +9,5 @@
 - [x] Auditar o editor de automações atual e documentar os contratos do runtime local que não podem ser quebrados.
 - [x] Avaliar apenas padrões e documentação de projetos de referência, sem copiar código sob licença incompatível.
 - [x] Expandir o editor visual com canvas navegável, ligações entre nós, paleta, propriedades, validação, zoom e controlos de execução.
-- [ ] Publicar o editor visual validado na branch `admin` e gerar o executável atualizado.
+- [x] Publicar o editor visual validado na branch `admin` e gerar o executável atualizado.
 - [x] Validar workflows antigos e novos contra o motor local com verificador de contrato, typecheck, IPC, entrega e build.
