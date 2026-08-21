@@ -11,3 +11,7 @@
 - [x] Expandir o editor visual com canvas navegável, ligações entre nós, paleta, propriedades, validação, zoom e controlos de execução.
 - [x] Publicar o editor visual validado na branch `admin` e gerar o executável atualizado.
 - [x] Validar workflows antigos e novos contra o motor local com verificador de contrato, typecheck, IPC, entrega e build.
+- [x] Auditar o layout do editor e os contratos de workflow antes de expandir a área operacional e os tipos de nó.
+- [x] Fazer o canvas ocupar a área útil da aplicação, com alternância de foco e ocultação independente de navegação, biblioteca e inspector.
+- [x] Adicionar nós Telegram e HTTP/HTTPS com validação, limites e execução pelo motor local sem comprometer workflows existentes.
+- [ ] Validar, publicar na branch `admin` e gerar o executável atualizado com o modo operacional de automações.

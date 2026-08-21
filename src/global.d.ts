@@ -28,7 +28,7 @@ declare global {
   }
   interface AttozapWorkflowNode {
     id: string;
-    type: 'trigger_message' | 'trigger_schedule' | 'condition_text' | 'wait' | 'send_text' | 'send_location' | 'send_contact' | 'send_poll' | 'ai_rewrite';
+    type: 'trigger_message' | 'trigger_schedule' | 'condition_text' | 'wait' | 'send_text' | 'send_location' | 'send_contact' | 'send_poll' | 'ai_rewrite' | 'telegram_send' | 'http_request';
     label: string;
     x: number;
     y: number;

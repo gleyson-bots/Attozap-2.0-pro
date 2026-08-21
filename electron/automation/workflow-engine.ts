@@ -6,6 +6,8 @@ import type { IncomingMessage, OutboundContent } from '../messaging/provider.js'
 import type { ChatService } from '../messaging/chat-service.js';
 import { rewriteAiText } from '../ai-service.js';
 import type { AiProviderId } from '../ai-service.js';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 
 export type WorkflowNodeType =
   | 'trigger_message'
@@ -16,7 +18,9 @@ export type WorkflowNodeType =
   | 'send_location'
   | 'send_contact'
   | 'send_poll'
-  | 'ai_rewrite';
+  | 'ai_rewrite'
+  | 'telegram_send'
+  | 'http_request';
 
 export type WorkflowNode = {
   id: string;
@@ -85,7 +89,7 @@ function safeNodes(value: unknown): WorkflowNode[] {
   if (!Array.isArray(value)) return [];
   return value.slice(0, 100).map((item, index) => {
     const raw = (item ?? {}) as Record<string, unknown>;
-    const allowed: WorkflowNodeType[] = ['trigger_message', 'trigger_schedule', 'condition_text', 'wait', 'send_text', 'send_location', 'send_contact', 'send_poll', 'ai_rewrite'];
+    const allowed: WorkflowNodeType[] = ['trigger_message', 'trigger_schedule', 'condition_text', 'wait', 'send_text', 'send_location', 'send_contact', 'send_poll', 'ai_rewrite', 'telegram_send', 'http_request'];
     const type = allowed.includes(raw.type as WorkflowNodeType) ? raw.type as WorkflowNodeType : 'send_text';
     return {
       id: cleanText(raw.id, 80) || `node-${index + 1}`,
@@ -156,6 +160,49 @@ function resolveTarget(config: Record<string, unknown>, context: WorkflowContext
   const target = configured || context.remoteJid;
   if (!target) throw new Error('Configure um destino no nó de envio ou execute o workflow a partir de uma conversa.');
   return target;
+}
+
+function isPrivateAddress(address: string) {
+  const normalized = address.toLowerCase();
+  if (normalized === '::1' || normalized === '::' || normalized.startsWith('fe80:') || normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+  if (isIP(normalized) !== 4) return false;
+  const [a, b] = normalized.split('.').map(Number);
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
+async function publicHttpUrl(input: string) {
+  let url: URL;
+  try { url = new URL(input.trim()); } catch { throw new Error('O nó HTTP precisa de uma URL HTTP/HTTPS válida.'); }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('O nó HTTP aceita somente URLs HTTP ou HTTPS.');
+  const host = url.hostname.toLowerCase();
+  if (!host || host === 'localhost' || host.endsWith('.local') || isPrivateAddress(host)) throw new Error('O nó HTTP bloqueia endereços locais e privados.');
+  const addresses = await lookup(host, { all: true, verbatim: true }).catch(() => []);
+  if (!addresses.length || addresses.some(address => isPrivateAddress(address.address))) throw new Error('O destino HTTP não pôde ser validado como público.');
+  return url;
+}
+
+function requestHeaders(value: unknown, context: WorkflowContext) {
+  const headers: Record<string, string> = {};
+  const blocked = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'upgrade']);
+  const add = (key: string, raw: unknown) => {
+    const name = cleanText(key, 120).toLowerCase();
+    const content = renderTemplate(raw, context).slice(0, 2_000);
+    if (!name || !content || blocked.has(name) || !/^[a-z0-9-]+$/i.test(name)) return;
+    if (Object.keys(headers).length < 24) headers[name] = content;
+  };
+  if (value && typeof value === 'object' && !Array.isArray(value)) Object.entries(value as Record<string, unknown>).forEach(([key, raw]) => add(key, raw));
+  else cleanText(value, 12_000).split(/\r?\n/).forEach(line => { const separator = line.indexOf(':'); if (separator > 0) add(line.slice(0, separator), line.slice(separator + 1).trim()); });
+  return headers;
+}
+
+async function requestWithLimit(url: URL, init: RequestInit, timeoutMs = 12_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, redirect: 'error', signal: controller.signal });
+    const body = (await response.text()).slice(0, 8_000);
+    return { response, body };
+  } finally { clearTimeout(timer); }
 }
 
 export class WorkflowEngine {
@@ -357,6 +404,32 @@ export class WorkflowEngine {
           });
           context.lastAi = result.text;
           context.vars.lastAi = result.text;
+          break;
+        }
+        case 'telegram_send': {
+          const tokenVariable = cleanText(current.config.tokenEnv, 100) || 'ATTOZAP_TELEGRAM_BOT_TOKEN';
+          const token = cleanText(process.env[tokenVariable] || current.config.botToken, 800);
+          const chatId = renderTemplate(current.config.chatId, context).slice(0, 180);
+          const text = renderTemplate(current.config.text || '{{text}}', context).slice(0, 4_096);
+          if (!token || !/^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(token)) throw new Error('Configure um token de bot Telegram válido no ambiente ou no nó local.');
+          if (!chatId || !text) throw new Error('O nó Telegram precisa de chat ID e mensagem.');
+          const endpoint = new URL(`https://api.telegram.org/bot${token}/sendMessage`);
+          const payload = { chat_id: chatId, text, disable_web_page_preview: Boolean(current.config.disablePreview), ...(cleanText(current.config.parseMode, 20) ? { parse_mode: cleanText(current.config.parseMode, 20) } : {}) };
+          const { response, body } = await requestWithLimit(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(payload) });
+          if (!response.ok) throw new Error(`Telegram recusou a mensagem (HTTP ${response.status}): ${body.slice(0, 500)}`);
+          try { context.vars.telegramMessageId = String((JSON.parse(body) as { result?: { message_id?: unknown } }).result?.message_id ?? ''); } catch { /* resposta válida sem JSON */ }
+          break;
+        }
+        case 'http_request': {
+          const url = await publicHttpUrl(renderTemplate(current.config.url, context));
+          const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(cleanText(current.config.method, 10).toUpperCase()) ? cleanText(current.config.method, 10).toUpperCase() : 'GET';
+          const body = renderTemplate(current.config.body, context).slice(0, 32_000);
+          const headers = requestHeaders(current.config.headers, context);
+          if (body && !headers['content-type']) headers['content-type'] = 'application/json';
+          const { response, body: responseBody } = await requestWithLimit(url, { method, headers, ...(method === 'GET' || method === 'DELETE' || !body ? {} : { body }) });
+          context.vars.httpStatus = String(response.status);
+          context.vars.httpBody = responseBody;
+          if (!response.ok && current.config.continueOnError !== true) throw new Error(`Pedido HTTP falhou com status ${response.status}.`);
           break;
         }
       }
