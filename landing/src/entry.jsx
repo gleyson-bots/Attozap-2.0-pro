@@ -1,17 +1,26 @@
 import './styles.css';
 
-const portalPaths = ['/login', '/cadastro', '/portal', '/admin'];
-const pathname = (window.location.pathname.replace(/\.html$/i, '').replace(/\/+$/, '') || '/');
+const rawPath = window.location.pathname || '/';
+let pathname = rawPath.replace(/\.html$/i, '').replace(/\/+$/, '') || '/';
 
-if (portalPaths.includes(pathname)) {
-  // O portal deve nascer no mesmo dark theme da landing. Definir antes do
-  // React/CSS dinâmico evita o flash claro e impede variáveis do :root light.
+// O portal hoje usa uma única tela por área. Normalizar aliases físicos e
+// caminhos profundos evita cair acidentalmente na landing em rewrites da Vercel.
+if (pathname.startsWith('/portal/')) pathname = '/portal';
+if (pathname.startsWith('/admin/')) pathname = '/admin';
+
+const portalPaths = new Set(['/login', '/cadastro', '/portal', '/admin']);
+const isPortal = portalPaths.has(pathname);
+
+if (isPortal && rawPath !== pathname) {
+  history.replaceState(history.state, '', `${pathname}${location.search}${location.hash}`);
+}
+
+if (isPortal) {
   document.documentElement.dataset.theme = 'dark';
   document.documentElement.style.colorScheme = 'dark';
 
-  // portal.jsx ainda contém o CSS estrutural legado. Carregamos primeiro a
-  // estrutura e SOMENTE depois o tema ATTOZAP para que o tema final sempre
-  // vença a cascata (header, cards, accent, superfícies e responsividade).
+  // CSS estrutural primeiro, identidade visual por último para impedir que o
+  // tema legado sobrescreva sidebar, header, cards ou superfícies.
   await import('./portal.jsx');
   await import('./portal-theme.css');
 } else {
