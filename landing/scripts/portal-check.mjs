@@ -10,11 +10,11 @@ const read = path => readFileSync(resolve(root, path), 'utf8');
 const requiredFiles = [
   'index.html', 'login.html', 'cadastro.html', 'portal.html', 'admin.html',
   'login/index.html', 'cadastro/index.html', 'portal/index.html', 'admin/index.html',
-  'src/entry.jsx', 'src/portal.jsx', 'src/portal.css', 'src/portal-theme.css',
+  'src/entry.jsx', 'src/portal.jsx', 'src/portal.css', 'src/portal-theme.css', 'src/portal-enhance.js',
   'api/auth.js', 'api/customer.js', 'api/admin.js', 'api/stripe-webhook.js', 'api/health.js',
   'api/_lib/auth.js', 'api/_lib/db.js', 'api/_lib/email.js', 'api/_lib/http.js', 'api/_lib/license.js',
   '../api/auth.js', '../api/customer.js', '../api/admin.js', '../api/stripe-webhook.js', '../api/health.js',
-  '../vercel.json',
+  'vercel.json', '../vercel.json',
 ];
 
 for (const file of requiredFiles) {
@@ -26,6 +26,10 @@ assert(entry.includes("pathname.startsWith('/portal/')"), 'Bootstrap não normal
 assert(entry.includes("pathname.startsWith('/admin/')"), 'Bootstrap não normaliza rotas profundas de /admin.');
 assert(entry.includes("replace(/\\.html$/i"), 'Bootstrap não normaliza páginas físicas .html.');
 assert(entry.indexOf("await import('./portal.jsx')") < entry.indexOf("await import('./portal-theme.css')"), 'portal-theme.css deve carregar depois do CSS estrutural.');
+assert(entry.includes("await import('./portal-enhance.js')"), 'Bootstrap precisa aplicar a navegação comercial pós-cadastro.');
+
+const enhance = read('src/portal-enhance.js');
+assert(enhance.includes("['plus','pro','ultra']"), 'Fluxo de plano selecionado precisa reconhecer Plus, Pro e Ultra.');
 
 const theme = read('src/portal-theme.css');
 assert(!/\.portal-app\s*>\s*\*\s*\{[^}]*position\s*:\s*relative/i.test(theme), 'Tema não pode sobrescrever position de todos os filhos de .portal-app.');
@@ -41,9 +45,14 @@ assert(license.includes("status=CASE WHEN ?=1 THEN 'active' ELSE status END"), '
 const health = read('api/health.js');
 assert(health.includes("SELECT 1 AS healthy"), 'Health endpoint deve testar conexão real com o Turso.');
 
-const vercel = JSON.parse(read('../vercel.json'));
-assert(vercel.outputDirectory === 'landing/dist', 'Vercel outputDirectory deve apontar para landing/dist.');
-assert(Array.isArray(vercel.rewrites) && vercel.rewrites.some(item => item.source === '/login'), 'Vercel precisa de rota /login.');
+const rootVercel = JSON.parse(read('../vercel.json'));
+const landingVercel = JSON.parse(read('vercel.json'));
+assert(rootVercel.outputDirectory === 'landing/dist', 'Vercel da raiz deve apontar para landing/dist.');
+assert(landingVercel.outputDirectory === 'dist', 'Vercel de landing deve apontar para dist.');
+for (const route of ['/login','/cadastro','/portal','/admin']) {
+  assert(rootVercel.rewrites?.some(item => item.source === route), `Vercel da raiz sem rota ${route}.`);
+  assert(landingVercel.rewrites?.some(item => item.source === route), `Vercel de landing sem rota ${route}.`);
+}
 
 const serverFiles = [
   'api/auth.js','api/customer.js','api/admin.js','api/stripe-webhook.js','api/health.js',
