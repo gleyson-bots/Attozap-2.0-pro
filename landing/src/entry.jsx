@@ -22,6 +22,12 @@ if (isPortal) {
   await import('./portal-enhance.css');
   const { enhancePortalRoute } = await import('./portal-enhance.js');
   enhancePortalRoute();
+
+  if (pathname === '/login' || pathname === '/cadastro') {
+    await import('./recaptcha.css');
+    const { initRecaptcha } = await import('./recaptcha.js');
+    initRecaptcha();
+  }
 } else {
   await import('./main.jsx');
 
