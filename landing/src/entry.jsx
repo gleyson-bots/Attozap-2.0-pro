@@ -1,11 +1,19 @@
 import './styles.css';
-import './portal-theme.css';
 
 const portalPaths = ['/login', '/cadastro', '/portal', '/admin'];
 const pathname = (window.location.pathname.replace(/\.html$/i, '').replace(/\/+$/, '') || '/');
 
 if (portalPaths.includes(pathname)) {
+  // O portal deve nascer no mesmo dark theme da landing. Definir antes do
+  // React/CSS dinâmico evita o flash claro e impede variáveis do :root light.
+  document.documentElement.dataset.theme = 'dark';
+  document.documentElement.style.colorScheme = 'dark';
+
+  // portal.jsx ainda contém o CSS estrutural legado. Carregamos primeiro a
+  // estrutura e SOMENTE depois o tema ATTOZAP para que o tema final sempre
+  // vença a cascata (header, cards, accent, superfícies e responsividade).
   await import('./portal.jsx');
+  await import('./portal-theme.css');
 } else {
   await import('./main.jsx');
 
