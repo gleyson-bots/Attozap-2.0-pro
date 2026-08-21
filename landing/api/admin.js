@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { audit, db, ensureSchema, publicPlan, publicUser, safeJson } from './_lib/db.js';
 import { requireAdmin } from './_lib/auth.js';
-import { issueLicense } from './_lib/license.js';
+import { issueLicense, resignLicense } from './_lib/license.js';
 import { sendLicenseIssued, sendReleaseNotice } from './_lib/email.js';
 import { body, fail, json } from './_lib/http.js';
 
@@ -88,7 +88,7 @@ export default async function handler(req, res) {
 
     if (action === 'resetFingerprint') {
       const id = String(input.id || '');
-      await db().execute({ sql: `UPDATE licenses SET fingerprint=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [id] });
+      await resignLicense(id, { fingerprint: null, actorId: admin.id });
       await audit(admin.id, 'admin.license.fingerprint.reset', 'license', id);
       return json(res, 200, { ok: true });
     }
