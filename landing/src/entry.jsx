@@ -1,3 +1,6 @@
+import './styles.css';
+import './portal-theme.css';
+
 const portalPaths = ['/login', '/cadastro', '/portal', '/admin'];
 const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
 
@@ -22,7 +25,7 @@ if (portalPaths.includes(pathname)) {
       const cta = card.querySelector('.plan-cta');
       if (!cta || cta.dataset.portalCheckout === 'true') return;
       const slug = name === 'plus' ? 'plus' : name === 'pro' ? 'pro' : name === 'ultra' ? 'ultra' : '';
-      if (!slug) return; // Enterprise continua no fluxo comercial personalizado.
+      if (!slug) return;
       cta.href = `/cadastro?next=${encodeURIComponent(`/portal?plan=${slug}`)}`;
       cta.removeAttribute('target');
       cta.removeAttribute('rel');
