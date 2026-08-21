@@ -23,6 +23,8 @@ if (isPortal) {
   // tema legado sobrescreva sidebar, header, cards ou superfícies.
   await import('./portal.jsx');
   await import('./portal-theme.css');
+  const { enhancePortalRoute } = await import('./portal-enhance.js');
+  enhancePortalRoute();
 } else {
   await import('./main.jsx');
 
