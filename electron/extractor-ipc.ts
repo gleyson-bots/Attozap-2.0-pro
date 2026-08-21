@@ -13,7 +13,7 @@ export function registerExtractorIpc(db: AttozapDatabase) {
   ipcMain.handle('importers:pick-contacts', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
-      filters: [{ name: 'Lista de contatos', extensions: ['csv','txt','tsv'] }],
+      filters: [{ name: 'Planilhas e listas de contatos', extensions: ['xlsx', 'csv', 'txt', 'tsv'] }],
     });
     if (result.canceled || !result.filePaths[0]) return null;
     return parseContactFile(result.filePaths[0]);

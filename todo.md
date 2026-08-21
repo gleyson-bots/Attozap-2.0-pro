@@ -23,3 +23,6 @@
 - [x] Corrigir a ativação inicial para que uma licença válida de novo cliente não exija chave de renovação.
 - [x] Adicionar ao Keygen um registo persistente local de clientes, licenças emitidas e dados de renovação recuperáveis.
 - [x] Validar o ciclo completo de emissão, importação inicial, renovação, compilação e distribuição atualizada.
+- [x] Permitir importar contactos por planilhas CSV, XLSX, TXT e TSV na agenda local com limites e validação de ficheiro.
+- [x] Apresentar pré-visualização, colunas reconhecidas, contactos inválidos e duplicados antes de confirmar a gravação.
+- [x] Validar, publicar na branch `admin` e entregar os executáveis com a importação de contactos.

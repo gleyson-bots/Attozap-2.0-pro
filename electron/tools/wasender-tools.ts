@@ -23,14 +23,14 @@ export class WaSenderTools {
       INSERT INTO contacts (phone, name, variables_json) VALUES (?, ?, ?)
       ON CONFLICT(phone) DO UPDATE SET
         name=COALESCE(excluded.name, contacts.name),
-        variables_json=excluded.variables_json,
+        variables_json=CASE WHEN excluded.variables_json='{}' THEN contacts.variables_json ELSE excluded.variables_json END,
         updated_at=CURRENT_TIMESTAMP
     `);
     const tx = this.db.transaction(() => {
       let imported = 0;
-      for (const contact of contacts) {
+      for (const contact of contacts.slice(0, 50_000)) {
         const phone = digits(contact.phone);
-        if (!phone) continue;
+        if (phone.length < 6 || phone.length > 15) continue;
         upsert.run(phone, contact.name?.trim() || null, JSON.stringify(contact.variables ?? {}));
         imported++;
       }
