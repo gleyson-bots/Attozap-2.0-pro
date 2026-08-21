@@ -5,7 +5,7 @@ function client() {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
-const FROM = process.env.RESEND_FROM || 'ATTOZAP <onboarding@resend.dev>';
+const FROM = process.env.RESEND_FROM || 'ATTOZAP <portal@orbitalcode.shop>';
 const APP_URL = String(process.env.APP_URL || '').replace(/\/$/, '') || 'https://attozap.orbitalcode.shop';
 
 function escapeHtml(value) {
