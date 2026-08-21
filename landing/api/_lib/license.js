@@ -23,11 +23,68 @@ function canonicalize(payload) {
   });
 }
 
+function signPayload(payload) {
+  const signature = sign(null, Buffer.from(canonicalize(payload)), createPrivateKey(privateKeyPem())).toString('base64url');
+  return encodeLicense({ payload, signature, algorithm: 'Ed25519' });
+}
+
 export function encodeLicense(signed) {
   return Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
 }
 
-export async function issueLicense({ userId, planId, subscriptionId = null, expiresAt = null, fingerprint = null, actorId = null }) {
+export async function resignLicense(licenseId, { fingerprint, expiresAt, planId, actorId = null } = {}) {
+  await ensureSchema();
+
+  if (planId) {
+    await db().execute({ sql: `UPDATE licenses SET plan_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [planId, licenseId] });
+  }
+
+  const result = await db().execute({
+    sql: `SELECT
+            l.*,
+            u.name AS user_name,
+            p.license_plan AS plan_license_plan,
+            p.max_seats AS plan_max_seats,
+            p.max_instances AS plan_max_instances,
+            p.features_json AS plan_features_json
+          FROM licenses l
+          JOIN users u ON u.id=l.user_id
+          JOIN plans p ON p.id=l.plan_id
+          WHERE l.id=? LIMIT 1`,
+    args: [licenseId],
+  });
+  const row = result.rows[0];
+  if (!row) throw new Error('Licença não encontrada');
+
+  const nextFingerprint = fingerprint === undefined ? (row.fingerprint || null) : (fingerprint || null);
+  const nextExpiresAt = expiresAt === undefined ? (row.expires_at || null) : (expiresAt || null);
+  const features = safeJson(row.plan_features_json);
+  const payload = {
+    licenseId: row.id,
+    customerId: row.user_id,
+    customerName: row.user_name,
+    plan: row.plan_license_plan,
+    issuedAt: row.issued_at,
+    expiresAt: nextExpiresAt,
+    maxSeats: Number(row.plan_max_seats || row.max_seats || 1),
+    maxInstances: Number(row.plan_max_instances || row.max_instances || 1),
+    features,
+    fingerprint: nextFingerprint,
+    version: 1,
+  };
+  const licenseKey = signPayload(payload);
+
+  await db().execute({
+    sql: `UPDATE licenses SET
+            license_key=?,fingerprint=?,expires_at=?,max_seats=?,max_instances=?,features_json=?,status='active',updated_at=CURRENT_TIMESTAMP
+          WHERE id=?`,
+    args: [licenseKey,nextFingerprint,nextExpiresAt,payload.maxSeats,payload.maxInstances,JSON.stringify(features),licenseId],
+  });
+  await audit(actorId || row.user_id, 'license.resign', 'license', licenseId, { planId: row.plan_id, fingerprintChanged: fingerprint !== undefined, expiresAt: nextExpiresAt });
+  return (await db().execute({ sql: `SELECT * FROM licenses WHERE id=? LIMIT 1`, args: [licenseId] })).rows[0];
+}
+
+export async function issueLicense({ userId, planId, subscriptionId = null, expiresAt = null, fingerprint = undefined, actorId = null }) {
   await ensureSchema();
   const userResult = await db().execute({ sql: `SELECT * FROM users WHERE id=? LIMIT 1`, args: [userId] });
   const planResult = await db().execute({ sql: `SELECT * FROM plans WHERE id=? LIMIT 1`, args: [planId] });
@@ -37,10 +94,17 @@ export async function issueLicense({ userId, planId, subscriptionId = null, expi
 
   if (subscriptionId) {
     const existing = await db().execute({
-      sql: `SELECT * FROM licenses WHERE subscription_id=? AND status='active' ORDER BY created_at DESC LIMIT 1`,
+      sql: `SELECT * FROM licenses WHERE subscription_id=? ORDER BY created_at DESC LIMIT 1`,
       args: [subscriptionId],
     });
-    if (existing.rows[0]) return existing.rows[0];
+    if (existing.rows[0]) {
+      return resignLicense(existing.rows[0].id, {
+        planId,
+        expiresAt,
+        ...(fingerprint !== undefined ? { fingerprint } : {}),
+        actorId: actorId || userId,
+      });
+    }
   }
 
   const issuedAt = new Date().toISOString();
@@ -56,16 +120,15 @@ export async function issueLicense({ userId, planId, subscriptionId = null, expi
     maxSeats: Number(plan.max_seats || 1),
     maxInstances: Number(plan.max_instances || 1),
     features,
-    fingerprint: fingerprint || null,
+    fingerprint: fingerprint ?? null,
     version: 1,
   };
-  const signature = sign(null, Buffer.from(canonicalize(payload)), createPrivateKey(privateKeyPem())).toString('base64url');
-  const licenseKey = encodeLicense({ payload, signature, algorithm: 'Ed25519' });
+  const licenseKey = signPayload(payload);
 
   await db().execute({
     sql: `INSERT INTO licenses (id,user_id,plan_id,subscription_id,license_key,status,fingerprint,issued_at,expires_at,max_seats,max_instances,features_json)
           VALUES (?,?,?,?,?,'active',?,?,?,?,?,?)`,
-    args: [licenseId,user.id,plan.id,subscriptionId,licenseKey,fingerprint,issuedAt,expiresAt,Number(plan.max_seats || 1),Number(plan.max_instances || 1),JSON.stringify(features)],
+    args: [licenseId,user.id,plan.id,subscriptionId,licenseKey,payload.fingerprint,issuedAt,payload.expiresAt,payload.maxSeats,payload.maxInstances,JSON.stringify(features)],
   });
   await audit(actorId || user.id, 'license.issue', 'license', licenseId, { userId, planId, subscriptionId });
   return (await db().execute({ sql: `SELECT * FROM licenses WHERE id=?`, args: [licenseId] })).rows[0];
