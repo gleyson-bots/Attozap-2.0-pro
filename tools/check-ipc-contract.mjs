@@ -14,6 +14,8 @@ const handlerFiles = [
   'electron/system-ipc.ts',
   'electron/recovery-ipc.ts',
   'electron/ai-ipc.ts',
+  'electron/ai-agent-ipc.ts',
+  'electron/workflow-ipc.ts',
 ];
 
 const preload = await readFile(preloadPath, 'utf8');

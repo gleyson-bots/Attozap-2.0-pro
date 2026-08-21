@@ -20,7 +20,7 @@ export const PLAN_LABELS: Record<CommercialPlan, string> = {
 
 export const PLAN_FEATURES: Record<CommercialPlan, string[]> = {
   plus: ['webchat', 'sender', 'campaigns', 'delivery', 'warmup', 'contacts', 'templates'],
-  pro: ['webchat', 'sender', 'groups', 'campaigns', 'delivery', 'warmup', 'ai_chat', 'scheduler', 'contacts', 'filter', 'autoreply', 'templates', 'poll_report'],
+  pro: ['webchat', 'sender', 'groups', 'campaigns', 'delivery', 'warmup', 'ai_chat', 'scheduler', 'contacts', 'filter', 'autoreply', 'templates', 'poll_report', 'workflows'],
   ultra: ['*'],
   enterprise: ['*'],
 };

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Copy, KeyRound, RefreshCw, ShieldCheck, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, Copy, FileUp, KeyRound, RefreshCw, ShieldCheck, Trash2, XCircle } from 'lucide-react';
 import { toLocalDateTime } from '../lib';
 
 type LicenseStatus = {
@@ -63,6 +63,18 @@ export function LicenseActivationPage() {
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally { setBusy(false); }
+  }
+
+  async function importLicenseFile() {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const result = await window.attozap.license.importFile();
+      if (result.canceled) return;
+      setStatus(result.status);
+      setEncoded('');
+      setNotice(result.status.valid ? `Licença importada de ${result.fileName ?? 'arquivo'} com sucesso nesta máquina.` : `O arquivo foi salvo, mas a licença não é válida: ${result.status.reason ?? 'INVALID_LICENSE'}.`);
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setBusy(false); }
   }
 
   async function renew() {
@@ -145,6 +157,8 @@ export function LicenseActivationPage() {
           </div>}
           <button className="button ghost danger-button wide" disabled={busy} onClick={() => void deactivate()}><Trash2 size={15}/> Desativar nesta máquina</button>
         </div> : <div className="license-activation">
+          <button className="button ghost full" disabled={busy || !status?.configured} onClick={() => void importLicenseFile()}><FileUp size={16}/> Importar licença (.txt ou .pem)</button>
+          <p className="field-help">Aceita apenas um ficheiro de licença emitido pelo Keygen. A chave privada Ed25519 é recusada e nunca deve ser copiada para o aplicativo.</p>
           <div className="field"><label>Chave de licença</label><textarea value={encoded} onChange={e => setEncoded(e.target.value)} placeholder="Cole aqui a licença codificada emitida pelo painel proprietário..."/></div>
           <button className="button primary full" disabled={busy || !encoded.trim() || !status?.configured} onClick={() => void activate()}><KeyRound size={16}/>{busy ? 'Validando...' : 'Ativar licença'}</button>
         </div>}

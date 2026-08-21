@@ -27,7 +27,8 @@ Opções de issue:
   --fingerprint <sha256>       Vincula a uma máquina específica
   --expires <ISO|never>        Padrão: never
   --features <csv>             Recursos liberados; vazio usa os recursos do plano
-  --out <arquivo>              Salva a licença codificada
+  --out <arquivo>              Salva a licença codificada; use --format pem ou both para ficheiro pronto para importar
+  --format <txt|pem|both>      Formato de saída; padrão txt
 `);
 }
 
@@ -76,7 +77,7 @@ function normalizePlan(value) {
 }
 function featuresFor(plan) {
   if (plan === 'plus') return ['webchat','sender','campaigns','delivery','warmup','contacts','templates'];
-  if (plan === 'pro') return ['webchat','sender','groups','campaigns','delivery','warmup','ai_chat','scheduler','contacts','filter','autoreply','templates','poll_report'];
+  if (plan === 'pro') return ['webchat','sender','groups','campaigns','delivery','warmup','ai_chat','scheduler','workflows','contacts','filter','autoreply','templates','poll_report'];
   return ['*'];
 }
 
@@ -129,9 +130,17 @@ function issue(options) {
   const encoded = Buffer.from(JSON.stringify(signedLicense), 'utf8').toString('base64url');
 
   if (options.out) {
-    ensureParent(options.out);
-    writeFileSync(options.out, encoded + '\n', { mode: 0o600 });
-    console.log(`Licença salva em: ${options.out}`);
+    const format = String(options.format ?? 'txt').toLowerCase();
+    if (!['txt', 'pem', 'both'].includes(format)) throw new Error('--format deve ser txt, pem ou both');
+    const pem = `-----BEGIN ATTOZAP LICENSE-----\n${encoded.match(/.{1,64}/g)?.join('\n') ?? encoded}\n-----END ATTOZAP LICENSE-----\n`;
+    const writeLicenseFile = (file, content) => { ensureParent(file); writeFileSync(file, content, { mode: 0o600 }); console.log(`Licença salva em: ${file}`); };
+    if (format === 'txt') writeLicenseFile(options.out, encoded + '\n');
+    else if (format === 'pem') writeLicenseFile(options.out, pem);
+    else {
+      const base = String(options.out).replace(/\.(?:txt|pem)$/i, '');
+      writeLicenseFile(`${base}.txt`, encoded + '\n');
+      writeLicenseFile(`${base}.pem`, pem);
+    }
   }
   console.log('\nLICENÇA CODIFICADA:\n');
   console.log(encoded);

@@ -204,7 +204,8 @@ export class LicenseService {
     if (!payload.limits) return payload;
     const wanted = featureKey(feature);
     const features = payload.features.map(featureKey);
-    if (!features.includes('*') && !features.includes(wanted)) {
+    const legacyEquivalent = wanted === 'workflows' && features.includes('scheduler');
+    if (!features.includes('*') && !features.includes(wanted) && !legacyEquivalent) {
       throw new Error(`O plano ${commercialPlan(payload.plan).toUpperCase()} não inclui o recurso ${feature}`);
     }
     return payload;

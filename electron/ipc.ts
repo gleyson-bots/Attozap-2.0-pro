@@ -1,6 +1,7 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import QRCode from 'qrcode';
 import { randomUUID } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
 import type { AttozapDatabase } from './database.js';
 import type { AccountManager } from './messaging/account-manager.js';
 import type { CampaignEngine, CreateCampaignInput } from './campaigns/engine.js';
@@ -221,6 +222,30 @@ export function registerIpc(input: {
 
   ipcMain.handle('license:status', () => license.status());
   ipcMain.handle('license:activate', (_event, encoded: string) => license.activate(encoded));
+  ipcMain.handle('license:import-file', async () => {
+    const result = await dialog.showOpenDialog(window, {
+      title: 'Importar licença ATTOZAP',
+      properties: ['openFile'],
+      filters: [{ name: 'Licença ATTOZAP', extensions: ['txt', 'pem'] }, { name: 'Todos os arquivos', extensions: ['txt', 'pem'] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true, status: license.status() };
+    const filePath = result.filePaths[0];
+    const info = await stat(filePath);
+    if (!info.isFile() || info.size <= 0 || info.size > 512 * 1024) throw new Error('O arquivo de licença deve ser um TXT ou PEM válido de até 512 KiB.');
+    const raw = (await readFile(filePath, 'utf8')).replace(/^\uFEFF/, '').trim();
+    if (/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/i.test(raw) || /PRIVATE KEY/i.test(raw)) {
+      throw new Error('Arquivo recusado: a chave privada Ed25519 nunca deve ser importada no ATTOZAP. Selecione o ficheiro de licença emitido pelo Keygen.');
+    }
+    const encoded = raw
+      .replace(/-----BEGIN ATTOZAP LICENSE-----/gi, '')
+      .replace(/-----END ATTOZAP LICENSE-----/gi, '')
+      .replace(/^\s*(?:ATTOZAP_LICENSE|LICENSE)\s*=\s*/i, '')
+      .replace(/\s+/g, '')
+      .trim();
+    if (!encoded || encoded.length < 40) throw new Error('O arquivo não contém uma licença ATTOZAP válida.');
+    const status = license.activate(encoded);
+    return { canceled: false, fileName: filePath.split(/[\\/]/).pop(), status };
+  });
   ipcMain.handle('license:renew', (_event, encoded: string) => license.renew(encoded));
   ipcMain.handle('license:deactivate', () => license.deactivate());
 

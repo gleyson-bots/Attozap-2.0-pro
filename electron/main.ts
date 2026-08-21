@@ -24,11 +24,17 @@ import { registerMessageStatusTracking } from './message-status.js';
 import { registerRecoveryIpc } from './recovery-ipc.js';
 import { registerAiIpc } from './ai-ipc.js';
 import { DeliveryCenter } from './delivery-center.js';
+import { WorkflowEngine } from './automation/workflow-engine.js';
+import { registerWorkflowIpc } from './workflow-ipc.js';
+import { AiAgentEngine } from './automation/ai-agent.js';
+import { registerAiAgentIpc } from './ai-agent-ipc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let scheduler: NodeJS.Timeout | null = null;
 let warmupEngine: WarmupEngine | null = null;
+let workflowEngine: WorkflowEngine | null = null;
+let aiAgentEngine: AiAgentEngine | null = null;
 
 if (process.platform === 'win32') app.setAppUserModelId('com.gleysondevs.attozap.wasender');
 
@@ -99,6 +105,8 @@ app.whenReady().then(async () => {
   const tools = new WaSenderTools(db, accounts);
   warmupEngine = new WarmupEngine(db, chat, license);
   const deliveryCenter = new DeliveryCenter(db);
+  workflowEngine = new WorkflowEngine(db, accounts, chat, license);
+  aiAgentEngine = new AiAgentEngine(db, accounts, chat, license);
 
   ipcMain.handle('app:get-version', () => app.getVersion());
   ipcMain.handle('app:get-platform', () => process.platform);
@@ -111,6 +119,8 @@ app.whenReady().then(async () => {
   safeRegister('desktop-ipc', () => registerDesktopIpc(mainWindow!));
   safeRegister('chat-ipc', () => registerChatIpc(chat, license));
   safeRegister('ai-ipc', () => registerAiIpc(db, license));
+  safeRegister('workflow-ipc', () => registerWorkflowIpc(workflowEngine!, license));
+  safeRegister('ai-agent-ipc', () => registerAiAgentIpc(aiAgentEngine!, license));
   safeRegister('warmup-ipc', () => registerWarmupIpc(warmupEngine!, license));
   safeRegister('campaign-monitor-ipc', () => registerCampaignMonitorIpc(mainWindow!, campaigns));
   safeRegister('browser-hub-ipc', () => registerBrowserHubIpc(mainWindow!));
@@ -128,7 +138,10 @@ app.whenReady().then(async () => {
   }));
   void Promise.allSettled(reconnectTasks).then(() => warmupEngine?.resumePersisted());
 
-  scheduler = setInterval(() => void campaigns.runDueSchedules().catch(error => console.error('[scheduler]', error)), 30_000);
+  scheduler = setInterval(() => {
+    void campaigns.runDueSchedules().catch(error => console.error('[scheduler]', error));
+    void workflowEngine?.runDueSchedules().catch(error => console.error('[workflow:scheduler]', error));
+  }, 30_000);
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow();

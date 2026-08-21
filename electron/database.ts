@@ -174,6 +174,69 @@ export function openDatabase(path: string) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS workflows (
+      id TEXT PRIMARY KEY,
+      account_id TEXT,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 0,
+      trigger_type TEXT NOT NULL DEFAULT 'manual',
+      nodes_json TEXT NOT NULL DEFAULT '[]',
+      edges_json TEXT NOT NULL DEFAULT '[]',
+      run_count INTEGER NOT NULL DEFAULT 0,
+      last_run_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      id TEXT PRIMARY KEY,
+      workflow_id TEXT NOT NULL,
+      account_id TEXT,
+      trigger_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      context_json TEXT NOT NULL DEFAULT '{}',
+      error TEXT,
+      started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at TEXT,
+      FOREIGN KEY(workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflows_enabled ON workflows(enabled, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status, started_at DESC);
+    CREATE TABLE IF NOT EXISTS ai_agents (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      provider TEXT NOT NULL DEFAULT 'openai',
+      model TEXT,
+      system_prompt TEXT NOT NULL DEFAULT '',
+      temperature REAL NOT NULL DEFAULT 0.6,
+      mode TEXT NOT NULL DEFAULT 'auto_reply',
+      allow_groups INTEGER NOT NULL DEFAULT 0,
+      max_history INTEGER NOT NULL DEFAULT 12,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS ai_agent_runs (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      remote_jid TEXT,
+      incoming_message_id TEXT,
+      status TEXT NOT NULL DEFAULT 'running',
+      response_text TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at TEXT,
+      FOREIGN KEY(agent_id) REFERENCES ai_agents(id) ON DELETE CASCADE,
+      FOREIGN KEY(account_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_agents_account ON ai_agents(account_id, enabled);
+    CREATE INDEX IF NOT EXISTS idx_ai_agent_runs_agent ON ai_agent_runs(agent_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS group_cache (
       account_id TEXT NOT NULL,
       group_id TEXT NOT NULL,
