@@ -138,8 +138,6 @@ const schema = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
   `CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id,status)`,
-  `CREATE INDEX IF NOT EXISTS idx_subscriptions_provider ON subscriptions(provider,provider_subscription_id)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_provider_unique ON subscriptions(provider,provider_subscription_id) WHERE provider_subscription_id IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_licenses_user ON licenses(user_id,status)`,
   `CREATE INDEX IF NOT EXISTS idx_licenses_subscription ON licenses(subscription_id)`,
   `CREATE INDEX IF NOT EXISTS idx_external_customers_email ON external_customers(email)`,
@@ -187,6 +185,8 @@ async function ensureLegacyColumns(conn) {
     }
   }
   await conn.execute(`UPDATE subscriptions SET provider='stripe' WHERE provider IS NULL OR provider=''`);
+  await conn.execute(`CREATE INDEX IF NOT EXISTS idx_subscriptions_provider ON subscriptions(provider,provider_subscription_id)`);
+  await conn.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_provider_unique ON subscriptions(provider,provider_subscription_id) WHERE provider_subscription_id IS NOT NULL`);
 }
 
 export async function ensureSchema() {
