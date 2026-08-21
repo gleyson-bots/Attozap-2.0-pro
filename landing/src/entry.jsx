@@ -3,8 +3,6 @@ import './styles.css';
 const rawPath = window.location.pathname || '/';
 let pathname = rawPath.replace(/\.html$/i, '').replace(/\/+$/, '') || '/';
 
-// O portal hoje usa uma única tela por área. Normalizar aliases físicos e
-// caminhos profundos evita cair acidentalmente na landing em rewrites da Vercel.
 if (pathname.startsWith('/portal/')) pathname = '/portal';
 if (pathname.startsWith('/admin/')) pathname = '/admin';
 
@@ -19,10 +17,9 @@ if (isPortal) {
   document.documentElement.dataset.theme = 'dark';
   document.documentElement.style.colorScheme = 'dark';
 
-  // CSS estrutural primeiro, identidade visual por último para impedir que o
-  // tema legado sobrescreva sidebar, header, cards ou superfícies.
   await import('./portal.jsx');
   await import('./portal-theme.css');
+  await import('./portal-enhance.css');
   const { enhancePortalRoute } = await import('./portal-enhance.js');
   enhancePortalRoute();
 } else {
