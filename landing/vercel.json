@@ -1,4 +1,5 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
@@ -7,7 +8,9 @@
     { "source": "/login", "destination": "/index.html" },
     { "source": "/cadastro", "destination": "/index.html" },
     { "source": "/portal", "destination": "/index.html" },
-    { "source": "/admin", "destination": "/index.html" }
+    { "source": "/portal/:path*", "destination": "/index.html" },
+    { "source": "/admin", "destination": "/index.html" },
+    { "source": "/admin/:path*", "destination": "/index.html" }
   ],
   "headers": [
     {
