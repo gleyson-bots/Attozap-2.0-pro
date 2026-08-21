@@ -17,8 +17,10 @@ export default async function handler(req, res) {
       const user = await registerUser(input);
       const token = await createSession(user);
       setSessionCookie(res, token);
-      void sendWelcome(user).catch(error => console.error('[welcome-email]', error));
-      return json(res, 201, { ok: true, user: publicUser(user) });
+      let emailSent = true;
+      try { await sendWelcome(user); }
+      catch (error) { emailSent = false; console.error('[welcome-email]', error); }
+      return json(res, 201, { ok: true, user: publicUser(user), emailSent });
     }
 
     if (action === 'login') {
