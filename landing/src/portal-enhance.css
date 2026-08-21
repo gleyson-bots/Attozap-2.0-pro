@@ -1,0 +1,6 @@
+.portal-plan-focus{
+  border-color:color-mix(in srgb,var(--accent) 70%,var(--line))!important;
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 32%,transparent),0 24px 70px color-mix(in srgb,var(--accent) 18%,transparent)!important;
+  transform:translateY(-3px);
+  transition:border-color .25s ease,box-shadow .25s ease,transform .25s ease;
+}
