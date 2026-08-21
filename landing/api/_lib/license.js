@@ -3,8 +3,18 @@ import { audit, db, ensureSchema, safeJson } from './db.js';
 
 function privateKeyPem() {
   const raw = String(process.env.LICENSE_PRIVATE_KEY || '').replace(/\\n/g, '\n').trim();
-  if (!raw) throw new Error('LICENSE_PRIVATE_KEY não configurada');
+  if (!raw) throw Object.assign(new Error('Assinatura de licenças não configurada no servidor'), { statusCode: 503 });
   return raw;
+}
+
+function normalizeFingerprint(value, { allowEmpty = true } = {}) {
+  if (value === undefined) return undefined;
+  const clean = String(value || '').trim().toLowerCase();
+  if (!clean && allowEmpty) return null;
+  if (!/^[a-f0-9]{64}$/.test(clean)) {
+    throw Object.assign(new Error('Fingerprint inválido. Use o fingerprint de 64 caracteres gerado pelo ATTOZAP.'), { statusCode: 400 });
+  }
+  return clean;
 }
 
 function canonicalize(payload) {
@@ -32,10 +42,15 @@ export function encodeLicense(signed) {
   return Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
 }
 
-export async function resignLicense(licenseId, { fingerprint, expiresAt, planId, actorId = null } = {}) {
+export async function resignLicense(licenseId, { fingerprint, expiresAt, planId, actorId = null, activate = false } = {}) {
   await ensureSchema();
+  if (!licenseId) throw Object.assign(new Error('Licença não informada'), { statusCode: 400 });
+
+  const normalizedFingerprint = normalizeFingerprint(fingerprint);
 
   if (planId) {
+    const planExists = await db().execute({ sql: `SELECT id FROM plans WHERE id=? LIMIT 1`, args: [planId] });
+    if (!planExists.rows[0]) throw Object.assign(new Error('Plano não encontrado'), { statusCode: 404 });
     await db().execute({ sql: `UPDATE licenses SET plan_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [planId, licenseId] });
   }
 
@@ -54,9 +69,9 @@ export async function resignLicense(licenseId, { fingerprint, expiresAt, planId,
     args: [licenseId],
   });
   const row = result.rows[0];
-  if (!row) throw new Error('Licença não encontrada');
+  if (!row) throw Object.assign(new Error('Licença não encontrada'), { statusCode: 404 });
 
-  const nextFingerprint = fingerprint === undefined ? (row.fingerprint || null) : (fingerprint || null);
+  const nextFingerprint = normalizedFingerprint === undefined ? (row.fingerprint || null) : normalizedFingerprint;
   const nextExpiresAt = expiresAt === undefined ? (row.expires_at || null) : (expiresAt || null);
   const features = safeJson(row.plan_features_json);
   const payload = {
@@ -76,21 +91,29 @@ export async function resignLicense(licenseId, { fingerprint, expiresAt, planId,
 
   await db().execute({
     sql: `UPDATE licenses SET
-            license_key=?,fingerprint=?,expires_at=?,max_seats=?,max_instances=?,features_json=?,status='active',updated_at=CURRENT_TIMESTAMP
+            license_key=?,fingerprint=?,expires_at=?,max_seats=?,max_instances=?,features_json=?,
+            status=CASE WHEN ?=1 THEN 'active' ELSE status END,
+            updated_at=CURRENT_TIMESTAMP
           WHERE id=?`,
-    args: [licenseKey,nextFingerprint,nextExpiresAt,payload.maxSeats,payload.maxInstances,JSON.stringify(features),licenseId],
+    args: [licenseKey,nextFingerprint,nextExpiresAt,payload.maxSeats,payload.maxInstances,JSON.stringify(features),activate ? 1 : 0,licenseId],
   });
-  await audit(actorId || row.user_id, 'license.resign', 'license', licenseId, { planId: row.plan_id, fingerprintChanged: fingerprint !== undefined, expiresAt: nextExpiresAt });
+  await audit(actorId || row.user_id, 'license.resign', 'license', licenseId, {
+    planId: row.plan_id,
+    fingerprintChanged: fingerprint !== undefined,
+    expiresAt: nextExpiresAt,
+    activated: Boolean(activate),
+  });
   return (await db().execute({ sql: `SELECT * FROM licenses WHERE id=? LIMIT 1`, args: [licenseId] })).rows[0];
 }
 
 export async function issueLicense({ userId, planId, subscriptionId = null, expiresAt = null, fingerprint = undefined, actorId = null }) {
   await ensureSchema();
+  const normalizedFingerprint = normalizeFingerprint(fingerprint);
   const userResult = await db().execute({ sql: `SELECT * FROM users WHERE id=? LIMIT 1`, args: [userId] });
-  const planResult = await db().execute({ sql: `SELECT * FROM plans WHERE id=? LIMIT 1`, args: [planId] });
+  const planResult = await db().execute({ sql: `SELECT * FROM plans WHERE id=? AND active=1 LIMIT 1`, args: [planId] });
   const user = userResult.rows[0];
   const plan = planResult.rows[0];
-  if (!user || !plan) throw new Error('Usuário ou plano não encontrado');
+  if (!user || !plan) throw Object.assign(new Error('Usuário ou plano ativo não encontrado'), { statusCode: 404 });
 
   if (subscriptionId) {
     const existing = await db().execute({
@@ -101,8 +124,9 @@ export async function issueLicense({ userId, planId, subscriptionId = null, expi
       return resignLicense(existing.rows[0].id, {
         planId,
         expiresAt,
-        ...(fingerprint !== undefined ? { fingerprint } : {}),
+        ...(normalizedFingerprint !== undefined ? { fingerprint: normalizedFingerprint } : {}),
         actorId: actorId || userId,
+        activate: true,
       });
     }
   }
@@ -120,7 +144,7 @@ export async function issueLicense({ userId, planId, subscriptionId = null, expi
     maxSeats: Number(plan.max_seats || 1),
     maxInstances: Number(plan.max_instances || 1),
     features,
-    fingerprint: fingerprint ?? null,
+    fingerprint: normalizedFingerprint ?? null,
     version: 1,
   };
   const licenseKey = signPayload(payload);
@@ -136,7 +160,9 @@ export async function issueLicense({ userId, planId, subscriptionId = null, expi
 
 export async function revokeLicensesForSubscription(subscriptionId, actorId = null) {
   await ensureSchema();
+  if (!subscriptionId) return;
   const rows = await db().execute({ sql: `SELECT id,user_id FROM licenses WHERE subscription_id=? AND status='active'`, args: [subscriptionId] });
-  await db().execute({ sql: `UPDATE licenses SET status='revoked',updated_at=CURRENT_TIMESTAMP WHERE subscription_id=?`, args: [subscriptionId] });
+  if (!rows.rows.length) return;
+  await db().execute({ sql: `UPDATE licenses SET status='revoked',updated_at=CURRENT_TIMESTAMP WHERE subscription_id=? AND status='active'`, args: [subscriptionId] });
   for (const row of rows.rows) await audit(actorId || row.user_id, 'license.revoke', 'license', row.id, { subscriptionId });
 }
