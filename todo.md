@@ -29,4 +29,4 @@
 - [x] Remover integralmente o login, OAuth, sessões e identificadores específicos do Manus do portal.
 - [x] Implementar autenticação própria por email e palavra-passe com hash seguro, sessão HTTP-only e perfis de utilizador/admin.
 - [x] Adaptar a aplicação e a documentação para execução independente na Vercel, sem segredos ou APIs do Manus.
-- [ ] Versionar e enviar o código independente do portal para o repositório GitHub selecionado.
+- [x] Versionar e enviar o código independente do portal para o repositório GitHub selecionado.
