@@ -11,6 +11,7 @@ import Licenses from "./pages/Licenses";
 import Downloads from "./pages/Downloads";
 import AIAgent from "./pages/AIAgent";
 import Admin from "./pages/Admin";
+import Auth from "./pages/Auth";
 
 function ProtectedPage({ children, requiredRole }: { children: React.ReactNode; requiredRole?: "admin" }) {
   return <DashboardLayout requiredRole={requiredRole}>{children}</DashboardLayout>;
@@ -21,6 +22,7 @@ function Router() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/entrar"} component={Auth} />
       <Route path={"/painel"}><ProtectedPage><Dashboard /></ProtectedPage></Route>
       <Route path={"/licenca"}><ProtectedPage><Licenses /></ProtectedPage></Route>
       <Route path={"/downloads"}><ProtectedPage><Downloads /></ProtectedPage></Route>

@@ -1,5 +1,4 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { startLogin } from "@/const";
 import {
   ArrowRight,
   Bot,
@@ -18,8 +17,9 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
 
-const logoUrl = "/manus-storage/attozap-logo_aff9fcc7.svg";
+const BrandMark = () => <span className="font-['Space_Grotesk'] text-lg font-black">A</span>;
 
 const featureCards = [
   { icon: MessageCircle, title: "WebChat fluido", text: "Conversas, ficheiros, localização, contactos e enquêtes num espaço pensado para operar sem fricção.", tag: "Conversas" },
@@ -77,15 +77,16 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [openFaq, setOpenFaq] = useState(0);
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
 
-  const openPortal = () => startLogin();
+  const openPortal = () => setLocation(user ? "/painel" : "/entrar");
 
   return (
     <div className="atto-site-shell">
       <header className="atto-topbar">
         <div className="atto-container atto-nav-inner">
           <button className="atto-brand" onClick={() => scrollToId("inicio")} aria-label="Ir para o início">
-            <span className="atto-brand-orb"><img src={logoUrl} alt="" /></span>
+            <span className="atto-brand-orb"><BrandMark /></span>
             <span className="atto-brand-copy"><strong>ATTOZAP</strong><small>WASENDER PRO</small></span>
           </button>
           <nav className="atto-nav-links" aria-label="Navegação principal">
@@ -142,8 +143,8 @@ export default function Home() {
               <div className="atto-app-window">
                 <div className="atto-window-top"><span className="atto-window-dots"><i /><i /><i /></span><span>ATTOZAP WASender Pro</span><span className="atto-window-state"><i /> Sessão protegida</span></div>
                 <div className="atto-app-body">
-                  <aside className="atto-mock-sidebar"><div className="atto-mock-logo"><img src={logoUrl} alt="" /> ATTOZAP</div><div className="atto-mock-account"><span className="atto-account-avatar">G</span><span><b>Comercial Brasil</b><small>Conectada</small></span></div><span className="atto-mock-nav active">Visão geral</span><span className="atto-mock-nav">WebChat</span><span className="atto-mock-nav">Automações</span><span className="atto-mock-nav">Campanhas</span></aside>
-                  <div className="atto-mock-content"><div className="atto-mock-header"><span><small>OPERAÇÃO</small><b>Bom trabalho, Gleyson.</b></span><em>Plano Pro</em></div><div className="atto-mock-hero-card"><span><small>ESTADO DA OPERAÇÃO</small><strong>O essencial, numa única leitura.</strong><p>Contas conectadas, campanhas e automações prontas para usar.</p><button onClick={openPortal}>Abrir portal</button></span><img src={logoUrl} alt="" /></div><div className="atto-mock-metrics"><article><small>Contas</small><b>03</b><i /></article><article><small>Automações</small><b>08</b><i /></article><article><small>Estado</small><b>Saudável</b><i /></article></div><div className="atto-mock-lower"><div className="atto-chart-line"><i /><i /><i /><i /><i /><i /></div><div className="atto-mock-list"><i /><i /><i /></div></div></div>
+                  <aside className="atto-mock-sidebar"><div className="atto-mock-logo"><BrandMark /> ATTOZAP</div><div className="atto-mock-account"><span className="atto-account-avatar">G</span><span><b>Comercial Brasil</b><small>Conectada</small></span></div><span className="atto-mock-nav active">Visão geral</span><span className="atto-mock-nav">WebChat</span><span className="atto-mock-nav">Automações</span><span className="atto-mock-nav">Campanhas</span></aside>
+                  <div className="atto-mock-content"><div className="atto-mock-header"><span><small>OPERAÇÃO</small><b>Bom trabalho, Gleyson.</b></span><em>Plano Pro</em></div><div className="atto-mock-hero-card"><span><small>ESTADO DA OPERAÇÃO</small><strong>O essencial, numa única leitura.</strong><p>Contas conectadas, campanhas e automações prontas para usar.</p><button onClick={openPortal}>Abrir portal</button></span><span className="atto-brand-orb"><BrandMark /></span></div><div className="atto-mock-metrics"><article><small>Contas</small><b>03</b><i /></article><article><small>Automações</small><b>08</b><i /></article><article><small>Estado</small><b>Saudável</b><i /></article></div><div className="atto-mock-lower"><div className="atto-chart-line"><i /><i /><i /><i /><i /><i /></div><div className="atto-mock-list"><i /><i /><i /></div></div></div>
                 </div>
               </div>
               <div className="atto-floating-chip atto-chip-health"><ShieldCheck size={17} /><span><b>Health Center</b><small>Diagnóstico disponível</small></span></div>
@@ -157,7 +158,7 @@ export default function Home() {
         <section id="produto" className="atto-section atto-product-section">
           <div className="atto-container">
             <div className="atto-section-heading"><span className="atto-eyebrow">O produto</span><h2>Local-first para trabalhar com <span>mais clareza e menos ferramentas soltas.</span></h2><p>O aplicativo concentra o trabalho operacional no computador. O portal estende a gestão comercial e de configuração sem substituir o controlo do utilizador sobre as sessões e os dados locais.</p></div>
-            <div className="atto-philosophy-grid"><article className="atto-philo-main"><div><span>UMA BASE, VÁRIOS FLUXOS</span><h3>Do contacto à automação, sem perder contexto.</h3><p>Faça a ponte entre WebChat, contactos, campanhas, identidade JID/LID e automações visuais. A experiência foi organizada para operações que pedem ritmo e rastreabilidade.</p></div><div className="atto-orbital-diagram"><div className="atto-core-orb"><img src={logoUrl} alt="" /></div><i className="atto-ring atto-ring-one" /><i className="atto-ring atto-ring-two" /><b className="atto-satellite atto-sat-one">WebChat</b><b className="atto-satellite atto-sat-two">Contas</b><b className="atto-satellite atto-sat-three">Fluxos</b><b className="atto-satellite atto-sat-four">Licenças</b></div></article><article className="atto-philo-card"><Bot size={25} /><span>AGENTE CONFIGURÁVEL</span><h3>IA que respeita a conta, o modo e o prompt.</h3><p>Selecione o canal, o provedor, o modelo e a operação: responder, reativar, qualificar ou combinar estratégias.</p></article><article className="atto-philo-card"><ShieldCheck size={25} /><span>GESTÃO OPERACIONAL</span><h3>Visibilidade para quem usa e para quem administra.</h3><p>Licenças, renovação, versões autorizadas e estados de acesso acessíveis a partir de um portal coerente.</p></article></div>
+            <div className="atto-philosophy-grid"><article className="atto-philo-main"><div><span>UMA BASE, VÁRIOS FLUXOS</span><h3>Do contacto à automação, sem perder contexto.</h3><p>Faça a ponte entre WebChat, contactos, campanhas, identidade JID/LID e automações visuais. A experiência foi organizada para operações que pedem ritmo e rastreabilidade.</p></div><div className="atto-orbital-diagram"><div className="atto-core-orb"><BrandMark /></div><i className="atto-ring atto-ring-one" /><i className="atto-ring atto-ring-two" /><b className="atto-satellite atto-sat-one">WebChat</b><b className="atto-satellite atto-sat-two">Contas</b><b className="atto-satellite atto-sat-three">Fluxos</b><b className="atto-satellite atto-sat-four">Licenças</b></div></article><article className="atto-philo-card"><Bot size={25} /><span>AGENTE CONFIGURÁVEL</span><h3>IA que respeita a conta, o modo e o prompt.</h3><p>Selecione o canal, o provedor, o modelo e a operação: responder, reativar, qualificar ou combinar estratégias.</p></article><article className="atto-philo-card"><ShieldCheck size={25} /><span>GESTÃO OPERACIONAL</span><h3>Visibilidade para quem usa e para quem administra.</h3><p>Licenças, renovação, versões autorizadas e estados de acesso acessíveis a partir de um portal coerente.</p></article></div>
           </div>
         </section>
 
@@ -170,7 +171,7 @@ export default function Home() {
         <section id="faq" className="atto-section atto-faq-section"><div className="atto-container atto-faq-layout"><div><span className="atto-eyebrow">Perguntas frequentes</span><h2>Informação direta para decidir com segurança.</h2><p>O ATTOZAP foi pensado como aplicativo desktop com funções locais. O portal complementa a gestão comercial e a configuração dos recursos ligados à conta.</p><button className="atto-button atto-button-ghost" onClick={() => window.open("mailto:gleysonferreira531@gmail.com", "_blank", "noopener,noreferrer")}>Falar com suporte <ArrowRight size={15} /></button></div><div className="atto-faq-list">{faqs.map(([question, answer], index) => <article className={`atto-faq-item ${openFaq === index ? "is-open" : ""}`} key={question}><button onClick={() => setOpenFaq(openFaq === index ? -1 : index)} aria-expanded={openFaq === index}><span>{question}</span><ChevronDown size={18} /></button>{openFaq === index && <p>{answer}</p>}</article>)}</div></div></section>
       </main>
 
-      <footer className="atto-footer"><div className="atto-container atto-footer-grid"><div><div className="atto-brand"><span className="atto-brand-orb"><img src={logoUrl} alt="" /></span><span className="atto-brand-copy"><strong>ATTOZAP</strong><small>WASENDER PRO</small></span></div><p>Plataforma desktop local-first para operações WhatsApp organizadas, com portal de licenças, versões e configuração inteligente.</p></div><div><b>Portal</b><button onClick={openPortal}>Área do cliente</button><button onClick={openPortal}>Downloads</button><button onClick={openPortal}>Agentes de IA</button></div><div><b>Suporte</b><a href="mailto:gleysonferreira531@gmail.com">gleysonferreira531@gmail.com</a><a href="https://wa.me/5511936216745" target="_blank" rel="noreferrer">+55 11 93621-6745</a><span>GleysonDevs</span></div></div><div className="atto-container atto-footer-bottom"><span>© {new Date().getFullYear()} ATTOZAP. Todos os direitos reservados.</span><span>Uso responsável e em conformidade com as plataformas aplicáveis.</span></div></footer>
+      <footer className="atto-footer"><div className="atto-container atto-footer-grid"><div><div className="atto-brand"><span className="atto-brand-orb"><BrandMark /></span><span className="atto-brand-copy"><strong>ATTOZAP</strong><small>WASENDER PRO</small></span></div><p>Plataforma desktop local-first para operações WhatsApp organizadas, com portal de licenças, versões e configuração inteligente.</p></div><div><b>Portal</b><button onClick={openPortal}>Área do cliente</button><button onClick={openPortal}>Downloads</button><button onClick={openPortal}>Agentes de IA</button></div><div><b>Suporte</b><a href="mailto:gleysonferreira531@gmail.com">gleysonferreira531@gmail.com</a><a href="https://wa.me/5511936216745" target="_blank" rel="noreferrer">+55 11 93621-6745</a><span>GleysonDevs</span></div></div><div className="atto-container atto-footer-bottom"><span>© {new Date().getFullYear()} ATTOZAP. Todos os direitos reservados.</span><span>Uso responsável e em conformidade com as plataformas aplicáveis.</span></div></footer>
     </div>
   );
 }

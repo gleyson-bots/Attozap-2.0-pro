@@ -12,7 +12,6 @@ import {
 } from "../db";
 import { getSensitiveHint, hashSensitiveValue } from "../security";
 import { adminProcedure, router } from "../_core/trpc";
-import { ENV } from "../_core/env";
 import { storagePut } from "../storage";
 
 const licenseStatus = z.enum(["active", "expiring", "expired", "suspended", "revoked"]);
@@ -44,14 +43,14 @@ export const adminRouter = router({
 
   setUserRole: adminProcedure
     .input(z.object({ userId: z.number().int().positive(), role: z.enum(["user", "admin"]) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return { updated: false };
 
       const target = await db.select().from(users).where(eq(users.id, input.userId)).limit(1);
       if (!target[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Utilizador não encontrado." });
-      if (target[0].openId === ENV.ownerOpenId && input.role !== "admin") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "A conta proprietária deve conservar o papel administrativo." });
+      if (target[0].id === ctx.user.id && input.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Não pode remover o seu próprio acesso administrativo." });
       }
       await db.update(users).set({ role: input.role }).where(eq(users.id, input.userId));
       return { updated: true };

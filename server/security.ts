@@ -3,11 +3,15 @@ import {
   createDecipheriv,
   createHash,
   randomBytes,
+  scrypt as scryptCallback,
   timingSafeEqual,
 } from "node:crypto";
+import { promisify } from "node:util";
 import { ENV } from "./_core/env";
 
 const CIPHER_VERSION = "v1";
+const PASSWORD_KEY_LENGTH = 64;
+const scrypt = promisify(scryptCallback);
 
 function getCipherKey() {
   if (!ENV.cookieSecret) {
@@ -32,6 +36,20 @@ export function secureCompare(value: string, expectedHash: string) {
   const candidate = Buffer.from(hashSensitiveValue(value), "hex");
   const expected = Buffer.from(expectedHash, "hex");
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+}
+
+export async function hashPassword(password: string) {
+  const salt = randomBytes(16).toString("base64url");
+  const derived = (await scrypt(password, salt, PASSWORD_KEY_LENGTH)) as Buffer;
+  return `scrypt:${salt}:${derived.toString("base64url")}`;
+}
+
+export async function verifyPassword(password: string, storedValue: string) {
+  const [algorithm, salt, expected] = storedValue.split(":");
+  if (algorithm !== "scrypt" || !salt || !expected) return false;
+  const candidate = (await scrypt(password, salt, PASSWORD_KEY_LENGTH)) as Buffer;
+  const expectedBuffer = Buffer.from(expected, "base64url");
+  return candidate.length === expectedBuffer.length && timingSafeEqual(candidate, expectedBuffer);
 }
 
 export function encryptSecret(value: string) {

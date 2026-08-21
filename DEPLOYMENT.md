@@ -1,38 +1,47 @@
-# Publicação do portal ATTOZAP
+# Publicação do portal ATTOZAP na Vercel
 
-## Estado validado
+## Arquitetura incluída
 
-O portal foi validado localmente com as migrations aplicadas, `pnpm check`, `pnpm test -- --run` e `pnpm build`. A versão recuperável mais recente é **`6d4eb245`**.
+O portal usa **React + Vite** no frontend, uma função **Express/tRPC** em `api/[...path].ts`, **MySQL/TiDB** através de Drizzle e armazenamento S3 compatível para instaladores. A autenticação é própria: cada utilizador entra com email e palavra-passe; a sessão é assinada e entregue num cookie HTTP-only. Não há redirecionamento OAuth nem dependência de login externo.
 
-## Alojamento integrado — recomendado
+## Variáveis de ambiente
 
-O projeto já está preparado para o alojamento integrado, com o banco MySQL/TiDB, OAuth e armazenamento de ficheiros configurados no ambiente do projeto. Para publicar, abra o projeto **ATTOZAP Portal** na interface de gestão e selecione **Publish**. Antes de tornar o endereço público, confirme o domínio e a visibilidade em **Settings**.
+Cadastre estas variáveis em **Vercel → Settings → Environment Variables**, nos ambientes de produção e pré-produção. Nunca as coloque num commit.
 
-Após a publicação, valide os seguintes fluxos com uma conta normal e uma conta com papel `admin`:
+| Variável | Finalidade |
+| --- | --- |
+| `DATABASE_URL` | Ligação MySQL/TiDB usada pelo Drizzle. |
+| `JWT_SECRET` | Segredo aleatório longo usado para assinar sessões e cifrar as credenciais de IA. |
+| `INITIAL_ADMIN_EMAIL` | Email que recebe papel `admin` quando se regista pela primeira vez. |
+| `S3_BUCKET` | Bucket que armazena versões do aplicativo. |
+| `S3_REGION` | Região do fornecedor S3 ou `auto` para R2. |
+| `S3_ENDPOINT` | Endpoint S3 compatível, se aplicável. |
+| `S3_ACCESS_KEY_ID` | Chave de acesso do bucket com permissão limitada. |
+| `S3_SECRET_ACCESS_KEY` | Segredo da chave de acesso do bucket. |
+| `S3_PUBLIC_BASE_URL` | Base pública/CDN opcional; se estiver vazia, os downloads usam URL assinada. |
+
+> Gere `JWT_SECRET` com pelo menos 32 caracteres aleatórios e mantenha-o estável. Alterá-lo invalida sessões e impede a leitura de chaves de IA já cifradas.
+
+## Procedimento de publicação
+
+1. Importe o repositório no painel da Vercel e selecione a branch do portal.
+2. Confirme o gestor de pacotes `pnpm`. O projeto executa `pnpm build` e publica `dist/public`.
+3. Crie as variáveis indicadas acima, ligando um MySQL/TiDB acessível à Vercel e um bucket S3 compatível.
+4. Antes do primeiro deploy de produção, aplique as migrations Drizzle na mesma base de dados. Reveja sempre o SQL gerado antes de o executar.
+5. Faça o deploy e visite `/api/health`; a resposta esperada é `{ "status": "ok" }`.
+6. Registe o email definido em `INITIAL_ADMIN_EMAIL`, crie a palavra-passe e entre no portal. Esse utilizador recebe o papel administrativo.
+7. Publique uma versão de teste e valide a elegibilidade de download, a emissão/renovação de licença e o acesso por papel.
+
+## Validação pós-publicação
 
 | Fluxo | Resultado esperado |
 | --- | --- |
-| Login e área de cliente | A conta autenticada vê apenas as suas licenças, renovações e downloads elegíveis. |
-| Administração | Apenas um utilizador com o papel `admin` abre a rota `/admin` e executa mutações administrativas. |
-| Licença e renovação | Uma chave de renovação é aceite apenas uma vez e cria histórico. |
-| Versões | Um ficheiro publicado no S3 fica visível somente aos planos permitidos. |
-| Agentes de IA | A chave do provedor é configurada por conta WhatsApp, nunca é devolvida ao navegador e pode ser removida. |
+| Registo e entrada | A sessão persiste apenas no cookie HTTP-only e não usa tokens no navegador. |
+| Área do cliente | Cada utilizador vê apenas licenças, renovação, downloads e contas WhatsApp próprias. |
+| Administração | Apenas utilizadores com `role = admin` podem emitir, renovar ou suspender licenças, gerir papéis e publicar versões. |
+| Agentes de IA | A chave é cifrada no servidor, nunca regressa ao cliente e pode ser removida. |
+| Downloads | Ficheiros autorizados usam armazenamento S3 e regras de plano no servidor. |
 
-> **Nota de segurança:** não coloque chaves de provedores de IA, chaves de licença ou segredos de OAuth no cliente, em commits ou em ficheiros públicos. O portal guarda credenciais de IA cifradas no servidor e armazena chaves de licença como hashes.
+## Evolução do schema
 
-## Variáveis e dados
-
-No alojamento integrado, as variáveis de infraestrutura são fornecidas automaticamente. Não é necessário copiar ficheiros `.env` nem publicar segredos manualmente. Para mudar uma variável do projeto, utilize a área segura de **Settings → Secrets**, em vez de a escrever no repositório.
-
-As estruturas de dados já foram aplicadas via Drizzle. Em evolução futura do schema, siga sempre esta sequência:
-
-1. Atualize `drizzle/schema.ts`.
-2. Execute `pnpm drizzle-kit generate`.
-3. Reveja o SQL gerado e aplique-o uma única vez na base de dados.
-4. Execute `pnpm check`, `pnpm test -- --run` e `pnpm build`.
-
-## Vercel — alternativa com adaptação necessária
-
-O projeto atual é um serviço Node/Express gerido e validado no alojamento integrado. A publicação direta na Vercel **não deve ser tratada como uma troca de DNS**: exige adaptar o entrypoint Express à convenção de funções serverless da Vercel, configurar as rotas `/api/trpc` e `/api/oauth/callback`, disponibilizar um MySQL/TiDB externo acessível e recriar todas as variáveis de OAuth, JWT, armazenamento e análise nesse fornecedor.
-
-Por esse motivo, recomenda-se publicar primeiro pelo alojamento integrado, que já suporta domínio personalizado e mantém as integrações configuradas. Se ainda for necessário migrar para a Vercel, faça essa adaptação num branch separado e valide login, tRPC, uploads S3 e chamadas de IA num ambiente de pré-produção antes de apontar o domínio de produção.
+Para qualquer alteração de dados, atualize `drizzle/schema.ts`, execute `pnpm drizzle-kit generate`, reveja a migration SQL, aplique-a uma vez na base de dados e execute `pnpm check`, `pnpm test -- --run` e `pnpm build` antes de publicar.

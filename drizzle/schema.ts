@@ -12,21 +12,17 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 
-/**
- * Core user table backing the Manus OAuth flow. The owner is promoted to
- * administrator by `upsertUser` in server/db.ts.
- */
+/** Core user table for the portal's independent email/password authentication. */
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
-  openId: varchar("openId", { length: 64 }).notNull().unique(),
-  name: text("name"),
-  email: varchar("email", { length: 320 }),
-  loginMethod: varchar("loginMethod", { length: 64 }),
+  name: text("name").notNull(),
+  email: varchar("email", { length: 320 }).notNull(),
+  passwordHash: varchar("passwordHash", { length: 256 }).notNull(),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
-});
+}, table => [uniqueIndex("users_email_unique").on(table.email)]);
 
 /**
  * Commercial definitions rendered in the landing and associated with

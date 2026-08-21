@@ -26,3 +26,7 @@
 - [x] Validar em código os estados e contratos das páginas de painel, downloads e configuração de agentes antes do checkpoint.
 - [x] Criar documentação de publicação no alojamento integrado e na Vercel, incluindo variáveis, migrações, build e validação pós-deploy.
 - [x] Entregar o checkpoint com orientação objetiva de publicação e verificação em produção.
+- [x] Remover integralmente o login, OAuth, sessões e identificadores específicos do Manus do portal.
+- [x] Implementar autenticação própria por email e palavra-passe com hash seguro, sessão HTTP-only e perfis de utilizador/admin.
+- [x] Adaptar a aplicação e a documentação para execução independente na Vercel, sem segredos ou APIs do Manus.
+- [ ] Versionar e enviar o código independente do portal para o repositório GitHub selecionado.
