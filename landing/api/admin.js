@@ -64,7 +64,7 @@ export default async function handler(req, res) {
       await db().execute({
         sql: `INSERT INTO plans (id,slug,name,description,price_cents,currency,interval,license_plan,max_seats,max_instances,features_json,stripe_price_id,active,featured,sort_order)
               VALUES (?,?,?,?,?,'brl','month',?,?,?,?,?,?,?,?)
-              ON CONFLICT(id) DO UPDATE SET slug=excluded.slug,name=excluded.name,description=excluded.description,price_cents=excluded.price_cents,license_plan=excluded.license_plan,max_seats=excluded.max_seats,max_instances=excluded.max_instances,features_json=excluded.features_json,stripe_price_id=excluded.stripe_price_id,active=excluded.active,featured=excluded.featured,sort_order=excluded.sort_order,updated_at=CURRENT_TIMESTAMP`,
+              ON CONFLICT(id) DO UPDATE SET slug=excluded.slug,name=excluded.name,description=excluded.description,price_cents=excluded.price_cents,license_plan=excluded.license_plan,max_seats=excluded.max_seats,max_instances=excluded.max_instances,features_json=excluded.features_json,stripe_price_id=COALESCE(excluded.stripe_price_id,plans.stripe_price_id),active=excluded.active,featured=excluded.featured,sort_order=excluded.sort_order,updated_at=CURRENT_TIMESTAMP`,
         args: [id,slug,name,String(input.description || ''),input.priceCents == null ? null : Math.max(0,Number(input.priceCents)),licensePlan,Math.max(1,Number(input.maxSeats || 1)),Math.max(1,Number(input.maxInstances || 1)),JSON.stringify(features),String(input.stripePriceId || '') || null,input.active === false ? 0 : 1,input.featured ? 1 : 0,Number(input.sortOrder || 0)],
       });
       await audit(admin.id, 'admin.plan.save', 'plan', id, { slug, name });
