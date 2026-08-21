@@ -31,6 +31,7 @@ const PLANS = {
 const $ = id => document.getElementById(id);
 let lastLicense = null;
 let lastRenewal = null;
+let registryLicenses = [];
 
 for (const [value, label] of FEATURES) {
   const el = document.createElement('label');
@@ -52,8 +53,70 @@ function renderPlan() {
   }
 }
 
+function syncBillingFields() {
+  const subscription = $('billingMode').value === 'subscription';
+  $('initialSubscriptionDaysRow').classList.toggle('hidden', !subscription);
+  $('expiresAt').disabled = subscription;
+  if (subscription) $('expiresAt').value = '';
+}
+
+function displayDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'data indisponível' : date.toLocaleDateString('pt-BR');
+}
+
+function selectHistoryLicense(licenseId) {
+  const record = registryLicenses.find(item => item.licenseId === licenseId);
+  if (!record) return;
+  $('customerId').value = record.customerId ?? '';
+  $('customerName').value = record.customerName ?? '';
+  $('plan').value = record.plan ?? 'pro';
+  $('billingMode').value = record.billingMode === 'perpetual' ? 'perpetual' : 'subscription';
+  $('fingerprint').value = record.fingerprint ?? '';
+  $('expiresAt').value = record.expiresAt ? String(record.expiresAt).slice(0, 10) : '';
+  $('initialSubscriptionDays').value = record.initialSubscriptionDays ?? 30;
+  $('renewalLicenseId').value = record.licenseId;
+  renderPlan();
+  syncBillingFields();
+  const renewalCount = Array.isArray(record.renewals) ? record.renewals.length : 0;
+  $('historyDetail').textContent = `${record.customerName || 'Cliente'} · ${record.licenseId} · ${String(record.plan || '').toUpperCase()} · emitida em ${displayDate(record.issuedAt)} · ${renewalCount} renovação(ões) guardada(s).`;
+  setStatus(`Dados de ${record.customerName || record.licenseId} carregados para emissão ou renovação.`, 'ok');
+}
+
+async function refreshHistory(selectedLicenseId = '') {
+  try {
+    registryLicenses = await window.keygen.listHistory();
+    const query = $('historySearch').value.trim().toLowerCase();
+    const visible = registryLicenses.filter(record => [record.customerId, record.customerName, record.licenseId, record.plan].some(value => String(value ?? '').toLowerCase().includes(query)));
+    const list = $('historyList');
+    list.replaceChildren();
+    for (const record of visible) {
+      const option = document.createElement('option');
+      option.value = record.licenseId;
+      option.textContent = `${record.customerName || 'Cliente'} · ${record.licenseId} · ${String(record.plan || '').toUpperCase()}`;
+      list.appendChild(option);
+    }
+    const target = selectedLicenseId || visible[0]?.licenseId;
+    if (target && visible.some(record => record.licenseId === target)) {
+      list.value = target;
+      selectHistoryLicense(target);
+    } else {
+      $('historyDetail').textContent = query ? 'Nenhum registo corresponde à pesquisa.' : 'Nenhuma licença guardada neste computador.';
+    }
+  } catch (error) {
+    $('historyDetail').textContent = 'Não foi possível ler o histórico local de licenças.';
+    setStatus(error.message || String(error), 'error');
+  }
+}
+
 $('plan').addEventListener('change', renderPlan);
+$('billingMode').addEventListener('change', syncBillingFields);
+$('historySearch').addEventListener('input', () => refreshHistory());
+$('refreshHistory').addEventListener('click', () => refreshHistory());
+$('historyList').addEventListener('change', event => selectHistoryLicense(event.target.value));
 renderPlan();
+syncBillingFields();
+refreshHistory();
 
 $('selectKey').addEventListener('click', async () => {
   const path = await window.keygen.selectPrivateKey();
@@ -85,6 +148,7 @@ $('issue').addEventListener('click', async () => {
       expiresAt: $('expiresAt').value || null,
       fingerprint: $('fingerprint').value,
       billingMode: $('billingMode').value,
+      initialSubscriptionDays: $('initialSubscriptionDays').value,
       features,
     });
     lastLicense = result;
@@ -96,6 +160,7 @@ $('issue').addEventListener('click', async () => {
     $('summary').textContent = `${result.payload.customerName} · ${plan.label} · ${fmt(result.payload.limits.maxInstances)} conta(s) · ${fmt(result.payload.limits.dailyOutbound)} saídas/dia`;
     $('encoded').value = result.encoded;
     $('result').classList.remove('hidden');
+    await refreshHistory(result.payload.licenseId);
     setStatus('Licença gerada e assinada com sucesso.', 'ok');
   } catch (error) {
     setStatus(error.message || String(error), 'error');
@@ -134,6 +199,7 @@ $('issueRenewal').addEventListener('click', async () => {
     $('renewalSummary').textContent = `${result.payload.licenseId} · ${result.payload.days} dia(s) · ${result.payload.plan}`;
     $('renewalEncoded').value = result.encoded;
     $('renewalResult').classList.remove('hidden');
+    await refreshHistory(result.payload.licenseId);
     setStatus('Chave de renovação gerada e assinada com sucesso.', 'ok');
   } catch (error) {
     setStatus(error.message || String(error), 'error');

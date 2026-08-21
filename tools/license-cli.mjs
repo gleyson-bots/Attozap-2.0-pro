@@ -27,6 +27,8 @@ Opções de issue:
   --fingerprint <sha256>       Vincula a uma máquina específica
   --expires <ISO|never>        Padrão: never
   --features <csv>             Recursos liberados; vazio usa os recursos do plano
+  --billing <perpetual|subscription>  Padrão: perpetual
+  --initial-days <1-366>       Período inicial de uma assinatura; padrão: 30
   --out <arquivo>              Salva a licença codificada; use --format pem ou both para ficheiro pronto para importar
   --format <txt|pem|both>      Formato de saída; padrão txt
 `);
@@ -66,6 +68,8 @@ function canonicalize(payload) {
       aiDaily: payload.limits.aiDaily,
     } } : {}),
     fingerprint: payload.fingerprint ?? null,
+    ...(payload.billingMode ? { billingMode: payload.billingMode } : {}),
+    ...(payload.initialSubscriptionDays ? { initialSubscriptionDays: payload.initialSubscriptionDays } : {}),
     version: payload.version,
   });
 }
@@ -100,8 +104,15 @@ function issue(options) {
   const plan = normalizePlan(options.plan);
   if (!plan) throw new Error(`Plano inválido: ${options.plan}. Use plus, pro, ultra ou enterprise.`);
 
+  const billingMode = String(options.billing ?? 'perpetual').toLowerCase();
+  if (!['perpetual', 'subscription'].includes(billingMode)) throw new Error('--billing deve ser perpetual ou subscription');
+  const initialSubscriptionDays = Number(options['initial-days'] ?? 30);
+  if (billingMode === 'subscription' && (!Number.isInteger(initialSubscriptionDays) || initialSubscriptionDays < 1 || initialSubscriptionDays > 366)) {
+    throw new Error('--initial-days deve estar entre 1 e 366');
+  }
+
   let expiresAt = null;
-  if (options.expires && options.expires !== 'never') {
+  if (billingMode === 'perpetual' && options.expires && options.expires !== 'never') {
     const date = new Date(options.expires);
     if (Number.isNaN(date.getTime())) throw new Error('--expires inválido');
     expiresAt = date.toISOString();
@@ -121,6 +132,8 @@ function issue(options) {
     limits,
     features: (features.length ? features : featuresFor(plan)).sort(),
     fingerprint: options.fingerprint || null,
+    billingMode,
+    ...(billingMode === 'subscription' ? { initialSubscriptionDays } : {}),
     version: 1,
   };
 

@@ -25,6 +25,8 @@ function canonicalize(payload: LicensePayload) {
       aiDaily: payload.limits.aiDaily,
     } } : {}),
     fingerprint: payload.fingerprint ?? null,
+    ...(payload.billingMode ? { billingMode: payload.billingMode } : {}),
+    ...(payload.initialSubscriptionDays ? { initialSubscriptionDays: payload.initialSubscriptionDays } : {}),
     version: payload.version,
   });
 }
@@ -48,6 +50,8 @@ export function issueLicense(input: {
   limits?: PlanLimits;
   features?: string[];
   fingerprint?: string | null;
+  billingMode?: 'perpetual' | 'subscription';
+  initialSubscriptionDays?: number;
 }, privateKeyPem: string): SignedLicense {
   const plan = commercialPlan(input.plan);
   const limits = input.limits ?? planLimits(plan);
@@ -63,6 +67,8 @@ export function issueLicense(input: {
     limits,
     features: [...new Set(input.features?.length ? input.features : planFeatures(plan))].sort(),
     fingerprint: input.fingerprint ?? null,
+    ...(input.billingMode ? { billingMode: input.billingMode } : {}),
+    ...(input.billingMode === 'subscription' ? { initialSubscriptionDays: input.initialSubscriptionDays ?? 30 } : {}),
     version: 1,
   };
   const key = createPrivateKey(privateKeyPem);

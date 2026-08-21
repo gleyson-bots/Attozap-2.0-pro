@@ -17,6 +17,7 @@ export type LicensePayload = {
   limits?: PlanLimits;
   fingerprint?: string | null;
   billingMode?: 'perpetual' | 'subscription';
+  initialSubscriptionDays?: number;
   version: 1;
 };
 
@@ -79,6 +80,7 @@ function canonicalize(payload: LicensePayload) {
     } } : {}),
     fingerprint: payload.fingerprint ?? null,
     ...(payload.billingMode ? { billingMode: payload.billingMode } : {}),
+    ...(payload.initialSubscriptionDays ? { initialSubscriptionDays: payload.initialSubscriptionDays } : {}),
     version: payload.version,
   });
 }
@@ -106,7 +108,15 @@ export function validateSignedLicense(
       return { valid: false, reason: 'INVALID_SIGNATURE' };
     }
 
-    if (license.payload.expiresAt && new Date(license.payload.expiresAt).getTime() <= now.getTime()) {
+    const subscription = license.payload.billingMode === 'subscription';
+    const initialDays = license.payload.initialSubscriptionDays;
+    if (initialDays != null && (!subscription || !Number.isInteger(initialDays) || initialDays < 1 || initialDays > 366)) {
+      return { valid: false, reason: 'INVALID_PAYLOAD' };
+    }
+
+    // A expiração das assinaturas é controlada localmente pela renovação. Em licenças
+    // perpétuas com data limite, o campo continua a funcionar como expiração definitiva.
+    if (!subscription && license.payload.expiresAt && new Date(license.payload.expiresAt).getTime() <= now.getTime()) {
       return { valid: false, reason: 'EXPIRED', payload: license.payload };
     }
 

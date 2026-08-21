@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron');
 const { createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign } = require('node:crypto');
-const { existsSync, readFileSync, writeFileSync } = require('node:fs');
+const { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 
 const PLAN_LIMITS = {
@@ -35,6 +35,7 @@ function canonicalize(payload) {
     } } : {}),
     fingerprint: payload.fingerprint ?? null,
     ...(payload.billingMode ? { billingMode: payload.billingMode } : {}),
+    ...(payload.initialSubscriptionDays ? { initialSubscriptionDays: payload.initialSubscriptionDays } : {}),
     version: payload.version,
   });
 }
@@ -56,6 +57,80 @@ function canonicalizeRenewal(payload) {
 function normalizePlan(value) {
   const plan = String(value ?? '').trim().toLowerCase();
   return PLAN_LIMITS[plan] ? plan : LEGACY_PLAN_MAP[plan] || null;
+}
+
+const REGISTRY_VERSION = 1;
+
+function registryFile() {
+  return path.join(app.getPath('userData'), 'attozap-license-registry.json');
+}
+
+function emptyRegistry() {
+  return { version: REGISTRY_VERSION, licenses: [] };
+}
+
+function loadRegistry() {
+  const file = registryFile();
+  if (!existsSync(file)) return emptyRegistry();
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    if (!parsed || !Array.isArray(parsed.licenses)) throw new Error('INVALID_REGISTRY');
+    return { version: REGISTRY_VERSION, licenses: parsed.licenses.filter(item => item && typeof item.licenseId === 'string') };
+  } catch {
+    try { renameSync(file, `${file}.corrompido-${Date.now()}`); } catch { /* preserva o ficheiro original se não puder renomear */ }
+    return emptyRegistry();
+  }
+}
+
+function saveRegistry(registry) {
+  const file = registryFile();
+  mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, JSON.stringify({ version: REGISTRY_VERSION, licenses: registry.licenses }, null, 2) + '\n', { mode: 0o600 });
+  renameSync(temporary, file);
+}
+
+function recordLicense(payload) {
+  const registry = loadRegistry();
+  const record = {
+    licenseId: payload.licenseId,
+    customerId: payload.customerId,
+    customerName: payload.customerName,
+    plan: payload.plan,
+    billingMode: payload.billingMode,
+    fingerprint: payload.fingerprint ?? null,
+    expiresAt: payload.expiresAt ?? null,
+    initialSubscriptionDays: payload.initialSubscriptionDays ?? null,
+    issuedAt: payload.issuedAt,
+    renewals: [],
+  };
+  const index = registry.licenses.findIndex(item => item.licenseId === payload.licenseId);
+  if (index >= 0) registry.licenses[index] = { ...registry.licenses[index], ...record, renewals: registry.licenses[index].renewals ?? [] };
+  else registry.licenses.unshift(record);
+  saveRegistry(registry);
+}
+
+function recordRenewal(payload) {
+  const registry = loadRegistry();
+  let record = registry.licenses.find(item => item.licenseId === payload.licenseId);
+  if (!record) {
+    record = {
+      licenseId: payload.licenseId,
+      customerId: payload.customerId,
+      customerName: 'Cliente recuperado manualmente',
+      plan: payload.plan,
+      billingMode: 'subscription',
+      fingerprint: payload.fingerprint ?? null,
+      expiresAt: null,
+      initialSubscriptionDays: null,
+      issuedAt: payload.issuedAt,
+      renewals: [],
+    };
+    registry.licenses.unshift(record);
+  }
+  const renewal = { renewalId: payload.renewalId, issuedAt: payload.issuedAt, days: payload.days };
+  record.renewals = [...(record.renewals ?? []).filter(item => item.renewalId !== renewal.renewalId), renewal];
+  saveRegistry(registry);
 }
 
 function embeddedPublicKey() {
@@ -154,6 +229,8 @@ app.whenReady().then(() => {
     return selected.canceled ? null : selected.filePaths[0] ?? null;
   });
 
+  ipcMain.handle('history:list', () => loadRegistry().licenses);
+
   ipcMain.handle('license:issue', async (_event, input) => {
     if (!input?.privateKeyPath) throw new Error('Selecione a chave privada.');
     if (!input.customerId?.trim()) throw new Error('Informe o ID do cliente.');
@@ -169,8 +246,14 @@ app.whenReady().then(() => {
       if (limits[key] != null) limits[key] = Number(limits[key]);
     }
 
+    const billingMode = input.billingMode === 'perpetual' ? 'perpetual' : 'subscription';
+    const initialSubscriptionDays = Number(input.initialSubscriptionDays ?? 30);
+    if (billingMode === 'subscription' && (!Number.isInteger(initialSubscriptionDays) || initialSubscriptionDays < 1 || initialSubscriptionDays > 366)) {
+      throw new Error('O período inicial deve ter entre 1 e 366 dias.');
+    }
+
     let expiresAt = null;
-    if (input.expiresAt) {
+    if (billingMode === 'perpetual' && input.expiresAt) {
       const date = new Date(input.expiresAt);
       if (Number.isNaN(date.getTime())) throw new Error('Data de expiração inválida.');
       expiresAt = date.toISOString();
@@ -188,7 +271,8 @@ app.whenReady().then(() => {
       limits,
       features: [...new Set((input.features ?? []).map(value => String(value).trim()).filter(Boolean))].sort(),
       fingerprint: input.fingerprint?.trim() || null,
-      billingMode: input.billingMode === 'perpetual' ? 'perpetual' : 'subscription',
+      billingMode,
+      ...(billingMode === 'subscription' ? { initialSubscriptionDays } : {}),
       version: 1,
     };
 
@@ -196,6 +280,7 @@ app.whenReady().then(() => {
     const signature = sign(null, Buffer.from(canonicalize(payload)), privateKey).toString('base64url');
     const signed = { payload, signature, algorithm: 'Ed25519' };
     const encoded = Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
+    recordLicense(payload);
     return { payload, encoded };
   });
 
@@ -223,6 +308,7 @@ app.whenReady().then(() => {
     const signature = sign(null, Buffer.from(canonicalizeRenewal(payload)), privateKey).toString('base64url');
     const signed = { payload, signature, algorithm: 'Ed25519' };
     const encoded = Buffer.from(JSON.stringify(signed), 'utf8').toString('base64url');
+    recordRenewal(payload);
     return { payload, encoded };
   });
 

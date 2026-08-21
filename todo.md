@@ -20,3 +20,6 @@
 - [x] Corrigir a rolagem do editor visual de automações, incluindo a navegação da biblioteca de nós em ecrãs compactos.
 - [x] Auditar os contratos críticos de automações, IPC, licenças, envios e interface para a preparação de lançamento oficial.
 - [x] Executar a bateria de validações, compilar a RC.17 corrigida, publicar na branch `admin` e entregar o executável auditado.
+- [x] Corrigir a ativação inicial para que uma licença válida de novo cliente não exija chave de renovação.
+- [x] Adicionar ao Keygen um registo persistente local de clientes, licenças emitidas e dados de renovação recuperáveis.
+- [x] Validar o ciclo completo de emissão, importação inicial, renovação, compilação e distribuição atualizada.

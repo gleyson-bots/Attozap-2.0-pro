@@ -135,6 +135,16 @@ export class LicenseService {
     };
   }
 
+  private initialSubscriptionFor(payload: LicensePayload, now = Date.now()) {
+    const requestedDays = Number(payload.initialSubscriptionDays ?? 30);
+    const days = Number.isInteger(requestedDays) && requestedDays >= 1 && requestedDays <= 366 ? requestedDays : 30;
+    return {
+      startedAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + days * DAY_MS).toISOString(),
+      lastSeenAt: new Date(now).toISOString(),
+    };
+  }
+
   private verifiedPayload() {
     const payload = this.verifiedLicensePayload();
     const subscription = this.subscriptionFor(payload);
@@ -255,6 +265,14 @@ export class LicenseService {
         INSERT INTO licenses (license_id, encoded_license, customer_id, plan, expires_at, validation_status)
         VALUES (?, ?, ?, ?, ?, 'valid')
       `).run(payload.licenseId, encoded.trim(), payload.customerId, payload.plan, payload.expiresAt);
+      if (payload.billingMode === 'subscription') {
+        const initial = this.initialSubscriptionFor(payload);
+        this.db.prepare(`
+          INSERT INTO license_subscriptions (license_id,renewal_id,started_at,expires_at,last_seen_at,updated_at)
+          VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
+          ON CONFLICT(license_id) DO NOTHING
+        `).run(payload.licenseId, null, initial.startedAt, initial.expiresAt, initial.lastSeenAt);
+      }
       this.db.prepare(`INSERT INTO audit_log (actor,action,entity_type,entity_id,metadata_json) VALUES ('local-user','license.activate','license',?,?)`).run(payload.licenseId, JSON.stringify({ plan: payload.plan, customer: payload.customerName, billingMode: payload.billingMode ?? 'perpetual', limits: this.limitsFor(payload) }));
     });
     tx();

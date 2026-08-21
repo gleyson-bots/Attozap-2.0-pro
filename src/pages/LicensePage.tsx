@@ -59,7 +59,7 @@ export function LicenseActivationPage() {
       const next = await window.attozap.license.activate(encoded.trim());
       setStatus(next);
       setEncoded('');
-      setNotice(next.valid ? 'Licença ativada com sucesso nesta máquina.' : `A licença foi salva, mas não é válida: ${next.reason ?? 'INVALID_LICENSE'}.`);
+      setNotice(next.valid ? (next.subscription?.required ? `Licença ativada e mensalidade inicial liberada por ${next.subscription.daysRemaining ?? 0} dia(s).` : 'Licença ativada com sucesso nesta máquina.') : `A licença foi salva, mas não é válida: ${next.reason ?? 'INVALID_LICENSE'}.`);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally { setBusy(false); }
@@ -72,7 +72,7 @@ export function LicenseActivationPage() {
       if (result.canceled) return;
       setStatus(result.status);
       setEncoded('');
-      setNotice(result.status.valid ? `Licença importada de ${result.fileName ?? 'arquivo'} com sucesso nesta máquina.` : `O arquivo foi salvo, mas a licença não é válida: ${result.status.reason ?? 'INVALID_LICENSE'}.`);
+      setNotice(result.status.valid ? (result.status.subscription?.required ? `Licença importada de ${result.fileName ?? 'arquivo'} e mensalidade inicial liberada por ${result.status.subscription.daysRemaining ?? 0} dia(s).` : `Licença importada de ${result.fileName ?? 'arquivo'} com sucesso nesta máquina.`) : `O arquivo foi salvo, mas a licença não é válida: ${result.status.reason ?? 'INVALID_LICENSE'}.`);
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }

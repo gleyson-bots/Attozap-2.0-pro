@@ -1,0 +1,43 @@
+.history-card {
+  margin-bottom: 18px;
+}
+
+.history-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.history-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr);
+  gap: 12px;
+}
+
+#historyList {
+  min-height: 156px;
+  padding: 6px;
+}
+
+#historyList option {
+  padding: 9px 10px;
+  border-radius: 7px;
+}
+
+.history-detail {
+  border: 1px solid #26384a;
+  border-radius: 11px;
+  background: #09111a;
+  color: #9eb0c4;
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .history-toolbar,
+  .history-grid {
+    grid-template-columns: 1fr;
+  }
+}

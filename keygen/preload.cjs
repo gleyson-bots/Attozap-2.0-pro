@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('keygen', {
   generateKeys: () => ipcRenderer.invoke('keys:generate'),
   selectPrivateKey: () => ipcRenderer.invoke('keys:select-private'),
+  listHistory: () => ipcRenderer.invoke('history:list'),
   issueLicense: payload => ipcRenderer.invoke('license:issue', payload),
   issueRenewal: payload => ipcRenderer.invoke('renewal:issue', payload),
   saveLicense: (encoded, suggestedName) => ipcRenderer.invoke('license:save', encoded, suggestedName),

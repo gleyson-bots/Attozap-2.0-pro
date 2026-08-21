@@ -11,6 +11,7 @@ files:
   - index.html
   - renderer.js
   - styles.css
+  - history.css
   - main.cjs
   - preload.cjs
   - package.json

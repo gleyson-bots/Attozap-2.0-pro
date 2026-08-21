@@ -53,7 +53,7 @@ async function readState(socket) {
       href: location.href,
       readyState: document.readyState,
       text: (document.body?.innerText || '').slice(0, 2500),
-      hasBridge: typeof window.keygen === 'object' && typeof window.keygen.issueLicense === 'function'
+      hasBridge: typeof window.keygen === 'object' && typeof window.keygen.issueLicense === 'function' && typeof window.keygen.listHistory === 'function'
     })`,
     returnByValue: true,
   });
@@ -71,7 +71,7 @@ try {
     await sleep(500);
   }
   if (!current?.hasBridge) throw new Error(`KeyGen preload bridge missing: ${JSON.stringify(current)}`);
-  if (!String(current.text || '').includes('ATTOZAP')) throw new Error(`KeyGen UI did not render: ${JSON.stringify(current)}`);
+  if (!String(current.text || '').includes('ATTOZAP') || !String(current.text || '').includes('Clientes e licenças guardados')) throw new Error(`KeyGen UI/history did not render: ${JSON.stringify(current)}`);
   await command(socket, 'Page.enable');
   const screenshot = await command(socket, 'Page.captureScreenshot', { format: 'png', fromSurface: true });
   writeFileSync(screenshotPath, Buffer.from(screenshot.data, 'base64'));
