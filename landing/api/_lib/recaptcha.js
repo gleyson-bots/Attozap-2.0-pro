@@ -2,13 +2,17 @@ function secretKey() {
   return String(process.env.RECAPTCHA_SECRET_KEY || '').trim();
 }
 
+function siteKey() {
+  return String(process.env.VITE_RECAPTCHA_SITE_KEY || '').trim();
+}
+
 export function recaptchaConfigured() {
-  return Boolean(secretKey());
+  return Boolean(secretKey() && siteKey());
 }
 
 export async function verifyRecaptcha(req, token) {
   const secret = secretKey();
-  if (!secret) return { configured: false, success: true };
+  if (!secret || !siteKey()) return { configured: false, success: true };
 
   const responseToken = String(token || '').trim();
   if (!responseToken) {
