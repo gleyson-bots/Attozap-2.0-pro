@@ -5,12 +5,27 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import DashboardLayout from "./components/DashboardLayout";
+import Dashboard from "./pages/Dashboard";
+import Licenses from "./pages/Licenses";
+import Downloads from "./pages/Downloads";
+import AIAgent from "./pages/AIAgent";
+import Admin from "./pages/Admin";
+
+function ProtectedPage({ children, requiredRole }: { children: React.ReactNode; requiredRole?: "admin" }) {
+  return <DashboardLayout requiredRole={requiredRole}>{children}</DashboardLayout>;
+}
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/painel"}><ProtectedPage><Dashboard /></ProtectedPage></Route>
+      <Route path={"/licenca"}><ProtectedPage><Licenses /></ProtectedPage></Route>
+      <Route path={"/downloads"}><ProtectedPage><Downloads /></ProtectedPage></Route>
+      <Route path={"/agentes"}><ProtectedPage><AIAgent /></ProtectedPage></Route>
+      <Route path={"/admin"}><ProtectedPage requiredRole="admin"><Admin /></ProtectedPage></Route>
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
@@ -27,7 +42,7 @@ function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider
-        defaultTheme="light"
+        defaultTheme="dark"
         // switchable
       >
         <TooltipProvider>

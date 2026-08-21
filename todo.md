@@ -1,0 +1,26 @@
+# Project TODO
+
+- [x] Importar e adaptar a referência visual do branch `landng page` do repositório ATTOZAP sem copiar credenciais ou artefactos sensíveis.
+- [x] Definir o tema premium dark ATTOZAP com tokens verde/verde-escuro, contraste acessível, tipografia e componentes consistentes.
+- [x] Modelar e aplicar schema para planos, licenças, renovações, versões de download, contas WhatsApp e configurações de agente IA.
+- [x] Implementar procedimentos protegidos para painel do utilizador, renovação por chave, downloads autorizados e configurações de agente.
+- [x] Implementar procedimentos exclusivos de administrador para gerir utilizadores, planos, licenças, renovações, versões e links de download.
+- [x] Aplicar autorização por papel no servidor e refletir as permissões na navegação e nas rotas da interface.
+- [x] Criar landing page pública baseada no branch `landng page`, com CTAs para registo, planos, área do cliente e downloads.
+- [x] Criar shell autenticado com sidebar responsiva para Visão geral, Licença, Renovações, Downloads e Agentes IA.
+- [x] Criar painel do utilizador com estado da licença, plano ativo, dias restantes, histórico de renovações e fluxo de chave de renovação.
+- [x] Criar área administrativa para gestão de utilizadores, licenças, planos, expirações, renovações e estado de acesso.
+- [x] Criar área administrativa de downloads com upload para armazenamento S3, notas de versão e elegibilidade por plano.
+- [x] Criar configurador de agente de IA por conta WhatsApp com seleção de conta, modos de operação, modelo, temperatura, prompt de sistema e chave protegida.
+- [x] Disponibilizar exatamente os provedores OpenAI, Anthropic, Groq, OpenRouter, NVIDIA NIM, xAI, Pollinations AI e Hugging Face no configurador do agente.
+- [x] Adicionar estados de carregamento, vazio, erro, confirmação e acessibilidade em todas as ações críticas.
+- [x] Cobrir procedimentos de licença, autorização e configurações do agente com testes Vitest.
+- [x] Executar migrations, testes, typecheck e validação visual responsiva antes da publicação.
+- [ ] Guardar checkpoint final e orientar a publicação do portal na Vercel ou no alojamento integrado.
+- [x] Usar a branch confirmada `landing` como referência visual e funcional da landing page pública do portal.
+- [x] Adicionar entidade de conta WhatsApp associada ao utilizador e ligar as configurações de agente a essa conta.
+- [x] Implementar renovação pelo próprio utilizador com consumo único de chave de renovação e registo no histórico.
+- [x] Completar a gestão administrativa de utilizadores e planos e preparar upload real de versões para armazenamento S3.
+- [x] Criar testes de routers para licença, agente de IA e bloqueio de acesso administrativo.
+- [x] Reforçar e validar a proteção visual da rota administrativa, além das permissões de servidor já testadas.
+- [x] Validar em código os estados e contratos das páginas de painel, downloads e configuração de agentes antes do checkpoint.

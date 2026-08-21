@@ -21,15 +21,32 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users } from "lucide-react";
+import {
+  Bot,
+  Download,
+  History,
+  LayoutDashboard,
+  LogOut,
+  PanelLeft,
+  ShieldCheck,
+  UserRoundCog,
+  Users,
+} from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 
-const menuItems = [
-  { icon: LayoutDashboard, label: "Page 1", path: "/" },
-  { icon: Users, label: "Page 2", path: "/some-path" },
+const portalMenu = [
+  { icon: LayoutDashboard, label: "Visão geral", path: "/painel" },
+  { icon: ShieldCheck, label: "Licença", path: "/licenca" },
+  { icon: History, label: "Renovações", path: "/licenca#renovacoes" },
+  { icon: Download, label: "Downloads", path: "/downloads" },
+  { icon: Bot, label: "Agentes de IA", path: "/agentes" },
+];
+
+const adminMenu = [
+  { icon: UserRoundCog, label: "Administração", path: "/admin" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -39,8 +56,10 @@ const MAX_WIDTH = 480;
 
 export default function DashboardLayout({
   children,
+  requiredRole,
 }: {
   children: React.ReactNode;
+  requiredRole?: "admin";
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
@@ -60,12 +79,12 @@ export default function DashboardLayout({
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
-          <div className="flex flex-col items-center gap-6">
+            <div className="flex flex-col items-center gap-6">
             <h1 className="text-2xl font-semibold tracking-tight text-center">
-              Sign in to continue
+              Entre para continuar
             </h1>
             <p className="text-sm text-muted-foreground text-center max-w-sm">
-              Access to this dashboard requires authentication. Continue to launch the login flow.
+              Esta área reúne as suas licenças, versões autorizadas e configurações por conta WhatsApp.
             </p>
           </div>
           <Button
@@ -73,12 +92,21 @@ export default function DashboardLayout({
             size="lg"
             className="w-full shadow-lg hover:shadow-xl transition-all"
           >
-            Sign in
+              Entrar no portal
           </Button>
         </div>
       </div>
     );
   }
+
+  const protectedContent = requiredRole === "admin" && user.role !== "admin" ? (
+    <div className="mx-auto flex min-h-[55vh] max-w-xl flex-col justify-center rounded-2xl border border-border bg-card/55 p-8 text-center">
+      <p className="text-[10px] font-extrabold uppercase tracking-[.16em] text-primary">Acesso restrito</p>
+      <h1 className="mt-3 font-['Space_Grotesk'] text-2xl font-bold tracking-[-.05em]">Esta área é apenas para administração.</h1>
+      <p className="mt-3 text-sm leading-6 text-muted-foreground">O seu perfil não possui autorização para gerir licenças, utilizadores ou versões. A validação também é aplicada no servidor.</p>
+      <a href="/painel" className="mt-6 text-sm font-bold text-primary hover:underline">Voltar ao painel</a>
+    </div>
+  ) : children;
 
   return (
     <SidebarProvider
@@ -89,7 +117,7 @@ export default function DashboardLayout({
       }
     >
       <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
-        {children}
+        {protectedContent}
       </DashboardLayoutContent>
     </SidebarProvider>
   );
@@ -110,6 +138,7 @@ function DashboardLayoutContent({
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const menuItems = user?.role === "admin" ? [...portalMenu, ...adminMenu] : portalMenu;
   const activeMenuItem = menuItems.find(item => item.path === location);
   const isMobile = useIsMobile();
 
@@ -169,7 +198,7 @@ function DashboardLayoutContent({
               {!isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-semibold tracking-tight truncate">
-                    Navigation
+                    ATTOZAP Portal
                   </span>
                 </div>
               ) : null}
@@ -224,7 +253,7 @@ function DashboardLayoutContent({
                   className="cursor-pointer text-destructive focus:text-destructive"
                 >
                   <LogOut className="mr-2 h-4 w-4" />
-                  <span>Sign out</span>
+                  <span>Sair</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -255,7 +284,7 @@ function DashboardLayoutContent({
             </div>
           </div>
         )}
-        <main className="flex-1 p-4">{children}</main>
+        <main className="flex-1 p-4 md:p-7">{children}</main>
       </SidebarInset>
     </>
   );
