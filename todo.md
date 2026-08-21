@@ -17,3 +17,6 @@
 - [x] Validar, publicar na branch `admin` e gerar o executável atualizado com o modo operacional de automações.
 - [x] Confirmar os artefactos RC.17, compilar o Keygen compatível e montar um pacote único com as chaves Ed25519 rc.16 mantidas.
 - [x] Verificar checksums do pacote de distribuição e entregar o arquivo compactado.
+- [x] Corrigir a rolagem do editor visual de automações, incluindo a navegação da biblioteca de nós em ecrãs compactos.
+- [x] Auditar os contratos críticos de automações, IPC, licenças, envios e interface para a preparação de lançamento oficial.
+- [x] Executar a bateria de validações, compilar a RC.17 corrigida, publicar na branch `admin` e entregar o executável auditado.

@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const engine = readFileSync(resolve(root, 'electron/automation/workflow-engine.ts'), 'utf8');
 const editor = readFileSync(resolve(root, 'src/pages/VisualAutomationPage.tsx'), 'utf8');
+const styles = readFileSync(resolve(root, 'src/ui-pages.css'), 'utf8');
 
 const allowedBlock = engine.match(/const allowed: WorkflowNodeType\[\] = \[([^\]]+)\]/s)?.[1] ?? '';
 const runtimeTypes = [...allowedBlock.matchAll(/'([^']+)'/g)].map(match => match[1]);
@@ -16,5 +17,6 @@ if (!editor.includes('screenToFlowPosition') || !editor.includes('onNodeDragStop
 if (!editor.includes('validationFor') || !editor.includes('O workflow contém um ciclo')) throw new Error('A validação visual de ciclos não está ativa.');
 if (!engine.includes('publicHttpUrl') || !engine.includes('O nó HTTP bloqueia endereços locais e privados')) throw new Error('O nó HTTP não possui validação de destinos públicos.');
 if (!engine.includes("case 'telegram_send'") || !engine.includes('ATTOZAP_TELEGRAM_BOT_TOKEN')) throw new Error('O nó Telegram não possui execução protegida.');
+if (!styles.includes('.workflow-flow-page { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto;') || !styles.includes('.workflow-library, .workflow-inspector { min-width: 0; min-height: 0;') || !styles.includes('overflow-y: auto; overscroll-behavior: contain;')) throw new Error('O editor precisa preservar a rolagem da página, biblioteca e inspector fora do modo foco.');
 
 console.log(`WORKFLOW EDITOR CONTRACT OK: ${runtimeTypes.length} tipos de nó, ramos condicionais e posições persistidas.`);
