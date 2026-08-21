@@ -1,14 +1,25 @@
 import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify } from 'jose';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { audit, db, ensureSchema, normalizeEmail, publicUser } from './db.js';
 
 const COOKIE_NAME = 'attozap_session';
 
 function secret() {
-  const value = process.env.AUTH_SECRET;
-  if (!value || value.length < 32) throw new Error('AUTH_SECRET deve ter pelo menos 32 caracteres');
-  return new TextEncoder().encode(value);
+  const explicit = String(process.env.AUTH_SECRET || '').trim();
+  if (explicit.length >= 32) return new TextEncoder().encode(explicit);
+
+  // Fallback seguro para ambientes onde AUTH_SECRET ainda não foi cadastrado:
+  // deriva uma chave HMAC de 256 bits de um segredo já exclusivamente server-side.
+  // Nada do TURSO_AUTH_TOKEN é enviado ao navegador ou persistido no banco.
+  const tursoToken = String(process.env.TURSO_AUTH_TOKEN || '').trim();
+  if (tursoToken.length >= 32) {
+    return createHash('sha256')
+      .update(`attozap:portal:auth:v1:${tursoToken}`, 'utf8')
+      .digest();
+  }
+
+  throw new Error('Configuração de autenticação indisponível. Defina AUTH_SECRET ou TURSO_AUTH_TOKEN na Vercel.');
 }
 
 export async function ensureAdmin() {
