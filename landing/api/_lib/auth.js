@@ -20,11 +20,19 @@ function secret() {
   throw new Error('Configuração de autenticação indisponível. Defina AUTH_SECRET ou TURSO_AUTH_TOKEN na Vercel.');
 }
 
+function bootstrapAdminCredentials() {
+  return {
+    email: normalizeEmail(process.env.ADMIN_EMAIL),
+    password: String(process.env.ADMIN_PASSWORD || ''),
+    name: String(process.env.ADMIN_NAME || 'Administrador ATTOZAP').trim() || 'Administrador ATTOZAP',
+  };
+}
+
 export async function ensureAdmin() {
   await ensureSchema();
-  const email = normalizeEmail(process.env.ADMIN_EMAIL);
-  const password = String(process.env.ADMIN_PASSWORD || '');
+  const { email, password, name } = bootstrapAdminCredentials();
   if (!email || !password) return;
+
   const existing = await db().execute({ sql: `SELECT id,role,status FROM users WHERE email=? LIMIT 1`, args: [email] });
   if (existing.rows[0]) {
     if (existing.rows[0].role !== 'admin' || existing.rows[0].status !== 'active') {
@@ -33,13 +41,30 @@ export async function ensureAdmin() {
     }
     return;
   }
+
   const id = randomUUID();
   const passwordHash = await bcrypt.hash(password, 12);
   await db().execute({
     sql: `INSERT INTO users (id,name,email,password_hash,role,status) VALUES (?,?,?,?, 'admin','active')`,
-    args: [id, process.env.ADMIN_NAME || 'Administrador ATTOZAP', email, passwordHash],
+    args: [id, name, email, passwordHash],
   });
   await audit(id, 'admin.bootstrap', 'user', id, { email });
+}
+
+async function recoverBootstrapAdmin(row, normalizedEmail, suppliedPassword) {
+  const bootstrap = bootstrapAdminCredentials();
+  if (!row || !bootstrap.email || !bootstrap.password) return null;
+  if (normalizedEmail !== bootstrap.email || String(suppliedPassword || '') !== bootstrap.password) return null;
+
+  const passwordHash = await bcrypt.hash(bootstrap.password, 12);
+  await db().execute({
+    sql: `UPDATE users SET name=?,password_hash=?,role='admin',status='active',updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+    args: [bootstrap.name, passwordHash, row.id],
+  });
+  await audit(row.id, 'admin.bootstrap.credentials.sync', 'user', row.id, { email: bootstrap.email });
+
+  const refreshed = await db().execute({ sql: `SELECT * FROM users WHERE id=? LIMIT 1`, args: [row.id] });
+  return refreshed.rows[0] || null;
 }
 
 export async function createSession(user) {
@@ -143,8 +168,18 @@ export async function loginUser(email, password) {
   await ensureAdmin();
   const normalized = normalizeEmail(email);
   const result = await db().execute({ sql: `SELECT * FROM users WHERE email=? LIMIT 1`, args: [normalized] });
-  const row = result.rows[0];
-  if (!row || !(await bcrypt.compare(String(password || ''), String(row.password_hash)))) {
+  let row = result.rows[0];
+
+  let validPassword = Boolean(row) && await bcrypt.compare(String(password || ''), String(row.password_hash));
+  if (!validPassword && row) {
+    const recovered = await recoverBootstrapAdmin(row, normalized, password);
+    if (recovered) {
+      row = recovered;
+      validPassword = true;
+    }
+  }
+
+  if (!row || !validPassword) {
     throw Object.assign(new Error('E-mail ou senha incorretos'), { statusCode: 401 });
   }
   if (row.status !== 'active') throw Object.assign(new Error('Esta conta está bloqueada'), { statusCode: 403 });
