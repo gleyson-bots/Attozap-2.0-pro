@@ -30,3 +30,8 @@
 - [x] Implementar autenticação própria por email e palavra-passe com hash seguro, sessão HTTP-only e perfis de utilizador/admin.
 - [x] Adaptar a aplicação e a documentação para execução independente na Vercel, sem segredos ou APIs do Manus.
 - [x] Versionar e enviar o código independente do portal para o repositório GitHub selecionado.
+- [x] Restaurar a identidade premium verde-escura do ATTOZAP na landing pública, sem alterar as áreas autenticadas.
+- [x] Reintroduzir uma assinatura visual ATTOZAP acessível e responsiva no cabeçalho da landing.
+- [x] Validar visualmente, testar, guardar checkpoint e publicar as correções de marca na branch `portal-vercel`.
+- [x] Guardar checkpoint do portal com a identidade visual restaurada e a rota segura de ativos estáticos.
+- [x] Publicar as alterações da correção de marca na branch `portal-vercel` do GitHub.

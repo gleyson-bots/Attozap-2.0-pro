@@ -19,7 +19,11 @@ import {
 import { useState } from "react";
 import { useLocation } from "wouter";
 
-const BrandMark = () => <span className="font-['Space_Grotesk'] text-lg font-black">A</span>;
+const ATTOZAP_LOGO_URL = "/manus-storage/attozap-logo_c75a0cb2.svg";
+
+const BrandMark = ({ alt = "" }: { alt?: string }) => (
+  <img src={ATTOZAP_LOGO_URL} alt={alt} />
+);
 
 const featureCards = [
   { icon: MessageCircle, title: "WebChat fluido", text: "Conversas, ficheiros, localização, contactos e enquêtes num espaço pensado para operar sem fricção.", tag: "Conversas" },
@@ -86,7 +90,7 @@ export default function Home() {
       <header className="atto-topbar">
         <div className="atto-container atto-nav-inner">
           <button className="atto-brand" onClick={() => scrollToId("inicio")} aria-label="Ir para o início">
-            <span className="atto-brand-orb"><BrandMark /></span>
+            <span className="atto-brand-orb"><BrandMark alt="" /></span>
             <span className="atto-brand-copy"><strong>ATTOZAP</strong><small>WASENDER PRO</small></span>
           </button>
           <nav className="atto-nav-links" aria-label="Navegação principal">
