@@ -2,7 +2,7 @@ import './styles.css';
 import './portal-theme.css';
 
 const portalPaths = ['/login', '/cadastro', '/portal', '/admin'];
-const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+const pathname = (window.location.pathname.replace(/\.html$/i, '').replace(/\/+$/, '') || '/');
 
 if (portalPaths.includes(pathname)) {
   await import('./portal.jsx');
