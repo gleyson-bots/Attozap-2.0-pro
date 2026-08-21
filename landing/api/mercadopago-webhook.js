@@ -39,7 +39,7 @@ async function syncPreapproval(preapproval, { paymentApproved = false } = {}) {
   if (!owner) return { skipped: 'owner_missing' };
   const { user, plan } = owner;
   const recordId = `mp_${preapproval.id}`;
-  const status = normalizedStatus(preapproval.status);
+  const status = paymentApproved ? 'active' : normalizedStatus(preapproval.status);
   const expiresAt = preapproval.next_payment_date || null;
   const previous = (await db().execute({ sql: `SELECT * FROM subscriptions WHERE id=? LIMIT 1`, args: [recordId] })).rows[0];
   const previousLicense = (await db().execute({ sql: `SELECT id,status FROM licenses WHERE subscription_id=? ORDER BY created_at DESC LIMIT 1`, args: [recordId] })).rows[0];
