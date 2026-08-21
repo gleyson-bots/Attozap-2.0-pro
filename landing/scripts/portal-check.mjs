@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
-const repoRoot = resolve(root, '..');
 const failures = [];
 const assert = (condition, message) => { if (!condition) failures.push(message); };
 const read = path => readFileSync(resolve(root, path), 'utf8');
@@ -12,9 +11,9 @@ const requiredFiles = [
   'index.html', 'login.html', 'cadastro.html', 'portal.html', 'admin.html',
   'login/index.html', 'cadastro/index.html', 'portal/index.html', 'admin/index.html',
   'src/entry.jsx', 'src/portal.jsx', 'src/portal.css', 'src/portal-theme.css',
-  'api/auth.js', 'api/customer.js', 'api/admin.js', 'api/stripe-webhook.js',
+  'api/auth.js', 'api/customer.js', 'api/admin.js', 'api/stripe-webhook.js', 'api/health.js',
   'api/_lib/auth.js', 'api/_lib/db.js', 'api/_lib/email.js', 'api/_lib/http.js', 'api/_lib/license.js',
-  '../api/auth.js', '../api/customer.js', '../api/admin.js', '../api/stripe-webhook.js',
+  '../api/auth.js', '../api/customer.js', '../api/admin.js', '../api/stripe-webhook.js', '../api/health.js',
   '../vercel.json',
 ];
 
@@ -39,15 +38,17 @@ const webhook = read('api/stripe-webhook.js');
 assert(webhook.includes('INSERT OR IGNORE INTO stripe_events'), 'Webhook precisa registrar event.id antes de processar.');
 const license = read('api/_lib/license.js');
 assert(license.includes("status=CASE WHEN ?=1 THEN 'active' ELSE status END"), 'Reassinatura de licença não pode reativar revogadas implicitamente.');
+const health = read('api/health.js');
+assert(health.includes("SELECT 1 AS healthy"), 'Health endpoint deve testar conexão real com o Turso.');
 
 const vercel = JSON.parse(read('../vercel.json'));
 assert(vercel.outputDirectory === 'landing/dist', 'Vercel outputDirectory deve apontar para landing/dist.');
 assert(Array.isArray(vercel.rewrites) && vercel.rewrites.some(item => item.source === '/login'), 'Vercel precisa de rota /login.');
 
 const serverFiles = [
-  'api/auth.js','api/customer.js','api/admin.js','api/stripe-webhook.js',
+  'api/auth.js','api/customer.js','api/admin.js','api/stripe-webhook.js','api/health.js',
   'api/_lib/auth.js','api/_lib/db.js','api/_lib/email.js','api/_lib/http.js','api/_lib/license.js',
-  '../api/auth.js','../api/customer.js','../api/admin.js','../api/stripe-webhook.js',
+  '../api/auth.js','../api/customer.js','../api/admin.js','../api/stripe-webhook.js','../api/health.js',
 ];
 for (const file of serverFiles) {
   const result = spawnSync(process.execPath, ['--check', resolve(root, file)], { encoding: 'utf8' });
