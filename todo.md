@@ -5,4 +5,4 @@
 - [x] Criar o agente de IA por conta WhatsApp conectada, com system prompt adaptativo e suporte aos provedores OpenAI, Anthropic, Groq, OpenRouter, NVIDIA NIM, xAI/Grok, Pollinations AI e Hugging Face.
 - [x] Adicionar importação de licença por ficheiro `.txt` e `.pem` no aplicativo, sem aceitar a chave privada Ed25519 como licença.
 - [x] Adicionar ao keygen a exportação segura de licença emitida em `.txt` e `.pem`, sem incluir a chave privada de assinatura no ficheiro entregue.
-- [ ] Atualizar a versão para RC.17, executar verificações, publicar na branch `admin` e gerar o executável portátil `.exe`.
+- [x] Atualizar a versão para RC.17, executar verificações, publicar na branch `admin` e gerar o executável portátil `.exe`.
