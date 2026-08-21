@@ -16,7 +16,7 @@
 - [x] Adicionar estados de carregamento, vazio, erro, confirmação e acessibilidade em todas as ações críticas.
 - [x] Cobrir procedimentos de licença, autorização e configurações do agente com testes Vitest.
 - [x] Executar migrations, testes, typecheck e validação visual responsiva antes da publicação.
-- [ ] Guardar checkpoint final e orientar a publicação do portal na Vercel ou no alojamento integrado.
+- [x] Guardar checkpoint final e orientar a publicação do portal na Vercel ou no alojamento integrado.
 - [x] Usar a branch confirmada `landing` como referência visual e funcional da landing page pública do portal.
 - [x] Adicionar entidade de conta WhatsApp associada ao utilizador e ligar as configurações de agente a essa conta.
 - [x] Implementar renovação pelo próprio utilizador com consumo único de chave de renovação e registo no histórico.
@@ -24,3 +24,5 @@
 - [x] Criar testes de routers para licença, agente de IA e bloqueio de acesso administrativo.
 - [x] Reforçar e validar a proteção visual da rota administrativa, além das permissões de servidor já testadas.
 - [x] Validar em código os estados e contratos das páginas de painel, downloads e configuração de agentes antes do checkpoint.
+- [x] Criar documentação de publicação no alojamento integrado e na Vercel, incluindo variáveis, migrações, build e validação pós-deploy.
+- [x] Entregar o checkpoint com orientação objetiva de publicação e verificação em produção.
