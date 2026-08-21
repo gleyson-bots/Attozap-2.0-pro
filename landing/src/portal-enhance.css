@@ -4,3 +4,27 @@
   transform:translateY(-3px);
   transition:border-color .25s ease,box-shadow .25s ease,transform .25s ease;
 }
+
+.payment-actions{display:grid;gap:8px;margin-top:auto}
+.portal-button.mp{background:linear-gradient(115deg,#1199ee,#0878d1);color:#fff;border-color:rgba(76,177,255,.35);box-shadow:0 12px 28px rgba(0,126,214,.18)}
+.portal-button.mp:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 16px 34px rgba(0,126,214,.26)}
+.provider-pill,.role-pill{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:8px;font-style:normal;font-weight:850;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.provider-pill.stripe{background:rgba(111,75,255,.12);color:#a996ff;border:1px solid rgba(111,75,255,.2)}
+.provider-pill.mercadopago{background:rgba(17,153,238,.11);color:#69c6ff;border:1px solid rgba(17,153,238,.2)}
+.provider-pill.portal{background:color-mix(in srgb,var(--accent) 10%,transparent);color:color-mix(in srgb,var(--accent) 75%,white);border:1px solid color-mix(in srgb,var(--accent) 20%,transparent)}
+.provider-pill.external{background:rgba(255,191,90,.09);color:#ffca75;border:1px solid rgba(255,191,90,.18)}
+.role-pill.customer{background:rgba(125,145,170,.1);color:#aab7c8;border:1px solid rgba(125,145,170,.18)}
+.role-pill.support{background:rgba(47,179,243,.1);color:#72d2ff;border:1px solid rgba(47,179,243,.18)}
+.role-pill.admin{background:rgba(122,77,255,.12);color:#b6a5ff;border:1px solid rgba(122,77,255,.22)}
+.mini-action{border:1px solid var(--line);background:var(--surface2);color:var(--text);border-radius:8px;padding:7px 9px;font-size:9px;cursor:pointer;margin-left:8px}
+.mini-action:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--line))}
+.external-license-card{border-color:color-mix(in srgb,#ffbf5a 22%,var(--line));background:linear-gradient(180deg,color-mix(in srgb,#ffbf5a 4%,var(--surface)),var(--surface))}
+.subscription-list article>b{font-size:11px}
+.subscription-list article .provider-pill{margin-left:6px;vertical-align:middle}
+.portal-table-card small{color:var(--muted)}
+
+@media(max-width:620px){
+  .payment-actions{gap:7px}
+  .mini-action{margin-left:0;width:100%;margin-top:6px}
+  .subscription-list article{flex-wrap:wrap}
+}
