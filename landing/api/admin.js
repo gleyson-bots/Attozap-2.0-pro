@@ -1,16 +1,23 @@
+import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
-import { audit, db, ensureSchema, publicPlan, publicUser, safeJson } from './_lib/db.js';
-import { requireAdmin } from './_lib/auth.js';
-import { issueLicense, resignLicense } from './_lib/license.js';
+import { audit, db, ensureSchema, normalizeEmail, publicPlan, publicUser, safeJson } from './_lib/db.js';
+import { assertAdmin, requireStaff } from './_lib/auth.js';
+import { issueExternalLicense, issueLicense, resignExternalLicense, resignLicense } from './_lib/license.js';
 import { sendLicenseIssued, sendReleaseNotice } from './_lib/email.js';
 import { body, fail, json } from './_lib/http.js';
 
 const licensePlans = new Set(['solo','solo_plus','solo_pro','team','team_plus','team_pro','enterprise']);
 const releaseChannels = new Set(['stable','beta','rc']);
+const userRoles = new Set(['customer','support','admin']);
 
-function licenseView(row) {
+function licenseView(row, scope = 'portal') {
   return {
-    id: row.id, userId: row.user_id, userName: row.user_name, userEmail: row.user_email,
+    id: row.id, scope,
+    userId: row.user_id || null,
+    userName: row.user_name || row.customer_name || null,
+    userEmail: row.user_email || row.customer_email || null,
+    externalCustomerId: row.external_customer_id || null,
+    reference: row.customer_reference || null,
     planId: row.plan_id, planName: row.plan_name, status: row.status, key: row.license_key,
     fingerprint: row.fingerprint, issuedAt: row.issued_at, expiresAt: row.expires_at,
     maxSeats: row.max_seats, maxInstances: row.max_instances, features: safeJson(row.features_json),
@@ -26,22 +33,27 @@ function positiveInt(value, fallback = 1) {
 export default async function handler(req, res) {
   try {
     await ensureSchema();
-    const admin = await requireAdmin(req);
+    const staff = await requireStaff(req);
 
     if (req.method === 'GET') {
-      const [users, plans, licenses, releases, subscriptions, auditRows] = await Promise.all([
+      const [users, plans, licenses, externalLicenses, externalCustomers, releases, subscriptions, auditRows] = await Promise.all([
         db().execute(`SELECT id,name,email,role,status,stripe_customer_id,created_at,updated_at FROM users ORDER BY created_at DESC LIMIT 500`),
         db().execute(`SELECT * FROM plans ORDER BY sort_order ASC,name ASC`),
         db().execute(`SELECT l.*,u.name AS user_name,u.email AS user_email,p.name AS plan_name FROM licenses l JOIN users u ON u.id=l.user_id JOIN plans p ON p.id=l.plan_id ORDER BY l.created_at DESC LIMIT 500`),
+        db().execute(`SELECT l.*,c.name AS customer_name,c.email AS customer_email,c.reference AS customer_reference,p.name AS plan_name FROM external_licenses l JOIN external_customers c ON c.id=l.external_customer_id JOIN plans p ON p.id=l.plan_id ORDER BY l.created_at DESC LIMIT 500`),
+        db().execute(`SELECT * FROM external_customers ORDER BY created_at DESC LIMIT 500`),
         db().execute(`SELECT * FROM releases ORDER BY published_at DESC LIMIT 100`),
         db().execute(`SELECT s.*,u.name AS user_name,u.email AS user_email,p.name AS plan_name FROM subscriptions s JOIN users u ON u.id=s.user_id JOIN plans p ON p.id=s.plan_id ORDER BY s.updated_at DESC LIMIT 500`),
-        db().execute(`SELECT a.*,u.name AS user_name FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 100`),
+        db().execute(`SELECT a.*,u.name AS user_name FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 150`),
       ]);
       return json(res, 200, {
-        ok: true, admin: publicUser(admin),
-        users: users.rows.map(publicUser), plans: plans.rows.map(publicPlan), licenses: licenses.rows.map(licenseView),
+        ok: true, admin: publicUser(staff), permissions: { fullAdmin: staff.role === 'admin', support: staff.role === 'support' },
+        users: users.rows.map(publicUser), plans: plans.rows.map(publicPlan),
+        licenses: licenses.rows.map(row => licenseView(row, 'portal')),
+        externalLicenses: externalLicenses.rows.map(row => licenseView(row, 'external')),
+        externalCustomers: externalCustomers.rows.map(row => ({ id: row.id, name: row.name, email: row.email, reference: row.reference, status: row.status, createdAt: row.created_at })),
         releases: releases.rows.map(row => ({ id: row.id, version: row.version, channel: row.channel, downloadUrl: row.download_url, notes: row.notes, mandatory: Boolean(row.mandatory), active: Boolean(row.active), publishedAt: row.published_at })),
-        subscriptions: subscriptions.rows.map(row => ({ id: row.id, userId: row.user_id, userName: row.user_name, userEmail: row.user_email, planId: row.plan_id, planName: row.plan_name, status: row.status, currentPeriodEnd: row.current_period_end, cancelAtPeriodEnd: Boolean(row.cancel_at_period_end) })),
+        subscriptions: subscriptions.rows.map(row => ({ id: row.id, userId: row.user_id, userName: row.user_name, userEmail: row.user_email, planId: row.plan_id, planName: row.plan_name, provider: row.provider || 'stripe', providerSubscriptionId: row.provider_subscription_id || row.stripe_subscription_id || null, status: row.status, currentPeriodEnd: row.current_period_end, cancelAtPeriodEnd: Boolean(row.cancel_at_period_end) })),
         audit: auditRows.rows.map(row => ({ id: row.id, userId: row.user_id, userName: row.user_name, action: row.action, entityType: row.entity_type, entityId: row.entity_id, metadata: safeJson(row.metadata_json, {}), createdAt: row.created_at })),
       });
     }
@@ -50,25 +62,55 @@ export default async function handler(req, res) {
     const input = await body(req);
     const action = String(input.action || '');
 
+    if (action === 'createStaff') {
+      assertAdmin(staff);
+      const name = String(input.name || '').trim();
+      const email = normalizeEmail(input.email);
+      const password = String(input.password || '');
+      const role = input.role === 'admin' ? 'admin' : 'support';
+      if (name.length < 2) throw Object.assign(new Error('Informe o nome do membro da equipe'), { statusCode: 400 });
+      if (!/^\S+@\S+\.\S+$/.test(email)) throw Object.assign(new Error('E-mail inválido'), { statusCode: 400 });
+      if (password.length < 8) throw Object.assign(new Error('A senha deve ter pelo menos 8 caracteres'), { statusCode: 400 });
+      const exists = (await db().execute({ sql: `SELECT id FROM users WHERE email=? LIMIT 1`, args: [email] })).rows[0];
+      if (exists) throw Object.assign(new Error('Já existe um usuário com este e-mail'), { statusCode: 409 });
+      const id = randomUUID();
+      await db().execute({ sql: `INSERT INTO users (id,name,email,password_hash,role,status) VALUES (?,?,?,?,?,'active')`, args: [id,name,email,await bcrypt.hash(password,12),role] });
+      await audit(staff.id, 'admin.staff.create', 'user', id, { email, role });
+      return json(res, 201, { ok: true, id });
+    }
+
     if (action === 'updateUser') {
+      assertAdmin(staff);
       const id = String(input.id || '');
       if (!id) throw Object.assign(new Error('Usuário não informado'), { statusCode: 400 });
-      const found = await db().execute({ sql: `SELECT id,role,status FROM users WHERE id=? LIMIT 1`, args: [id] });
-      const target = found.rows[0];
+      const target = (await db().execute({ sql: `SELECT id,role,status FROM users WHERE id=? LIMIT 1`, args: [id] })).rows[0];
       if (!target) throw Object.assign(new Error('Usuário não encontrado'), { statusCode: 404 });
-      const role = ['customer','admin'].includes(input.role) ? input.role : target.role;
+      const role = userRoles.has(input.role) ? input.role : target.role;
       const status = ['active','blocked'].includes(input.status) ? input.status : target.status;
-      if (id === admin.id && (role !== 'admin' || status !== 'active')) throw Object.assign(new Error('Você não pode remover seu próprio acesso administrativo'), { statusCode: 400 });
+      if (id === staff.id && (role !== 'admin' || status !== 'active')) throw Object.assign(new Error('Você não pode remover seu próprio acesso administrativo'), { statusCode: 400 });
       if (target.role === 'admin' && target.status === 'active' && (role !== 'admin' || status !== 'active')) {
         const remaining = await db().execute({ sql: `SELECT COUNT(*) AS total FROM users WHERE role='admin' AND status='active' AND id<>?`, args: [id] });
         if (Number(remaining.rows[0]?.total || 0) < 1) throw Object.assign(new Error('É necessário manter pelo menos um administrador ativo'), { statusCode: 409 });
       }
       await db().execute({ sql: `UPDATE users SET role=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [role,status,id] });
-      await audit(admin.id, 'admin.user.update', 'user', id, { role, status });
+      await audit(staff.id, 'admin.user.update', 'user', id, { role, status });
+      return json(res, 200, { ok: true });
+    }
+
+    if (action === 'setUserPassword') {
+      assertAdmin(staff);
+      const id = String(input.id || '');
+      const password = String(input.password || '');
+      if (password.length < 8) throw Object.assign(new Error('A nova senha deve ter pelo menos 8 caracteres'), { statusCode: 400 });
+      const found = (await db().execute({ sql: `SELECT id FROM users WHERE id=? LIMIT 1`, args: [id] })).rows[0];
+      if (!found) throw Object.assign(new Error('Usuário não encontrado'), { statusCode: 404 });
+      await db().execute({ sql: `UPDATE users SET password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [await bcrypt.hash(password,12),id] });
+      await audit(staff.id, 'admin.user.password.set', 'user', id);
       return json(res, 200, { ok: true });
     }
 
     if (action === 'savePlan') {
+      assertAdmin(staff);
       const id = String(input.id || `plan_${randomUUID()}`);
       const slug = String(input.slug || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
       const name = String(input.name || '').trim();
@@ -86,41 +128,55 @@ export default async function handler(req, res) {
               ON CONFLICT(id) DO UPDATE SET slug=excluded.slug,name=excluded.name,description=excluded.description,price_cents=excluded.price_cents,license_plan=excluded.license_plan,max_seats=excluded.max_seats,max_instances=excluded.max_instances,features_json=excluded.features_json,stripe_price_id=COALESCE(excluded.stripe_price_id,plans.stripe_price_id),active=excluded.active,featured=excluded.featured,sort_order=excluded.sort_order,updated_at=CURRENT_TIMESTAMP`,
         args: [id,slug,name,String(input.description || ''),priceCents,licensePlan,positiveInt(input.maxSeats),positiveInt(input.maxInstances),JSON.stringify(features),stripePriceId,input.active === false ? 0 : 1,input.featured ? 1 : 0,Math.floor(Number(input.sortOrder || 0))],
       });
-      await audit(admin.id, 'admin.plan.save', 'plan', id, { slug, name });
+      await audit(staff.id, 'admin.plan.save', 'plan', id, { slug, name });
       return json(res, 200, { ok: true, id });
     }
 
     if (action === 'issueLicense') {
       const userId = String(input.userId || '');
       const planId = String(input.planId || '');
-      const license = await issueLicense({ userId, planId, expiresAt: input.expiresAt || null, fingerprint: input.fingerprint || undefined, actorId: admin.id });
+      const license = await issueLicense({ userId, planId, expiresAt: input.expiresAt || null, fingerprint: input.fingerprint || undefined, actorId: staff.id });
       const user = (await db().execute({ sql: `SELECT * FROM users WHERE id=?`, args: [userId] })).rows[0];
       const plan = (await db().execute({ sql: `SELECT * FROM plans WHERE id=?`, args: [planId] })).rows[0];
-      if (user && plan) void sendLicenseIssued(user, plan, license).catch(error => console.error('[license-email]', error));
+      if (user && plan) await sendLicenseIssued(user, plan, license).catch(error => console.error('[license-email]', error));
       return json(res, 201, { ok: true, license: licenseView({ ...license, user_name: user?.name, user_email: user?.email, plan_name: plan?.name }) });
+    }
+
+    if (action === 'issueExternalLicense') {
+      const planId = String(input.planId || '');
+      const license = await issueExternalLicense({ name: input.name, email: input.email, reference: input.reference, planId, expiresAt: input.expiresAt || null, fingerprint: input.fingerprint || undefined, actorId: staff.id });
+      const plan = (await db().execute({ sql: `SELECT * FROM plans WHERE id=?`, args: [planId] })).rows[0];
+      if (license.customer_email && plan) await sendLicenseIssued({ name: license.customer_name, email: license.customer_email }, plan, license).catch(error => console.error('[external-license-email]', error));
+      return json(res, 201, { ok: true, license: licenseView({ ...license, plan_name: plan?.name }, 'external') });
     }
 
     if (action === 'revokeLicense') {
       const id = String(input.id || '');
-      const found = await db().execute({ sql: `SELECT id,status FROM licenses WHERE id=? LIMIT 1`, args: [id] });
-      if (!found.rows[0]) throw Object.assign(new Error('Licença não encontrada'), { statusCode: 404 });
-      if (found.rows[0].status !== 'active') throw Object.assign(new Error('A licença já não está ativa'), { statusCode: 409 });
-      await db().execute({ sql: `UPDATE licenses SET status='revoked',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='active'`, args: [id] });
-      await audit(admin.id, 'admin.license.revoke', 'license', id);
+      const scope = input.scope === 'external' ? 'external' : 'portal';
+      const table = scope === 'external' ? 'external_licenses' : 'licenses';
+      const found = (await db().execute({ sql: `SELECT id,status FROM ${table} WHERE id=? LIMIT 1`, args: [id] })).rows[0];
+      if (!found) throw Object.assign(new Error('Licença não encontrada'), { statusCode: 404 });
+      if (found.status !== 'active') throw Object.assign(new Error('A licença já não está ativa'), { statusCode: 409 });
+      await db().execute({ sql: `UPDATE ${table} SET status='revoked',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='active'`, args: [id] });
+      await audit(staff.id, 'staff.license.revoke', scope === 'external' ? 'external_license' : 'license', id);
       return json(res, 200, { ok: true });
     }
 
     if (action === 'resetFingerprint') {
       const id = String(input.id || '');
-      const found = await db().execute({ sql: `SELECT id,status FROM licenses WHERE id=? LIMIT 1`, args: [id] });
-      if (!found.rows[0]) throw Object.assign(new Error('Licença não encontrada'), { statusCode: 404 });
-      if (found.rows[0].status !== 'active') throw Object.assign(new Error('Somente licenças ativas podem ter o fingerprint redefinido'), { statusCode: 409 });
-      await resignLicense(id, { fingerprint: null, actorId: admin.id });
-      await audit(admin.id, 'admin.license.fingerprint.reset', 'license', id);
+      const scope = input.scope === 'external' ? 'external' : 'portal';
+      const table = scope === 'external' ? 'external_licenses' : 'licenses';
+      const found = (await db().execute({ sql: `SELECT id,status FROM ${table} WHERE id=? LIMIT 1`, args: [id] })).rows[0];
+      if (!found) throw Object.assign(new Error('Licença não encontrada'), { statusCode: 404 });
+      if (found.status !== 'active') throw Object.assign(new Error('Somente licenças ativas podem ter o fingerprint redefinido'), { statusCode: 409 });
+      if (scope === 'external') await resignExternalLicense(id, { fingerprint: null, actorId: staff.id });
+      else await resignLicense(id, { fingerprint: null, actorId: staff.id });
+      await audit(staff.id, 'staff.license.fingerprint.reset', scope === 'external' ? 'external_license' : 'license', id);
       return json(res, 200, { ok: true });
     }
 
     if (action === 'saveRelease') {
+      assertAdmin(staff);
       const id = String(input.id || `release_${randomUUID()}`);
       const version = String(input.version || '').trim();
       const channel = String(input.channel || 'stable').toLowerCase();
@@ -136,27 +192,24 @@ export default async function handler(req, res) {
               ON CONFLICT(id) DO UPDATE SET version=excluded.version,channel=excluded.channel,download_url=excluded.download_url,notes=excluded.notes,mandatory=excluded.mandatory,active=excluded.active,published_at=CURRENT_TIMESTAMP`,
         args: [id,release.version,release.channel,release.download_url,release.notes,release.mandatory,release.active],
       });
-      await audit(admin.id, 'admin.release.save', 'release', id, { version, notify: Boolean(input.notify) });
+      await audit(staff.id, 'admin.release.save', 'release', id, { version, notify: Boolean(input.notify) });
       let emailSummary = null;
       if (input.notify) {
         const users = await db().execute(`SELECT name,email FROM users WHERE status='active'`);
         const payload = { ...release, mandatory: Boolean(release.mandatory) };
         const results = await Promise.allSettled(users.rows.map(user => sendReleaseNotice(user, payload)));
-        emailSummary = {
-          total: results.length,
-          sent: results.filter(item => item.status === 'fulfilled').length,
-          failed: results.filter(item => item.status === 'rejected').length,
-        };
+        emailSummary = { total: results.length, sent: results.filter(item => item.status === 'fulfilled').length, failed: results.filter(item => item.status === 'rejected').length };
       }
       return json(res, 200, { ok: true, id, emailSummary });
     }
 
     if (action === 'toggleRelease') {
+      assertAdmin(staff);
       const id = String(input.id || '');
-      const found = await db().execute({ sql: `SELECT id FROM releases WHERE id=? LIMIT 1`, args: [id] });
-      if (!found.rows[0]) throw Object.assign(new Error('Release não encontrada'), { statusCode: 404 });
+      const found = (await db().execute({ sql: `SELECT id FROM releases WHERE id=? LIMIT 1`, args: [id] })).rows[0];
+      if (!found) throw Object.assign(new Error('Release não encontrada'), { statusCode: 404 });
       await db().execute({ sql: `UPDATE releases SET active=? WHERE id=?`, args: [input.active ? 1 : 0,id] });
-      await audit(admin.id, 'admin.release.toggle', 'release', id, { active: Boolean(input.active) });
+      await audit(staff.id, 'admin.release.toggle', 'release', id, { active: Boolean(input.active) });
       return json(res, 200, { ok: true });
     }
 
