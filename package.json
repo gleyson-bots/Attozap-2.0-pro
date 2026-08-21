@@ -4,12 +4,16 @@
   "description": "ATTOZAP WASender Pro desktop messaging tools",
   "author": "GleysonDevs",
   "private": true,
-  "repository": { "type": "git", "url": "git+https://github.com/gleyson-bots/Attozap-2.0-pro.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gleyson-bots/Attozap-2.0-pro.git"
+  },
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "ipc:check": "node tools/check-ipc-contract.mjs",
+    "workflow:editor:check": "node tools/check-workflow-editor-contract.mjs",
     "delivery:check": "node tools/check-delivery-contract.mjs",
     "build": "npm run ipc:check && npm run delivery:check && tsc -b && vite build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
@@ -23,6 +27,7 @@
   },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc13",
+    "@xyflow/react": "^12.11.3",
     "better-sqlite3": "13.0.1",
     "https-proxy-agent": "^7.0.6",
     "lucide-react": "^0.468.0",
@@ -50,16 +55,48 @@
     "appId": "com.gleysondevs.attozap.wasender",
     "productName": "ATTOZAP WASender Pro",
     "asar": true,
-    "directories": { "output": "release", "buildResources": "build" },
-    "files": ["dist/**/*", "dist-electron/**/*", "package.json"],
-    "asarUnpack": ["node_modules/better-sqlite3/prebuilds/*.node"],
-    "extraResources": [{ "from": "resources", "to": ".", "filter": ["**/*"] }],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/prebuilds/*.node"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": ".",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "win": {
       "icon": "build/icon.svg",
-      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "artifactName": "ATTOZAP-WASender-Pro-${version}-${arch}.${ext}"
     },
-    "portable": { "artifactName": "ATTOZAP-WASender-Pro-${version}-${arch}.${ext}" },
+    "portable": {
+      "artifactName": "ATTOZAP-WASender-Pro-${version}-${arch}.${ext}"
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
