@@ -15,3 +15,5 @@
 - [x] Fazer o canvas ocupar a área útil da aplicação, com alternância de foco e ocultação independente de navegação, biblioteca e inspector.
 - [x] Adicionar nós Telegram e HTTP/HTTPS com validação, limites e execução pelo motor local sem comprometer workflows existentes.
 - [x] Validar, publicar na branch `admin` e gerar o executável atualizado com o modo operacional de automações.
+- [x] Confirmar os artefactos RC.17, compilar o Keygen compatível e montar um pacote único com as chaves Ed25519 rc.16 mantidas.
+- [x] Verificar checksums do pacote de distribuição e entregar o arquivo compactado.
