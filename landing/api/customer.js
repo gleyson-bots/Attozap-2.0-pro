@@ -84,6 +84,16 @@ export default async function handler(req, res) {
         await db().execute({ sql: `UPDATE users SET stripe_customer_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [customerId, user.id] });
       }
       const base = origin(req);
+      const current = await db().execute({
+        sql: `SELECT id,plan_id,stripe_subscription_id,status FROM subscriptions WHERE user_id=? AND status IN ('active','trialing') ORDER BY updated_at DESC LIMIT 1`,
+        args: [user.id],
+      });
+      if (current.rows[0]) {
+        const portal = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: `${base}/portal` });
+        await audit(user.id, 'billing.plan.change.open', 'plan', plan.id, { subscriptionId: current.rows[0].stripe_subscription_id, currentPlanId: current.rows[0].plan_id });
+        return json(res, 200, { ok: true, url: portal.url, mode: 'billing_portal' });
+      }
+
       const session = await stripe.checkout.sessions.create({
         mode: 'subscription', customer: customerId,
         line_items: [{ price: plan.stripe_price_id, quantity: 1 }],
@@ -94,7 +104,7 @@ export default async function handler(req, res) {
         subscription_data: { metadata: { userId: user.id, planId: plan.id } },
       });
       await audit(user.id, 'billing.checkout.create', 'plan', plan.id, { sessionId: session.id });
-      return json(res, 200, { ok: true, url: session.url });
+      return json(res, 200, { ok: true, url: session.url, mode: 'checkout' });
     }
 
     if (action === 'billingPortal') {
@@ -122,7 +132,7 @@ export default async function handler(req, res) {
       if (!license) throw Object.assign(new Error('Licença ativa não encontrada'), { statusCode: 404 });
       if (license.fingerprint && license.fingerprint !== fingerprint) throw Object.assign(new Error('Esta licença já está vinculada a outro dispositivo. Solicite uma redefinição.'), { statusCode: 409 });
       const resigned = await resignLicense(licenseId, { fingerprint, actorId: user.id });
-      return json(res, 200, { ok: true, license: licenseView({ ...resigned, plan_name: license.plan_name }) });
+      return json(res, 200, { ok: true, license: licenseView(resigned) });
     }
 
     return json(res, 400, { ok: false, error: 'Ação inválida' });
