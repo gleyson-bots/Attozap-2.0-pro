@@ -50,6 +50,8 @@ const schema = [
     user_id TEXT NOT NULL,
     plan_id TEXT NOT NULL,
     stripe_subscription_id TEXT UNIQUE,
+    provider TEXT NOT NULL DEFAULT 'stripe',
+    provider_subscription_id TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     current_period_end TEXT,
     cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
@@ -74,6 +76,32 @@ const schema = [
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(plan_id) REFERENCES plans(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS external_customers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT,
+    reference TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS external_licenses (
+    id TEXT PRIMARY KEY,
+    external_customer_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    license_key TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'active',
+    fingerprint TEXT,
+    issued_at TEXT NOT NULL,
+    expires_at TEXT,
+    max_seats INTEGER NOT NULL DEFAULT 1,
+    max_instances INTEGER NOT NULL DEFAULT 1,
+    features_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(external_customer_id) REFERENCES external_customers(id) ON DELETE CASCADE,
     FOREIGN KEY(plan_id) REFERENCES plans(id)
   )`,
   `CREATE TABLE IF NOT EXISTS releases (
@@ -102,10 +130,20 @@ const schema = [
     event_created INTEGER,
     processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS mercadopago_events (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    resource_id TEXT,
+    processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
   `CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id,status)`,
+  `CREATE INDEX IF NOT EXISTS idx_subscriptions_provider ON subscriptions(provider,provider_subscription_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_provider_unique ON subscriptions(provider,provider_subscription_id) WHERE provider_subscription_id IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_licenses_user ON licenses(user_id,status)`,
   `CREATE INDEX IF NOT EXISTS idx_licenses_subscription ON licenses(subscription_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_external_customers_email ON external_customers(email)`,
+  `CREATE INDEX IF NOT EXISTS idx_external_licenses_customer ON external_licenses(external_customer_id,status)`,
   `CREATE INDEX IF NOT EXISTS idx_releases_channel ON releases(channel,active,published_at DESC)`,
 ];
 
@@ -136,10 +174,26 @@ const seedPlans = [
   },
 ];
 
+async function ensureLegacyColumns(conn) {
+  const migrations = [
+    `ALTER TABLE subscriptions ADD COLUMN provider TEXT NOT NULL DEFAULT 'stripe'`,
+    `ALTER TABLE subscriptions ADD COLUMN provider_subscription_id TEXT`,
+  ];
+  for (const sql of migrations) {
+    try { await conn.execute(sql); }
+    catch (error) {
+      const message = String(error?.message || error).toLowerCase();
+      if (!message.includes('duplicate column') && !message.includes('already exists')) throw error;
+    }
+  }
+  await conn.execute(`UPDATE subscriptions SET provider='stripe' WHERE provider IS NULL OR provider=''`);
+}
+
 export async function ensureSchema() {
   if (!schemaPromise) schemaPromise = (async () => {
     const conn = db();
     await conn.batch(schema.map(sql => ({ sql, args: [] })), 'write');
+    await ensureLegacyColumns(conn);
     for (const plan of seedPlans) {
       await conn.execute({
         sql: `INSERT INTO plans (id,slug,name,description,price_cents,license_plan,max_seats,max_instances,features_json,stripe_price_id,featured,sort_order)
@@ -177,7 +231,9 @@ export function publicPlan(row) {
     priceCents: row.price_cents, currency: row.currency, interval: row.interval,
     licensePlan: row.license_plan, maxSeats: row.max_seats, maxInstances: row.max_instances,
     features: safeJson(row.features_json), active: Boolean(row.active), featured: Boolean(row.featured),
-    stripeConfigured: Boolean(row.stripe_price_id), sortOrder: row.sort_order,
+    stripeConfigured: Boolean(row.stripe_price_id && process.env.STRIPE_SECRET_KEY),
+    mercadoPagoConfigured: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && Number(row.price_cents) > 0),
+    sortOrder: row.sort_order,
   };
 }
 
