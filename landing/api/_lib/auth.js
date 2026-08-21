@@ -4,14 +4,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { audit, db, ensureSchema, normalizeEmail, publicUser } from './db.js';
 
 const COOKIE_NAME = 'attozap_session';
+export const STAFF_ROLES = new Set(['admin', 'support']);
 
 function secret() {
   const explicit = String(process.env.AUTH_SECRET || '').trim();
   if (explicit.length >= 32) return new TextEncoder().encode(explicit);
 
-  // Fallback seguro para ambientes onde AUTH_SECRET ainda não foi cadastrado:
-  // deriva uma chave HMAC de 256 bits de um segredo já exclusivamente server-side.
-  // Nada do TURSO_AUTH_TOKEN é enviado ao navegador ou persistido no banco.
   const tursoToken = String(process.env.TURSO_AUTH_TOKEN || '').trim();
   if (tursoToken.length >= 32) {
     return createHash('sha256')
@@ -27,8 +25,14 @@ export async function ensureAdmin() {
   const email = normalizeEmail(process.env.ADMIN_EMAIL);
   const password = String(process.env.ADMIN_PASSWORD || '');
   if (!email || !password) return;
-  const existing = await db().execute({ sql: `SELECT id FROM users WHERE email=? LIMIT 1`, args: [email] });
-  if (existing.rows[0]) return;
+  const existing = await db().execute({ sql: `SELECT id,role,status FROM users WHERE email=? LIMIT 1`, args: [email] });
+  if (existing.rows[0]) {
+    if (existing.rows[0].role !== 'admin' || existing.rows[0].status !== 'active') {
+      await db().execute({ sql: `UPDATE users SET role='admin',status='active',updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [existing.rows[0].id] });
+      await audit(existing.rows[0].id, 'admin.bootstrap.restore', 'user', existing.rows[0].id, { email });
+    }
+    return;
+  }
   const id = randomUUID();
   const passwordHash = await bcrypt.hash(password, 12);
   await db().execute({
@@ -99,6 +103,20 @@ export async function requireAdmin(req) {
     throw error;
   }
   return user;
+}
+
+export async function requireStaff(req) {
+  const user = await requireUser(req);
+  if (!STAFF_ROLES.has(user.role)) {
+    const error = new Error('Acesso de equipe necessário');
+    error.statusCode = 403;
+    throw error;
+  }
+  return user;
+}
+
+export function assertAdmin(user) {
+  if (user?.role !== 'admin') throw Object.assign(new Error('Apenas administradores podem executar esta ação'), { statusCode: 403 });
 }
 
 export async function registerUser({ name, email, password }) {
