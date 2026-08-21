@@ -1,7 +1,7 @@
 import Stripe from 'stripe';
-import { randomUUID } from 'node:crypto';
 import { audit, db, ensureSchema, publicPlan, publicUser, safeJson } from './_lib/db.js';
 import { requireUser } from './_lib/auth.js';
+import { resignLicense } from './_lib/license.js';
 import { body, fail, json, origin } from './_lib/http.js';
 
 function stripeClient() {
@@ -12,8 +12,11 @@ function stripeClient() {
 function subscriptionView(row) {
   if (!row) return null;
   return {
-    id: row.id, status: row.status, currentPeriodEnd: row.current_period_end,
-    cancelAtPeriodEnd: Boolean(row.cancel_at_period_end), stripeSubscriptionId: row.stripe_subscription_id,
+    id: row.subscription_id,
+    status: row.subscription_status,
+    currentPeriodEnd: row.current_period_end,
+    cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
+    stripeSubscriptionId: row.stripe_subscription_id,
     plan: publicPlan(row),
   };
 }
@@ -34,8 +37,17 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const plans = await db().execute(`SELECT * FROM plans WHERE active=1 ORDER BY sort_order ASC,name ASC`);
       const subscriptions = await db().execute({
-        sql: `SELECT s.*,p.id,p.slug,p.name,p.description,p.price_cents,p.currency,p.interval,p.license_plan,p.max_seats,p.max_instances,p.features_json,p.active,p.featured,p.sort_order,p.stripe_price_id
-              FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.updated_at DESC`,
+        sql: `SELECT
+                s.id AS subscription_id,
+                s.status AS subscription_status,
+                s.current_period_end,
+                s.cancel_at_period_end,
+                s.stripe_subscription_id,
+                p.*
+              FROM subscriptions s
+              JOIN plans p ON p.id=s.plan_id
+              WHERE s.user_id=?
+              ORDER BY s.updated_at DESC`,
         args: [user.id],
       });
       const licenses = await db().execute({
@@ -109,9 +121,8 @@ export default async function handler(req, res) {
       const license = found.rows[0];
       if (!license) throw Object.assign(new Error('Licença ativa não encontrada'), { statusCode: 404 });
       if (license.fingerprint && license.fingerprint !== fingerprint) throw Object.assign(new Error('Esta licença já está vinculada a outro dispositivo. Solicite uma redefinição.'), { statusCode: 409 });
-      await db().execute({ sql: `UPDATE licenses SET fingerprint=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [fingerprint, licenseId] });
-      await audit(user.id, 'license.bind', 'license', licenseId, { fingerprint });
-      return json(res, 200, { ok: true });
+      const resigned = await resignLicense(licenseId, { fingerprint, actorId: user.id });
+      return json(res, 200, { ok: true, license: licenseView({ ...resigned, plan_name: license.plan_name }) });
     }
 
     return json(res, 400, { ok: false, error: 'Ação inválida' });
