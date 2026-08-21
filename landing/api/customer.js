@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 import { audit, db, ensureSchema, publicPlan, publicUser, safeJson } from './_lib/db.js';
 import { requireUser } from './_lib/auth.js';
 import { resignLicense } from './_lib/license.js';
+import { cancelMercadoPagoSubscription, createMercadoPagoSubscription } from './_lib/mercadopago.js';
 import { body, fail, json, origin } from './_lib/http.js';
 
 function stripeClient() {
@@ -16,6 +17,8 @@ function subscriptionView(row) {
     status: row.subscription_status,
     currentPeriodEnd: row.current_period_end,
     cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
+    provider: row.provider || 'stripe',
+    providerSubscriptionId: row.provider_subscription_id || row.stripe_subscription_id || null,
     stripeSubscriptionId: row.stripe_subscription_id,
     plan: publicPlan(row),
   };
@@ -37,17 +40,10 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const plans = await db().execute(`SELECT * FROM plans WHERE active=1 ORDER BY sort_order ASC,name ASC`);
       const subscriptions = await db().execute({
-        sql: `SELECT
-                s.id AS subscription_id,
-                s.status AS subscription_status,
-                s.current_period_end,
-                s.cancel_at_period_end,
-                s.stripe_subscription_id,
-                p.*
-              FROM subscriptions s
-              JOIN plans p ON p.id=s.plan_id
-              WHERE s.user_id=?
-              ORDER BY s.updated_at DESC`,
+        sql: `SELECT s.id AS subscription_id,s.status AS subscription_status,s.current_period_end,s.cancel_at_period_end,
+                    s.stripe_subscription_id,s.provider,s.provider_subscription_id,p.*
+              FROM subscriptions s JOIN plans p ON p.id=s.plan_id
+              WHERE s.user_id=? ORDER BY s.updated_at DESC`,
         args: [user.id],
       });
       const licenses = await db().execute({
@@ -61,6 +57,7 @@ export default async function handler(req, res) {
         plans: plans.rows.map(publicPlan),
         subscriptions: subscriptions.rows.map(subscriptionView),
         licenses: licenses.rows.map(licenseView),
+        paymentProviders: { stripe: Boolean(process.env.STRIPE_SECRET_KEY), mercadoPago: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN) },
         releases: releases.rows.map(row => ({ id: row.id, version: row.version, channel: row.channel, downloadUrl: row.download_url, notes: row.notes, mandatory: Boolean(row.mandatory), publishedAt: row.published_at })),
       });
     }
@@ -70,12 +67,34 @@ export default async function handler(req, res) {
     const action = String(input.action || '');
 
     if (action === 'checkout') {
-      const planResult = await db().execute({ sql: `SELECT * FROM plans WHERE (id=? OR slug=?) AND active=1 LIMIT 1`, args: [input.planId || '', input.planId || ''] });
-      const plan = planResult.rows[0];
+      const plan = (await db().execute({ sql: `SELECT * FROM plans WHERE (id=? OR slug=?) AND active=1 LIMIT 1`, args: [input.planId || '', input.planId || ''] })).rows[0];
       if (!plan) throw Object.assign(new Error('Plano não encontrado'), { statusCode: 404 });
       if (plan.slug === 'enterprise') throw Object.assign(new Error('Enterprise é contratado por proposta comercial'), { statusCode: 400 });
-      if (!plan.stripe_price_id) throw Object.assign(new Error(`Preço Stripe do plano ${plan.name} ainda não configurado`), { statusCode: 409 });
+      const provider = input.provider === 'mercadopago' ? 'mercadopago' : 'stripe';
+      const current = (await db().execute({
+        sql: `SELECT id,plan_id,stripe_subscription_id,provider,provider_subscription_id,status FROM subscriptions WHERE user_id=? AND status IN ('active','trialing') ORDER BY updated_at DESC LIMIT 1`,
+        args: [user.id],
+      })).rows[0];
 
+      if (provider === 'mercadopago') {
+        if (!process.env.MERCADOPAGO_ACCESS_TOKEN) throw Object.assign(new Error('Mercado Pago ainda não configurado'), { statusCode: 503 });
+        if (current) {
+          if (current.provider === 'mercadopago' && current.plan_id === plan.id) throw Object.assign(new Error('Este plano já está ativo no Mercado Pago'), { statusCode: 409 });
+          throw Object.assign(new Error('Você já possui uma assinatura ativa. Cancele ou gerencie a assinatura atual antes de contratar outro plano.'), { statusCode: 409 });
+        }
+        const preapproval = await createMercadoPagoSubscription({ user, plan, baseUrl: origin(req) });
+        const recordId = `mp_${preapproval.id}`;
+        await db().execute({
+          sql: `INSERT INTO subscriptions (id,user_id,plan_id,stripe_subscription_id,provider,provider_subscription_id,status,current_period_end,cancel_at_period_end)
+                VALUES (?,?,?,NULL,'mercadopago',?,?,?,0)
+                ON CONFLICT(id) DO UPDATE SET plan_id=excluded.plan_id,status=excluded.status,updated_at=CURRENT_TIMESTAMP`,
+          args: [recordId,user.id,plan.id,String(preapproval.id),String(preapproval.status || 'pending'),preapproval.next_payment_date || null],
+        });
+        await audit(user.id, 'billing.mercadopago.create', 'subscription', recordId, { providerId: preapproval.id, planId: plan.id });
+        return json(res, 200, { ok: true, url: preapproval.init_point, mode: 'mercadopago_subscription', provider: 'mercadopago' });
+      }
+
+      if (!plan.stripe_price_id) throw Object.assign(new Error(`Preço Stripe do plano ${plan.name} ainda não configurado`), { statusCode: 409 });
       const stripe = stripeClient();
       let customerId = user.stripe_customer_id;
       if (!customerId) {
@@ -84,35 +103,46 @@ export default async function handler(req, res) {
         await db().execute({ sql: `UPDATE users SET stripe_customer_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [customerId, user.id] });
       }
       const base = origin(req);
-      const current = await db().execute({
-        sql: `SELECT id,plan_id,stripe_subscription_id,status FROM subscriptions WHERE user_id=? AND status IN ('active','trialing') ORDER BY updated_at DESC LIMIT 1`,
-        args: [user.id],
-      });
-      if (current.rows[0]) {
+      if (current) {
+        if (current.provider !== 'stripe') throw Object.assign(new Error('Você já possui uma assinatura ativa no Mercado Pago. Gerencie-a antes de migrar para Stripe.'), { statusCode: 409 });
         const portal = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: `${base}/portal` });
-        await audit(user.id, 'billing.plan.change.open', 'plan', plan.id, { subscriptionId: current.rows[0].stripe_subscription_id, currentPlanId: current.rows[0].plan_id });
-        return json(res, 200, { ok: true, url: portal.url, mode: 'billing_portal' });
+        await audit(user.id, 'billing.plan.change.open', 'plan', plan.id, { subscriptionId: current.stripe_subscription_id, currentPlanId: current.plan_id });
+        return json(res, 200, { ok: true, url: portal.url, mode: 'billing_portal', provider: 'stripe' });
       }
-
       const session = await stripe.checkout.sessions.create({
         mode: 'subscription', customer: customerId,
         line_items: [{ price: plan.stripe_price_id, quantity: 1 }],
         allow_promotion_codes: true,
-        success_url: `${base}/portal?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        success_url: `${base}/portal?checkout=success&provider=stripe&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${base}/portal?checkout=cancelled`,
         metadata: { userId: user.id, planId: plan.id },
         subscription_data: { metadata: { userId: user.id, planId: plan.id } },
       });
       await audit(user.id, 'billing.checkout.create', 'plan', plan.id, { sessionId: session.id });
-      return json(res, 200, { ok: true, url: session.url, mode: 'checkout' });
+      return json(res, 200, { ok: true, url: session.url, mode: 'checkout', provider: 'stripe' });
     }
 
     if (action === 'billingPortal') {
-      if (!user.stripe_customer_id) throw Object.assign(new Error('Nenhuma conta de cobrança vinculada ainda'), { statusCode: 409 });
+      if (!user.stripe_customer_id) throw Object.assign(new Error('Nenhuma conta Stripe vinculada ainda'), { statusCode: 409 });
       const stripe = stripeClient();
       const session = await stripe.billingPortal.sessions.create({ customer: user.stripe_customer_id, return_url: `${origin(req)}/portal` });
       await audit(user.id, 'billing.portal.open', 'user', user.id);
       return json(res, 200, { ok: true, url: session.url });
+    }
+
+    if (action === 'cancelSubscription') {
+      const subscriptionId = String(input.subscriptionId || '');
+      const subscription = (await db().execute({ sql: `SELECT * FROM subscriptions WHERE id=? AND user_id=? LIMIT 1`, args: [subscriptionId,user.id] })).rows[0];
+      if (!subscription) throw Object.assign(new Error('Assinatura não encontrada'), { statusCode: 404 });
+      if (subscription.provider === 'mercadopago') {
+        await cancelMercadoPagoSubscription(subscription.provider_subscription_id);
+        await db().execute({ sql: `UPDATE subscriptions SET status='canceled',updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [subscription.id] });
+        await audit(user.id, 'billing.mercadopago.cancel', 'subscription', subscription.id, { providerId: subscription.provider_subscription_id });
+        return json(res, 200, { ok: true, message: 'Assinatura Mercado Pago cancelada.' });
+      }
+      if (!user.stripe_customer_id) throw Object.assign(new Error('Conta Stripe não vinculada'), { statusCode: 409 });
+      const session = await stripeClient().billingPortal.sessions.create({ customer: user.stripe_customer_id, return_url: `${origin(req)}/portal` });
+      return json(res, 200, { ok: true, url: session.url, mode: 'billing_portal' });
     }
 
     if (action === 'requestLicenseReset') {
@@ -120,15 +150,14 @@ export default async function handler(req, res) {
       const found = await db().execute({ sql: `SELECT id FROM licenses WHERE id=? AND user_id=? LIMIT 1`, args: [licenseId, user.id] });
       if (!found.rows[0]) throw Object.assign(new Error('Licença não encontrada'), { statusCode: 404 });
       await audit(user.id, 'license.reset.request', 'license', licenseId, { reason: String(input.reason || '') });
-      return json(res, 200, { ok: true, message: 'Solicitação registrada. O administrador poderá liberar a troca de dispositivo.' });
+      return json(res, 200, { ok: true, message: 'Solicitação registrada. O administrador ou suporte poderá liberar a troca de dispositivo.' });
     }
 
     if (action === 'bindFingerprint') {
       const licenseId = String(input.licenseId || '');
       const fingerprint = String(input.fingerprint || '').trim();
       if (!/^[a-f0-9]{64}$/i.test(fingerprint)) throw Object.assign(new Error('Fingerprint inválido'), { statusCode: 400 });
-      const found = await db().execute({ sql: `SELECT * FROM licenses WHERE id=? AND user_id=? AND status='active' LIMIT 1`, args: [licenseId, user.id] });
-      const license = found.rows[0];
+      const license = (await db().execute({ sql: `SELECT * FROM licenses WHERE id=? AND user_id=? AND status='active' LIMIT 1`, args: [licenseId, user.id] })).rows[0];
       if (!license) throw Object.assign(new Error('Licença ativa não encontrada'), { statusCode: 404 });
       if (license.fingerprint && license.fingerprint !== fingerprint) throw Object.assign(new Error('Esta licença já está vinculada a outro dispositivo. Solicite uma redefinição.'), { statusCode: 409 });
       const resigned = await resignLicense(licenseId, { fingerprint, actorId: user.id });
