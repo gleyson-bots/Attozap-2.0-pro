@@ -2,6 +2,7 @@ import { audit } from './_lib/db.js';
 import { clearSessionCookie, createSession, currentUser, loginUser, publicUser, registerUser, setSessionCookie } from './_lib/auth.js';
 import { sendWelcome } from './_lib/email.js';
 import { body, fail, json } from './_lib/http.js';
+import { verifyRecaptcha } from './_lib/recaptcha.js';
 
 export default async function handler(req, res) {
   try {
@@ -14,6 +15,7 @@ export default async function handler(req, res) {
     const action = String(input.action || 'login');
 
     if (action === 'register') {
+      await verifyRecaptcha(req, input.recaptchaToken);
       const user = await registerUser(input);
       const token = await createSession(user);
       setSessionCookie(res, token);
@@ -24,6 +26,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'login') {
+      await verifyRecaptcha(req, input.recaptchaToken);
       const user = await loginUser(input.email, input.password);
       const token = await createSession(user);
       setSessionCookie(res, token);
