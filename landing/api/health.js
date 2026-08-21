@@ -13,7 +13,8 @@ export default async function handler(req, res) {
       database: 'ok',
       services: {
         auth: Boolean((process.env.AUTH_SECRET || '').length >= 32 || (process.env.TURSO_AUTH_TOKEN || '').length >= 32),
-        recaptcha: Boolean(process.env.RECAPTCHA_SECRET_KEY),
+        adminBootstrap: Boolean(String(process.env.ADMIN_EMAIL || '').trim() && String(process.env.ADMIN_PASSWORD || '').length >= 8),
+        recaptcha: Boolean(process.env.RECAPTCHA_SECRET_KEY && process.env.VITE_RECAPTCHA_SITE_KEY),
         email: Boolean(process.env.RESEND_API_KEY),
         stripe: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET),
         mercadoPago: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && process.env.MERCADOPAGO_WEBHOOK_SECRET),
