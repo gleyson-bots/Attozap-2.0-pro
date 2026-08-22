@@ -28,6 +28,16 @@ if (isPortal) {
     const { initRecaptcha } = await import('./recaptcha.js');
     initRecaptcha();
   }
+
+  if (pathname === '/portal' || pathname === '/admin') {
+    await import('./portal-payments.css');
+    const [{ initNotifications }, { initPixCheckout }] = await Promise.all([
+      import('./notifications.js'),
+      import('./pix.js'),
+    ]);
+    initNotifications();
+    if (pathname === '/portal') initPixCheckout();
+  }
 } else {
   await import('./main.jsx');
 
