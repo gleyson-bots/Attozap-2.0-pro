@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 import { audit, db, ensureSchema } from './_lib/db.js';
 import { issueLicense, revokeLicensesForSubscription } from './_lib/license.js';
 import { sendLicenseIssued, sendPlanActivated } from './_lib/email.js';
+import { qualifyReferralForUser } from './_lib/referrals.js';
 import { fail, json, rawBody } from './_lib/http.js';
 
 export const config = { api: { bodyParser: false } };
@@ -28,27 +29,16 @@ async function syncSubscription(subscription) {
   const plan = planResult.rows[0];
   if (!plan) return { skipped: 'plan_missing' };
 
-  const previousResult = await db().execute({
-    sql: `SELECT * FROM subscriptions WHERE stripe_subscription_id=? LIMIT 1`,
-    args: [subscription.id],
-  });
+  const previousResult = await db().execute({ sql: `SELECT * FROM subscriptions WHERE stripe_subscription_id=? LIMIT 1`, args: [subscription.id] });
   const previous = previousResult.rows[0];
-  const hadLicense = await db().execute({
-    sql: `SELECT id,status FROM licenses WHERE subscription_id=? ORDER BY created_at DESC LIMIT 1`,
-    args: [subscription.id],
-  });
-
+  const hadLicense = await db().execute({ sql: `SELECT id,status FROM licenses WHERE subscription_id=? ORDER BY created_at DESC LIMIT 1`, args: [subscription.id] });
   const expiresAt = subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null;
+
   await db().execute({
-    sql: `INSERT INTO subscriptions (id,user_id,plan_id,stripe_subscription_id,status,current_period_end,cancel_at_period_end)
-          VALUES (?,?,?,?,?,?,?)
-          ON CONFLICT(stripe_subscription_id) DO UPDATE SET
-            plan_id=excluded.plan_id,
-            status=excluded.status,
-            current_period_end=excluded.current_period_end,
-            cancel_at_period_end=excluded.cancel_at_period_end,
-            updated_at=CURRENT_TIMESTAMP`,
-    args: [`sub_${subscription.id}`,user.id,plan.id,subscription.id,subscription.status,expiresAt,subscription.cancel_at_period_end ? 1 : 0],
+    sql: `INSERT INTO subscriptions (id,user_id,plan_id,stripe_subscription_id,provider,provider_subscription_id,status,current_period_end,cancel_at_period_end)
+          VALUES (?,?,?,?,'stripe',?,?,?,?)
+          ON CONFLICT(stripe_subscription_id) DO UPDATE SET plan_id=excluded.plan_id,provider='stripe',provider_subscription_id=excluded.provider_subscription_id,status=excluded.status,current_period_end=excluded.current_period_end,cancel_at_period_end=excluded.cancel_at_period_end,updated_at=CURRENT_TIMESTAMP`,
+    args: [`sub_${subscription.id}`,user.id,plan.id,subscription.id,subscription.id,subscription.status,expiresAt,subscription.cancel_at_period_end ? 1 : 0],
   });
   await audit(user.id, 'stripe.subscription.sync', 'subscription', subscription.id, { status: subscription.status, planId: plan.id });
 
@@ -58,18 +48,9 @@ async function syncSubscription(subscription) {
   const shouldNotifyActivation = isActive && (!wasActive || planChanged || !hadLicense.rows[0]);
 
   if (isActive) {
-    const license = await issueLicense({
-      userId: user.id,
-      planId: plan.id,
-      subscriptionId: subscription.id,
-      expiresAt,
-      actorId: user.id,
-    });
+    const license = await issueLicense({ userId: user.id, planId: plan.id, subscriptionId: subscription.id, expiresAt, actorId: user.id });
     if (shouldNotifyActivation) {
-      await Promise.allSettled([
-        sendPlanActivated(user, plan),
-        sendLicenseIssued(user, plan, license),
-      ]);
+      await Promise.allSettled([sendPlanActivated(user, plan), sendLicenseIssued(user, plan, license)]);
     }
   }
 
@@ -91,10 +72,7 @@ export default async function handler(req, res) {
     if (!signature) return json(res, 400, { ok: false, error: 'Assinatura Stripe ausente' });
     const event = stripe.webhooks.constructEvent(await rawBody(req), signature, process.env.STRIPE_WEBHOOK_SECRET);
 
-    const recorded = await db().execute({
-      sql: `INSERT OR IGNORE INTO stripe_events (id,type,event_created) VALUES (?,?,?)`,
-      args: [event.id,event.type,Number(event.created || 0)],
-    });
+    const recorded = await db().execute({ sql: `INSERT OR IGNORE INTO stripe_events (id,type,event_created) VALUES (?,?,?)`, args: [event.id,event.type,Number(event.created || 0)] });
     if (!recorded.rowsAffected) return json(res, 200, { received: true, duplicate: true });
 
     try {
@@ -102,10 +80,7 @@ export default async function handler(req, res) {
         const session = event.data.object;
         if (session.metadata?.userId && session.customer) {
           const customerId = typeof session.customer === 'string' ? session.customer : session.customer.id;
-          await db().execute({
-            sql: `UPDATE users SET stripe_customer_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-            args: [customerId,session.metadata.userId],
-          });
+          await db().execute({ sql: `UPDATE users SET stripe_customer_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [customerId,session.metadata.userId] });
         }
         if (session.subscription) {
           const id = typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
@@ -116,8 +91,16 @@ export default async function handler(req, res) {
       if (['customer.subscription.created','customer.subscription.updated','customer.subscription.deleted'].includes(event.type)) {
         await syncSubscription(event.data.object);
       }
+
+      if (event.type === 'invoice.paid') {
+        const invoice = event.data.object;
+        const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+        if (subscriptionId) {
+          const synced = await syncSubscription(await stripe.subscriptions.retrieve(subscriptionId));
+          if (synced?.userId) await qualifyReferralForUser(synced.userId, `stripe_invoice:${invoice.id}`).catch(error => console.error('[referral-qualify-stripe]', error));
+        }
+      }
     } catch (processingError) {
-      // Permite que o Stripe tente novamente se o processamento real falhar.
       await db().execute({ sql: `DELETE FROM stripe_events WHERE id=?`, args: [event.id] });
       throw processingError;
     }
