@@ -2,6 +2,7 @@ import { audit, db, ensureSchema } from './_lib/db.js';
 import { issueLicense, resignLicense } from './_lib/license.js';
 import { sendLicenseIssued, sendPlanActivated } from './_lib/email.js';
 import { notifyUser } from './_lib/notifications.js';
+import { qualifyReferralForUser } from './_lib/referrals.js';
 import { body, fail, json } from './_lib/http.js';
 import {
   getMercadoPagoAuthorizedPayment,
@@ -63,6 +64,7 @@ async function syncPreapproval(preapproval, { paymentApproved = false } = {}) {
   if (status === 'active' && paymentApproved) {
     const license = await issueLicense({ userId: user.id, planId: plan.id, subscriptionId: recordId, expiresAt, actorId: user.id });
     const shouldNotify = !previous || previous.status !== 'active' || previous.plan_id !== plan.id || !previousLicense;
+    await qualifyReferralForUser(user.id, recordId).catch(error => console.error('[referral-qualify-mp]', error));
     if (shouldNotify) {
       await Promise.allSettled([
         sendPlanActivated(user, plan),
@@ -120,6 +122,7 @@ async function syncPixPayment(payment) {
       ? await resignLicense(oldPixLicense.id, { planId: plan.id, expiresAt, actorId: user.id })
       : await issueLicense({ userId: user.id, planId: plan.id, subscriptionId: id, expiresAt, actorId: user.id });
 
+    await qualifyReferralForUser(user.id, id).catch(error => console.error('[referral-qualify-pix]', error));
     await Promise.allSettled([
       sendPlanActivated(user, plan),
       sendLicenseIssued(user, plan, license),
