@@ -78,6 +78,7 @@ if (recoveryPaths.has(pathname)) {
     if (pathname === '/portal') initPixCheckout();
   }
 } else {
+  await import('./landing-extras.css');
   await import('./main.jsx');
 
   const enhanceLanding = () => {
