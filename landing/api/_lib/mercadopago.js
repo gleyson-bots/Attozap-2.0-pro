@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
 const API = 'https://api.mercadopago.com';
 
@@ -12,20 +12,21 @@ export function mercadoPagoConfigured() {
   return Boolean(String(process.env.MERCADOPAGO_ACCESS_TOKEN || '').trim());
 }
 
-export async function mpRequest(path, { method = 'GET', body } = {}) {
+export async function mpRequest(path, { method = 'GET', body, idempotencyKey } = {}) {
   const response = await fetch(`${API}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${accessToken()}`,
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      ...(idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = data?.message || data?.error || data?.cause?.[0]?.description || `Mercado Pago retornou HTTP ${response.status}`;
-    throw Object.assign(new Error(message), { statusCode: response.status >= 500 ? 502 : 400, providerStatus: response.status });
+    throw Object.assign(new Error(message), { statusCode: response.status >= 500 ? 502 : 400, providerStatus: response.status, providerData: data });
   }
   return data;
 }
@@ -51,6 +52,32 @@ export async function createMercadoPagoSubscription({ user, plan, baseUrl }) {
   return result;
 }
 
+export async function createMercadoPagoPixPayment({ user, plan, payerDocument, baseUrl }) {
+  if (!plan?.price_cents || Number(plan.price_cents) <= 0) throw Object.assign(new Error('Este plano não possui valor válido para PIX'), { statusCode: 400 });
+  const cpf = String(payerDocument || '').replace(/\D/g, '');
+  if (!/^\d{11}$/.test(cpf)) throw Object.assign(new Error('Informe um CPF válido com 11 dígitos para gerar o PIX'), { statusCode: 400 });
+
+  const externalReference = `attozap-pix:${user.id}:${plan.id}`;
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  const payload = {
+    transaction_amount: Number((Number(plan.price_cents) / 100).toFixed(2)),
+    description: `ATTOZAP ${plan.name} - 30 dias`,
+    payment_method_id: 'pix',
+    external_reference: externalReference,
+    notification_url: `${baseUrl}/api/mercadopago-webhook?source_news=webhooks`,
+    date_of_expiration: expiresAt,
+    payer: {
+      email: user.email,
+      identification: { type: 'CPF', number: cpf },
+    },
+    metadata: { attozap_user_id: user.id, attozap_plan_id: plan.id, product: 'attozap_license_30d' },
+  };
+  const result = await mpRequest('/v1/payments', { method: 'POST', body: payload, idempotencyKey: randomUUID() });
+  const transaction = result?.point_of_interaction?.transaction_data || {};
+  if (!result?.id || !transaction.qr_code) throw Object.assign(new Error('Mercado Pago não retornou os dados do PIX'), { statusCode: 502 });
+  return { ...result, pixExpiresAt: expiresAt };
+}
+
 export async function getMercadoPagoSubscription(id) {
   return mpRequest(`/preapproval/${encodeURIComponent(String(id))}`);
 }
@@ -68,8 +95,12 @@ export async function cancelMercadoPagoSubscription(id) {
 }
 
 export function parseMercadoPagoReference(reference) {
-  const match = /^attozap:([^:]+):([^:]+)$/.exec(String(reference || ''));
-  return match ? { userId: match[1], planId: match[2] } : null;
+  const raw = String(reference || '');
+  let match = /^attozap:([^:]+):([^:]+)$/.exec(raw);
+  if (match) return { kind: 'subscription', userId: match[1], planId: match[2] };
+  match = /^attozap-pix:([^:]+):([^:]+)$/.exec(raw);
+  if (match) return { kind: 'pix', userId: match[1], planId: match[2] };
+  return null;
 }
 
 export function verifyMercadoPagoWebhook(req, dataId) {
