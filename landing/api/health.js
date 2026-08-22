@@ -18,6 +18,8 @@ export default async function handler(req, res) {
         email: Boolean(process.env.RESEND_API_KEY),
         stripe: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET),
         mercadoPago: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && process.env.MERCADOPAGO_WEBHOOK_SECRET),
+        pix: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && process.env.MERCADOPAGO_WEBHOOK_SECRET),
+        notifications: true,
         licensing: Boolean(process.env.LICENSE_PRIVATE_KEY),
       },
       timestamp: new Date().toISOString(),
