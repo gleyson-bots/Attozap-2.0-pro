@@ -6,6 +6,8 @@ import { body, fail, json } from './_lib/http.js';
 import { ensurePlatformSchema, newId, newToken } from './_lib/platform.js';
 import { verifyRecaptcha } from './_lib/recaptcha.js';
 
+const GENERIC = 'Se existir uma conta com este e-mail, enviaremos as instruções.';
+
 function hashToken(value) {
   return createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
 }
@@ -19,11 +21,16 @@ export default async function handler(req, res) {
     const action = String(input.action || 'request');
 
     if (action === 'request') {
-      await verifyRecaptcha(req, input.recaptchaToken, { siteKeyPresent: Boolean(process.env.VITE_RECAPTCHA_SITE_KEY) });
+      await verifyRecaptcha(req, input.recaptchaToken);
       const email = normalizeEmail(input.email);
-      if (!/^\S+@\S+\.\S+$/.test(email)) return json(res, 200, { ok: true, message: 'Se existir uma conta com este e-mail, enviaremos as instruções.' });
+      if (!/^\S+@\S+\.\S+$/.test(email)) return json(res, 200, { ok: true, message: GENERIC });
       const user = (await db().execute({ sql: `SELECT id,name,email,status FROM users WHERE email=? LIMIT 1`, args: [email] })).rows[0];
-      if (!user || user.status !== 'active') return json(res, 200, { ok: true, message: 'Se existir uma conta com este e-mail, enviaremos as instruções.' });
+      if (!user || user.status !== 'active') return json(res, 200, { ok: true, message: GENERIC });
+
+      const recent = (await db().execute({ sql: `SELECT created_at FROM password_reset_tokens WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, args: [user.id] })).rows[0];
+      if (recent?.created_at && Date.now() - new Date(recent.created_at).getTime() < 60_000) {
+        return json(res, 200, { ok: true, message: GENERIC });
+      }
 
       await db().execute({ sql: `UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE user_id=? AND used_at IS NULL`, args: [user.id] });
       const token = newToken(32);
@@ -34,13 +41,13 @@ export default async function handler(req, res) {
       });
       await audit(user.id, 'password.reset.request', 'user', user.id);
       await sendPasswordReset(user, token);
-      return json(res, 200, { ok: true, message: 'Se existir uma conta com este e-mail, enviaremos as instruções.' });
+      return json(res, 200, { ok: true, message: GENERIC });
     }
 
     if (action === 'reset') {
       const tokenHash = hashToken(input.token);
       const password = String(input.password || '');
-      if (!tokenHash || password.length < 8) throw Object.assign(new Error('Token inválido ou senha com menos de 8 caracteres'), { statusCode: 400 });
+      if (!input.token || password.length < 8) throw Object.assign(new Error('Token inválido ou senha com menos de 8 caracteres'), { statusCode: 400 });
       const row = (await db().execute({
         sql: `SELECT t.id,t.user_id,t.expires_at,t.used_at,u.name,u.email,u.status FROM password_reset_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=? LIMIT 1`,
         args: [tokenHash],
