@@ -260,14 +260,15 @@ export async function audit(userId, action, entityType, entityId, metadata) {
 
 export function publicPlan(row) {
   if (!row) return null;
+  const mercadoPagoReady = Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && process.env.MERCADOPAGO_WEBHOOK_SECRET);
   return {
     id: row.id, slug: row.slug, name: row.name, description: row.description,
     priceCents: row.price_cents, currency: row.currency, interval: row.interval,
     licensePlan: row.license_plan, maxSeats: row.max_seats, maxInstances: row.max_instances,
     features: safeJson(row.features_json), active: Boolean(row.active), featured: Boolean(row.featured),
     stripeConfigured: Boolean(row.stripe_price_id && process.env.STRIPE_SECRET_KEY),
-    mercadoPagoConfigured: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && Number(row.price_cents) > 0),
-    pixConfigured: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && Number(row.price_cents) > 0),
+    mercadoPagoConfigured: Boolean(mercadoPagoReady && Number(row.price_cents) > 0),
+    pixConfigured: Boolean(mercadoPagoReady && Number(row.price_cents) > 0),
     sortOrder: row.sort_order,
   };
 }
