@@ -3,6 +3,7 @@ import { clearSessionCookie, createSession, currentUser, loginUser, publicUser, 
 import { sendWelcome } from './_lib/email.js';
 import { body, fail, json } from './_lib/http.js';
 import { verifyRecaptcha } from './_lib/recaptcha.js';
+import { applyReferralCode } from './_lib/referrals.js';
 
 export default async function handler(req, res) {
   try {
@@ -17,6 +18,10 @@ export default async function handler(req, res) {
     if (action === 'register') {
       await verifyRecaptcha(req, input.recaptchaToken);
       const user = await registerUser(input);
+      if (input.referralCode) {
+        try { await applyReferralCode(user.id, input.referralCode); }
+        catch (error) { console.error('[referral-apply]', error); }
+      }
       const token = await createSession(user);
       setSessionCookie(res, token);
       let emailSent = true;
