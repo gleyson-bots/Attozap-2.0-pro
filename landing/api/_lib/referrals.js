@@ -1,5 +1,5 @@
-import { createHash, randomBytes } from 'node:crypto';
-import { audit, db, normalizeEmail } from './db.js';
+import { randomBytes } from 'node:crypto';
+import { audit, db } from './db.js';
 import { ensurePlatformSchema, getSetting, newId } from './platform.js';
 import { notifyUser } from './notifications.js';
 import { sendReferralReward } from './email.js';
@@ -12,6 +12,14 @@ function normalizeCode(value) {
 
 function randomCode() {
   return `ATTO-${randomBytes(4).toString('hex').toUpperCase()}`;
+}
+
+function maskEmail(value) {
+  const email = String(value || '');
+  const [local, domain] = email.split('@');
+  if (!local || !domain) return '';
+  const safeLocal = local.length <= 2 ? `${local[0] || '*'}*` : `${local.slice(0,2)}${'*'.repeat(Math.min(6, Math.max(2, local.length - 2)))}`;
+  return `${safeLocal}@${domain}`;
 }
 
 export async function ensureReferralCode(userId) {
@@ -35,7 +43,7 @@ export async function applyReferralCode(referredUserId, rawCode) {
   if (!code) return { applied: false };
   await ensurePlatformSchema();
   const owner = (await db().execute({
-    sql: `SELECT rc.user_id,u.email FROM referral_codes rc JOIN users u ON u.id=rc.user_id WHERE rc.code=? AND u.status='active' LIMIT 1`,
+    sql: `SELECT rc.user_id FROM referral_codes rc JOIN users u ON u.id=rc.user_id WHERE rc.code=? AND u.status='active' LIMIT 1`,
     args: [code],
   })).rows[0];
   if (!owner || owner.user_id === referredUserId) return { applied: false };
@@ -103,7 +111,7 @@ export async function memberReferralView(user) {
     link: `${APP_URL}/cadastro?ref=${encodeURIComponent(code)}`,
     rewardCents: Number(await getSetting('referral_reward_cents', 1000)) || 1000,
     totals,
-    referrals: referrals.rows.map(row => ({ id: row.id, name: row.name, email: row.email, status: row.status, qualifiedAt: row.qualified_at, createdAt: row.created_at })),
+    referrals: referrals.rows.map(row => ({ id: row.id, name: row.name, email: maskEmail(row.email), status: row.status, qualifiedAt: row.qualified_at, createdAt: row.created_at })),
     rewards: rewardRows,
   };
 }
