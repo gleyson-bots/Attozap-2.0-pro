@@ -10,10 +10,11 @@ const read = path => readFileSync(resolve(root, path), 'utf8');
 const requiredFiles = [
   'index.html', 'login.html', 'cadastro.html', 'portal.html', 'admin.html',
   'login/index.html', 'cadastro/index.html', 'portal/index.html', 'admin/index.html',
-  'src/entry.jsx', 'src/portal.jsx', 'src/portal.css', 'src/portal-theme.css', 'src/portal-enhance.js', 'src/portal-enhance.css', 'src/recaptcha.js', 'src/recaptcha.css',
-  'api/auth.js', 'api/customer.js', 'api/admin.js', 'api/stripe-webhook.js', 'api/mercadopago-webhook.js', 'api/health.js',
-  'api/_lib/auth.js', 'api/_lib/db.js', 'api/_lib/email.js', 'api/_lib/http.js', 'api/_lib/license.js', 'api/_lib/mercadopago.js', 'api/_lib/recaptcha.js',
-  '../api/auth.js', '../api/customer.js', '../api/admin.js', '../api/stripe-webhook.js', '../api/mercadopago-webhook.js', '../api/health.js',
+  'src/entry.jsx', 'src/portal.jsx', 'src/portal.css', 'src/portal-theme.css', 'src/portal-enhance.js', 'src/portal-enhance.css',
+  'src/recaptcha.js', 'src/recaptcha.css', 'src/pix.js', 'src/notifications.js', 'src/portal-payments.css',
+  'api/auth.js', 'api/customer.js', 'api/admin.js', 'api/stripe-webhook.js', 'api/mercadopago-webhook.js', 'api/notifications.js', 'api/health.js',
+  'api/_lib/auth.js', 'api/_lib/db.js', 'api/_lib/email.js', 'api/_lib/http.js', 'api/_lib/license.js', 'api/_lib/mercadopago.js', 'api/_lib/recaptcha.js', 'api/_lib/notifications.js',
+  '../api/auth.js', '../api/customer.js', '../api/admin.js', '../api/stripe-webhook.js', '../api/mercadopago-webhook.js', '../api/notifications.js', '../api/health.js',
   'vercel.json', '../vercel.json',
 ];
 
@@ -26,6 +27,8 @@ assert(entry.includes("replace(/\\.html$/i"), 'Bootstrap não normaliza páginas
 assert(entry.indexOf("await import('./portal.jsx')") < entry.indexOf("await import('./portal-theme.css')"), 'portal-theme.css deve carregar depois do CSS estrutural.');
 assert(entry.includes("await import('./portal-enhance.js')"), 'Bootstrap precisa aplicar a navegação comercial pós-cadastro.');
 assert(entry.includes("await import('./recaptcha.js')"), 'Rotas de autenticação precisam carregar o reCAPTCHA.');
+assert(entry.includes("import('./pix.js')"), 'Portal precisa carregar checkout PIX.');
+assert(entry.includes("import('./notifications.js')"), 'Portal precisa carregar central de notificações.');
 
 const portal = read('src/portal.jsx');
 assert(portal.includes("onBuy(plan,'mercadopago')"), 'Portal precisa oferecer Mercado Pago nos planos.');
@@ -39,6 +42,14 @@ assert(recaptchaFront.includes("theme: 'dark'"), 'reCAPTCHA visual deve usar tem
 assert(recaptchaFront.includes('recaptchaToken'), 'Frontend precisa anexar token ao /api/auth.');
 assert(recaptchaFront.includes('Não sou um robô'), 'Frontend deve orientar o checkbox do reCAPTCHA.');
 
+const pixFront = read('src/pix.js');
+assert(pixFront.includes("action: 'createPix'"), 'Frontend PIX precisa criar cobrança pelo backend.');
+assert(pixFront.includes("action: 'pixStatus'"), 'Frontend PIX precisa acompanhar confirmação.');
+assert(pixFront.includes('qrCodeBase64'), 'Frontend PIX precisa renderizar QR Code.');
+const notificationsFront = read('src/notifications.js');
+assert(notificationsFront.includes('/api/notifications'), 'Central de notificações precisa usar API autenticada.');
+assert(notificationsFront.includes('markAllRead'), 'Central precisa permitir marcar notificações como lidas.');
+
 const enhance = read('src/portal-enhance.js');
 assert(enhance.includes("['plus','pro','ultra']"), 'Fluxo de plano selecionado precisa reconhecer Plus, Pro e Ultra.');
 
@@ -50,6 +61,8 @@ assert(/\.auth-page\s*>\s*\.auth-ambient\s*\{[^}]*position\s*:\s*absolute/i.test
 const db = read('api/_lib/db.js');
 assert(db.includes('CREATE TABLE IF NOT EXISTS stripe_events'), 'Schema precisa da tabela de idempotência do Stripe.');
 assert(db.includes('CREATE TABLE IF NOT EXISTS mercadopago_events'), 'Schema precisa da tabela de idempotência do Mercado Pago.');
+assert(db.includes('CREATE TABLE IF NOT EXISTS payments'), 'Schema precisa registrar pagamentos PIX.');
+assert(db.includes('CREATE TABLE IF NOT EXISTS notifications'), 'Schema precisa da central de notificações.');
 assert(db.includes('CREATE TABLE IF NOT EXISTS external_customers'), 'Schema precisa de clientes externos.');
 assert(db.includes('CREATE TABLE IF NOT EXISTS external_licenses'), 'Schema precisa de licenças externas.');
 assert(db.indexOf("await ensureLegacyColumns(conn)") > db.indexOf("await conn.batch"), 'Migração de colunas legadas precisa ocorrer após criação das tabelas.');
@@ -59,8 +72,15 @@ assert(stripeWebhook.includes('INSERT OR IGNORE INTO stripe_events'), 'Webhook S
 const mpWebhook = read('api/mercadopago-webhook.js');
 assert(mpWebhook.includes('verifyMercadoPagoWebhook'), 'Webhook Mercado Pago precisa validar x-signature.');
 assert(mpWebhook.includes('INSERT OR IGNORE INTO mercadopago_events'), 'Webhook Mercado Pago precisa ser idempotente.');
+assert(mpWebhook.includes("method === 'pix'"), 'Webhook PIX precisa validar o meio de pagamento.');
+assert(mpWebhook.includes("currency === 'BRL'"), 'Webhook PIX precisa validar moeda BRL.');
+assert(mpWebhook.includes('amountCents === Number(plan.price_cents'), 'Webhook PIX precisa validar o valor contra o plano.');
+assert(mpWebhook.includes('resignLicense'), 'PIX precisa renovar licença existente com nova assinatura.');
 const mp = read('api/_lib/mercadopago.js');
 assert(mp.includes("'/preapproval'"), 'Mercado Pago precisa usar API de Assinaturas /preapproval.');
+assert(mp.includes("'/v1/payments'"), 'PIX precisa usar API de pagamentos /v1/payments.');
+assert(mp.includes("payment_method_id: 'pix'"), 'Pagamento PIX precisa usar payment_method_id pix.');
+assert(mp.includes("'X-Idempotency-Key'"), 'Criação de PIX precisa usar X-Idempotency-Key.');
 assert(mp.includes("createHmac('sha256'"), 'Webhook Mercado Pago precisa validar HMAC SHA-256.');
 
 const auth = read('api/_lib/auth.js');
@@ -72,6 +92,14 @@ const recaptchaServer = read('api/_lib/recaptcha.js');
 assert(recaptchaServer.includes('https://www.google.com/recaptcha/api/siteverify'), 'Backend precisa validar token no Google siteverify.');
 assert(recaptchaServer.includes('RECAPTCHA_SECRET_KEY'), 'Backend precisa usar RECAPTCHA_SECRET_KEY.');
 
+const customer = read('api/customer.js');
+assert(customer.includes("action === 'createPix'"), 'API cliente precisa criar PIX.');
+assert(customer.includes("action === 'pixStatus'"), 'API cliente precisa consultar status PIX.');
+const notificationApi = read('api/notifications.js');
+assert(notificationApi.includes('markAllRead'), 'API de notificações precisa permitir marcar todas como lidas.');
+const notificationService = read('api/_lib/notifications.js');
+assert(notificationService.includes('notifyUser'), 'Serviço de notificação precisa existir.');
+
 const admin = read('api/admin.js');
 assert(admin.includes("new Set(['customer','support','admin'])"), 'Admin precisa permitir customer/support/admin.');
 assert(admin.includes('assertAdmin(staff)'), 'Ações sensíveis precisam exigir administrador.');
@@ -81,6 +109,8 @@ assert(license.includes('issueExternalLicense'), 'Licenciamento externo precisa 
 const health = read('api/health.js');
 assert(health.includes("SELECT 1 AS healthy"), 'Health endpoint deve testar conexão real com o Turso.');
 assert(health.includes('mercadoPago:'), 'Health endpoint precisa reportar Mercado Pago.');
+assert(health.includes('pix:'), 'Health endpoint precisa reportar PIX.');
+assert(health.includes('notifications:'), 'Health endpoint precisa reportar notificações.');
 assert(health.includes('recaptcha:'), 'Health endpoint precisa reportar reCAPTCHA.');
 
 const rootVercel = JSON.parse(read('../vercel.json'));
@@ -93,9 +123,9 @@ for (const route of ['/login','/cadastro','/portal','/admin']) {
 }
 
 const serverFiles = [
-  'api/auth.js','api/customer.js','api/admin.js','api/stripe-webhook.js','api/mercadopago-webhook.js','api/health.js',
-  'api/_lib/auth.js','api/_lib/db.js','api/_lib/email.js','api/_lib/http.js','api/_lib/license.js','api/_lib/mercadopago.js','api/_lib/recaptcha.js',
-  '../api/auth.js','../api/customer.js','../api/admin.js','../api/stripe-webhook.js','../api/mercadopago-webhook.js','../api/health.js',
+  'api/auth.js','api/customer.js','api/admin.js','api/stripe-webhook.js','api/mercadopago-webhook.js','api/notifications.js','api/health.js',
+  'api/_lib/auth.js','api/_lib/db.js','api/_lib/email.js','api/_lib/http.js','api/_lib/license.js','api/_lib/mercadopago.js','api/_lib/recaptcha.js','api/_lib/notifications.js',
+  '../api/auth.js','../api/customer.js','../api/admin.js','../api/stripe-webhook.js','../api/mercadopago-webhook.js','../api/notifications.js','../api/health.js',
 ];
 for (const file of serverFiles) {
   const result = spawnSync(process.execPath, ['--check', resolve(root, file)], { encoding: 'utf8' });
