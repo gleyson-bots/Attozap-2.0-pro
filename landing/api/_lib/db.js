@@ -60,6 +60,26 @@ const schema = [
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(plan_id) REFERENCES plans(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS payments (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    provider_payment_id TEXT UNIQUE,
+    method TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'brl',
+    external_reference TEXT,
+    qr_code TEXT,
+    ticket_url TEXT,
+    expires_at TEXT,
+    paid_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(plan_id) REFERENCES plans(id)
+  )`,
   `CREATE TABLE IF NOT EXISTS licenses (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -104,6 +124,17 @@ const schema = [
     FOREIGN KEY(external_customer_id) REFERENCES external_customers(id) ON DELETE CASCADE,
     FOREIGN KEY(plan_id) REFERENCES plans(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'info',
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    metadata_json TEXT,
+    read_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
   `CREATE TABLE IF NOT EXISTS releases (
     id TEXT PRIMARY KEY,
     version TEXT NOT NULL,
@@ -138,10 +169,13 @@ const schema = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
   `CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id,status)`,
+  `CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id,created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(provider,status,updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_licenses_user ON licenses(user_id,status)`,
   `CREATE INDEX IF NOT EXISTS idx_licenses_subscription ON licenses(subscription_id)`,
   `CREATE INDEX IF NOT EXISTS idx_external_customers_email ON external_customers(email)`,
   `CREATE INDEX IF NOT EXISTS idx_external_licenses_customer ON external_licenses(external_customer_id,status)`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id,read_at,created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_releases_channel ON releases(channel,active,published_at DESC)`,
 ];
 
@@ -233,6 +267,7 @@ export function publicPlan(row) {
     features: safeJson(row.features_json), active: Boolean(row.active), featured: Boolean(row.featured),
     stripeConfigured: Boolean(row.stripe_price_id && process.env.STRIPE_SECRET_KEY),
     mercadoPagoConfigured: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && Number(row.price_cents) > 0),
+    pixConfigured: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && Number(row.price_cents) > 0),
     sortOrder: row.sort_order,
   };
 }
