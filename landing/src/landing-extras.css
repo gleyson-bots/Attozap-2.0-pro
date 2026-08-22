@@ -1,0 +1,1 @@
+.public-legal-links{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:center;margin-top:14px}.public-legal-links a{color:var(--text-muted,#7f8da3);text-decoration:none;font-size:11px;transition:color .2s ease}.public-legal-links a:hover{color:var(--text,#f7fbff)}@media(max-width:640px){.public-legal-links{gap:10px 14px;padding:0 14px}}

@@ -1,0 +1,57 @@
+name: Microsoft Store Package
+
+on:
+  push:
+    branches: ["feat/foundation-v2", "main"]
+  workflow_dispatch:
+
+concurrency:
+  group: microsoft-store-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  appx:
+    runs-on: windows-latest
+    env:
+      STORE_IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
+      STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}
+      STORE_PUBLISHER_DISPLAY_NAME: ${{ vars.STORE_PUBLISHER_DISPLAY_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build application
+        run: npm run build
+      - name: Generate Store assets
+        shell: pwsh
+        run: ./tools/generate-appx-assets.ps1
+      - name: Show Store identity mode
+        shell: pwsh
+        run: |
+          if ($env:STORE_IDENTITY_NAME -and $env:STORE_PUBLISHER) {
+            Write-Host "Partner Center identity configured: $env:STORE_IDENTITY_NAME / $env:STORE_PUBLISHER"
+          } else {
+            Write-Warning "Partner Center identity variables are not configured. This is a structural preflight package, not the final Store submission package."
+          }
+      - name: Build Store AppX MSIX package
+        run: npx electron-builder --config store-builder.cjs --win appx --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Verify package output
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem release-store -Include '*.appx','*.msix' -Recurse | Select-Object -First 1
+          if (-not $package) { throw 'Microsoft Store AppX/MSIX package was not generated' }
+          Write-Host "STORE_PACKAGE=$($package.FullName) SIZE=$($package.Length)"
+      - name: Upload Store package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATTOZAP-Microsoft-Store-package
+          path: |
+            release-store/*.appx
+            release-store/*.msix
+          if-no-files-found: error
+          retention-days: 30

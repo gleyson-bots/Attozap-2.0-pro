@@ -1,0 +1,45 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "cd landing && npm install --no-audit --no-fund",
+  "buildCommand": "cd landing && npm run build",
+  "outputDirectory": "landing/dist",
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/login", "destination": "/index.html" },
+    { "source": "/cadastro", "destination": "/index.html" },
+    { "source": "/forgot-password", "destination": "/forgot-password/index.html" },
+    { "source": "/reset-password", "destination": "/reset-password/index.html" },
+    { "source": "/membros", "destination": "/membros/index.html" },
+    { "source": "/atualizacoes", "destination": "/atualizacoes/index.html" },
+    { "source": "/termos", "destination": "/termos/index.html" },
+    { "source": "/privacidade", "destination": "/privacidade/index.html" },
+    { "source": "/condicoes", "destination": "/condicoes/index.html" },
+    { "source": "/licenca", "destination": "/licenca/index.html" },
+    { "source": "/lgpd", "destination": "/lgpd/index.html" },
+    { "source": "/portal", "destination": "/index.html" },
+    { "source": "/portal/:path*", "destination": "/index.html" },
+    { "source": "/admin/operacoes", "destination": "/admin/operacoes/index.html" },
+    { "source": "/admin", "destination": "/index.html" },
+    { "source": "/admin/:path*", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" }
+      ]
+    }
+  ]
+}

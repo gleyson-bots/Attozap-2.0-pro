@@ -1,0 +1,25 @@
+name: Landing CI
+
+on:
+  push:
+    branches: ["landing"]
+    paths:
+      - "landing/**"
+      - ".github/workflows/landing-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: landing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build landing
+        run: npm run build
