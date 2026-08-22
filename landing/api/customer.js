@@ -11,6 +11,10 @@ function stripeClient() {
   return new Stripe(process.env.STRIPE_SECRET_KEY);
 }
 
+function mercadoPagoReady() {
+  return Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN && process.env.MERCADOPAGO_WEBHOOK_SECRET);
+}
+
 function subscriptionView(row) {
   if (!row) return null;
   return {
@@ -74,8 +78,8 @@ export default async function handler(req, res) {
         licenses: licenses.rows.map(licenseView),
         paymentProviders: {
           stripe: Boolean(process.env.STRIPE_SECRET_KEY),
-          mercadoPago: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN),
-          pix: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN),
+          mercadoPago: mercadoPagoReady(),
+          pix: mercadoPagoReady(),
         },
         releases: releases.rows.map(row => ({ id: row.id, version: row.version, channel: row.channel, downloadUrl: row.download_url, notes: row.notes, mandatory: Boolean(row.mandatory), publishedAt: row.published_at })),
       });
@@ -89,7 +93,7 @@ export default async function handler(req, res) {
       const plan = (await db().execute({ sql: `SELECT * FROM plans WHERE (id=? OR slug=?) AND active=1 LIMIT 1`, args: [input.planId || '', input.planId || ''] })).rows[0];
       if (!plan) throw Object.assign(new Error('Plano não encontrado'), { statusCode: 404 });
       if (plan.slug === 'enterprise') throw Object.assign(new Error('Enterprise é contratado por proposta comercial'), { statusCode: 400 });
-      if (!process.env.MERCADOPAGO_ACCESS_TOKEN) throw Object.assign(new Error('PIX ainda não configurado no Mercado Pago'), { statusCode: 503 });
+      if (!mercadoPagoReady()) throw Object.assign(new Error('PIX ainda não configurado por completo no Mercado Pago'), { statusCode: 503 });
       const activeRecurring = (await db().execute({
         sql: `SELECT id,provider FROM subscriptions WHERE user_id=? AND status IN ('active','trialing') ORDER BY updated_at DESC LIMIT 1`,
         args: [user.id],
@@ -140,7 +144,7 @@ export default async function handler(req, res) {
       })).rows[0];
 
       if (provider === 'mercadopago') {
-        if (!process.env.MERCADOPAGO_ACCESS_TOKEN) throw Object.assign(new Error('Mercado Pago ainda não configurado'), { statusCode: 503 });
+        if (!mercadoPagoReady()) throw Object.assign(new Error('Mercado Pago ainda não configurado por completo'), { statusCode: 503 });
         if (current) {
           if (current.provider === 'mercadopago' && current.plan_id === plan.id) throw Object.assign(new Error('Este plano já está ativo no Mercado Pago'), { statusCode: 409 });
           throw Object.assign(new Error('Você já possui uma assinatura ativa. Cancele ou gerencie a assinatura atual antes de contratar outro plano.'), { statusCode: 409 });
