@@ -48,8 +48,36 @@ export async function sendWelcome(user) {
   return send(user.email, 'Bem-vindo ao ATTOZAP', shell({
     eyebrow: 'Conta criada',
     title: `Bem-vindo, ${user.name}.`,
-    intro: 'Seu portal ATTOZAP está pronto. Por ele você acompanha plano, cobrança, licenças e novas versões do WASender Pro.',
+    intro: 'Seu portal ATTOZAP está pronto. Por ele você acompanha plano, cobrança, licenças, indicações e novas versões do WASender Pro.',
     ctaLabel: 'Abrir meu portal', ctaUrl: `${APP_URL}/portal`,
+  }));
+}
+
+export async function sendPasswordReset(user, token) {
+  const link = `${APP_URL}/reset-password?token=${encodeURIComponent(token)}`;
+  const body = `<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0b0e16" style="width:100%;background-color:#0b0e16;border:1px solid #252a3b;border-radius:12px;"><tr><td style="padding-top:16px;padding-right:18px;padding-bottom:16px;padding-left:18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:21px;color:#aeb9c9;">Este link expira em <strong style="color:#f7fbff;">30 minutos</strong> e só pode ser usado uma vez. Se você não solicitou a redefinição, ignore este e-mail.</td></tr></table>`;
+  return send(user.email, 'Redefina sua senha do ATTOZAP', shell({
+    eyebrow: 'Segurança da conta', title: 'Redefina sua senha.',
+    intro: `Olá, ${escapeHtml(user.name)}. Recebemos uma solicitação para trocar a senha da sua conta ATTOZAP.`, body,
+    ctaLabel: 'Criar nova senha', ctaUrl: link,
+    footer: 'ATTOZAP · Link de segurança com uso único e expiração automática.',
+  }));
+}
+
+export async function sendPasswordChanged(user) {
+  return send(user.email, 'Sua senha do ATTOZAP foi alterada', shell({
+    eyebrow: 'Segurança confirmada', title: 'Senha alterada com sucesso.',
+    intro: 'A senha da sua conta foi atualizada. Se você não realizou essa alteração, entre em contato com o suporte imediatamente.',
+    ctaLabel: 'Entrar no portal', ctaUrl: `${APP_URL}/login`,
+  }));
+}
+
+export async function sendReferralReward(user, amountCents) {
+  const value = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(amountCents || 0) / 100);
+  return send(user.email, `Você ganhou ${value} no Indique e Ganhe ATTOZAP`, shell({
+    eyebrow: 'Indique e Ganhe', title: 'Sua indicação virou recompensa.',
+    intro: `Uma pessoa indicada por você realizou o primeiro pagamento aprovado. Sua recompensa de ${escapeHtml(value)} já aparece na área de membros.`,
+    ctaLabel: 'Ver minhas indicações', ctaUrl: `${APP_URL}/membros`,
   }));
 }
 
@@ -69,7 +97,7 @@ export async function sendReleaseNotice(user, release) {
     eyebrow: release.mandatory ? 'Atualização importante' : 'Nova versão',
     title: `${release.version} já está disponível.`,
     intro: 'Acompanhe as novidades e baixe a versão publicada pelo painel administrativo.', body,
-    ctaLabel: 'Baixar atualização', ctaUrl: release.download_url || `${APP_URL}/portal`,
+    ctaLabel: 'Ver atualização', ctaUrl: `${APP_URL}/atualizacoes`,
   }));
 }
 
