@@ -2,7 +2,8 @@ import Stripe from 'stripe';
 import { audit, db, ensureSchema, publicPlan, publicUser, safeJson } from './_lib/db.js';
 import { requireUser } from './_lib/auth.js';
 import { resignLicense } from './_lib/license.js';
-import { cancelMercadoPagoSubscription, createMercadoPagoSubscription } from './_lib/mercadopago.js';
+import { cancelMercadoPagoSubscription, createMercadoPagoPixPayment, createMercadoPagoSubscription } from './_lib/mercadopago.js';
+import { notifyUser } from './_lib/notifications.js';
 import { body, fail, json, origin } from './_lib/http.js';
 
 function stripeClient() {
@@ -32,6 +33,15 @@ function licenseView(row) {
   };
 }
 
+function paymentView(row) {
+  return {
+    id: row.id, providerPaymentId: row.provider_payment_id, provider: row.provider, method: row.method,
+    status: row.status, amountCents: row.amount_cents, currency: row.currency, planId: row.plan_id,
+    planName: row.plan_name || null, ticketUrl: row.ticket_url || null, expiresAt: row.expires_at || null,
+    paidAt: row.paid_at || null, createdAt: row.created_at,
+  };
+}
+
 export default async function handler(req, res) {
   try {
     await ensureSchema();
@@ -50,14 +60,23 @@ export default async function handler(req, res) {
         sql: `SELECT l.*,p.name AS plan_name FROM licenses l JOIN plans p ON p.id=l.plan_id WHERE l.user_id=? ORDER BY l.created_at DESC`,
         args: [user.id],
       });
+      const payments = await db().execute({
+        sql: `SELECT pay.*,p.name AS plan_name FROM payments pay JOIN plans p ON p.id=pay.plan_id WHERE pay.user_id=? ORDER BY pay.created_at DESC LIMIT 30`,
+        args: [user.id],
+      });
       const releases = await db().execute(`SELECT * FROM releases WHERE active=1 ORDER BY published_at DESC LIMIT 20`);
       return json(res, 200, {
         ok: true,
         user: publicUser(user),
         plans: plans.rows.map(publicPlan),
         subscriptions: subscriptions.rows.map(subscriptionView),
+        payments: payments.rows.map(paymentView),
         licenses: licenses.rows.map(licenseView),
-        paymentProviders: { stripe: Boolean(process.env.STRIPE_SECRET_KEY), mercadoPago: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN) },
+        paymentProviders: {
+          stripe: Boolean(process.env.STRIPE_SECRET_KEY),
+          mercadoPago: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN),
+          pix: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN),
+        },
         releases: releases.rows.map(row => ({ id: row.id, version: row.version, channel: row.channel, downloadUrl: row.download_url, notes: row.notes, mandatory: Boolean(row.mandatory), publishedAt: row.published_at })),
       });
     }
@@ -65,6 +84,50 @@ export default async function handler(req, res) {
     if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Método não permitido' });
     const input = await body(req);
     const action = String(input.action || '');
+
+    if (action === 'createPix') {
+      const plan = (await db().execute({ sql: `SELECT * FROM plans WHERE (id=? OR slug=?) AND active=1 LIMIT 1`, args: [input.planId || '', input.planId || ''] })).rows[0];
+      if (!plan) throw Object.assign(new Error('Plano não encontrado'), { statusCode: 404 });
+      if (plan.slug === 'enterprise') throw Object.assign(new Error('Enterprise é contratado por proposta comercial'), { statusCode: 400 });
+      if (!process.env.MERCADOPAGO_ACCESS_TOKEN) throw Object.assign(new Error('PIX ainda não configurado no Mercado Pago'), { statusCode: 503 });
+      const activeRecurring = (await db().execute({
+        sql: `SELECT id,provider FROM subscriptions WHERE user_id=? AND status IN ('active','trialing') ORDER BY updated_at DESC LIMIT 1`,
+        args: [user.id],
+      })).rows[0];
+      if (activeRecurring) throw Object.assign(new Error('Você já possui uma assinatura recorrente ativa. Gerencie-a antes de comprar um período via PIX.'), { statusCode: 409 });
+
+      const payment = await createMercadoPagoPixPayment({ user, plan, payerDocument: input.payerDocument, baseUrl: origin(req) });
+      const transaction = payment.point_of_interaction?.transaction_data || {};
+      const id = `pix_${payment.id}`;
+      await db().execute({
+        sql: `INSERT INTO payments (id,user_id,plan_id,provider,provider_payment_id,method,status,amount_cents,currency,external_reference,qr_code,ticket_url,expires_at)
+              VALUES (?,?,?,'mercadopago',?,'pix',?,?,?,?,?,?,?)
+              ON CONFLICT(provider_payment_id) DO UPDATE SET status=excluded.status,qr_code=excluded.qr_code,ticket_url=excluded.ticket_url,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP`,
+        args: [id,user.id,plan.id,String(payment.id),String(payment.status || 'pending'),Number(plan.price_cents),String(payment.currency_id || 'BRL').toLowerCase(),String(payment.external_reference || ''),String(transaction.qr_code || ''),String(transaction.ticket_url || ''),payment.pixExpiresAt || payment.date_of_expiration || null],
+      });
+      await audit(user.id, 'billing.pix.create', 'payment', id, { providerPaymentId: payment.id, planId: plan.id, amountCents: plan.price_cents });
+      await notifyUser(user.id, {
+        type: 'payment', title: 'PIX gerado',
+        message: `Seu PIX do plano ${plan.name} foi gerado. A licença será liberada automaticamente após a confirmação do pagamento.`,
+        metadata: { paymentId: id, planId: plan.id },
+      });
+      return json(res, 201, {
+        ok: true,
+        pix: {
+          id, providerPaymentId: String(payment.id), status: String(payment.status || 'pending'),
+          planId: plan.id, planName: plan.name, amountCents: Number(plan.price_cents),
+          qrCode: String(transaction.qr_code || ''), qrCodeBase64: String(transaction.qr_code_base64 || ''),
+          ticketUrl: String(transaction.ticket_url || ''), expiresAt: payment.pixExpiresAt || payment.date_of_expiration || null,
+        },
+      });
+    }
+
+    if (action === 'pixStatus') {
+      const id = String(input.paymentId || '');
+      const row = (await db().execute({ sql: `SELECT * FROM payments WHERE id=? AND user_id=? AND method='pix' LIMIT 1`, args: [id,user.id] })).rows[0];
+      if (!row) throw Object.assign(new Error('Pagamento PIX não encontrado'), { statusCode: 404 });
+      return json(res, 200, { ok: true, payment: paymentView(row) });
+    }
 
     if (action === 'checkout') {
       const plan = (await db().execute({ sql: `SELECT * FROM plans WHERE (id=? OR slug=?) AND active=1 LIMIT 1`, args: [input.planId || '', input.planId || ''] })).rows[0];
@@ -91,6 +154,7 @@ export default async function handler(req, res) {
           args: [recordId,user.id,plan.id,String(preapproval.id),String(preapproval.status || 'pending'),preapproval.next_payment_date || null],
         });
         await audit(user.id, 'billing.mercadopago.create', 'subscription', recordId, { providerId: preapproval.id, planId: plan.id });
+        await notifyUser(user.id, { type: 'payment', title: 'Assinatura criada', message: `A assinatura Mercado Pago do plano ${plan.name} foi iniciada.`, metadata: { subscriptionId: recordId } });
         return json(res, 200, { ok: true, url: preapproval.init_point, mode: 'mercadopago_subscription', provider: 'mercadopago' });
       }
 
@@ -138,6 +202,7 @@ export default async function handler(req, res) {
         await cancelMercadoPagoSubscription(subscription.provider_subscription_id);
         await db().execute({ sql: `UPDATE subscriptions SET status='canceled',updated_at=CURRENT_TIMESTAMP WHERE id=?`, args: [subscription.id] });
         await audit(user.id, 'billing.mercadopago.cancel', 'subscription', subscription.id, { providerId: subscription.provider_subscription_id });
+        await notifyUser(user.id, { type: 'warning', title: 'Assinatura cancelada', message: 'Sua assinatura Mercado Pago foi cancelada.', metadata: { subscriptionId: subscription.id } });
         return json(res, 200, { ok: true, message: 'Assinatura Mercado Pago cancelada.' });
       }
       if (!user.stripe_customer_id) throw Object.assign(new Error('Conta Stripe não vinculada'), { statusCode: 409 });
@@ -150,6 +215,7 @@ export default async function handler(req, res) {
       const found = await db().execute({ sql: `SELECT id FROM licenses WHERE id=? AND user_id=? LIMIT 1`, args: [licenseId, user.id] });
       if (!found.rows[0]) throw Object.assign(new Error('Licença não encontrada'), { statusCode: 404 });
       await audit(user.id, 'license.reset.request', 'license', licenseId, { reason: String(input.reason || '') });
+      await notifyUser(user.id, { type: 'info', title: 'Reset solicitado', message: 'Sua solicitação de redefinição de dispositivo foi registrada.', metadata: { licenseId } });
       return json(res, 200, { ok: true, message: 'Solicitação registrada. O administrador ou suporte poderá liberar a troca de dispositivo.' });
     }
 
@@ -161,6 +227,7 @@ export default async function handler(req, res) {
       if (!license) throw Object.assign(new Error('Licença ativa não encontrada'), { statusCode: 404 });
       if (license.fingerprint && license.fingerprint !== fingerprint) throw Object.assign(new Error('Esta licença já está vinculada a outro dispositivo. Solicite uma redefinição.'), { statusCode: 409 });
       const resigned = await resignLicense(licenseId, { fingerprint, actorId: user.id });
+      await notifyUser(user.id, { type: 'license', title: 'Dispositivo vinculado', message: 'A licença foi vinculada ao fingerprint informado.', metadata: { licenseId } });
       return json(res, 200, { ok: true, license: licenseView(resigned) });
     }
 
