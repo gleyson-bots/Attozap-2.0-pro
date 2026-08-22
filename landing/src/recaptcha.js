@@ -4,14 +4,10 @@ let widgetId = null;
 let widgetHost = null;
 let loadingPromise = null;
 
-function recaptchaApi() {
-  return window.grecaptcha;
-}
+function recaptchaApi() { return window.grecaptcha; }
 
 function resetWidget() {
-  try {
-    if (widgetId !== null && recaptchaApi()) recaptchaApi().reset(widgetId);
-  } catch {}
+  try { if (widgetId !== null && recaptchaApi()) recaptchaApi().reset(widgetId); } catch {}
 }
 
 function currentToken() {
@@ -25,7 +21,6 @@ function loadGoogleScript() {
   if (!siteKey) return Promise.resolve(false);
   if (recaptchaApi()?.render) return Promise.resolve(true);
   if (loadingPromise) return loadingPromise;
-
   loadingPromise = new Promise((resolve, reject) => {
     const existing = document.querySelector('script[data-attozap-recaptcha]');
     if (existing) {
@@ -39,20 +34,28 @@ function loadGoogleScript() {
     window.__attozapRecaptchaReady = () => resolve(true);
     const script = document.createElement('script');
     script.src = 'https://www.google.com/recaptcha/api.js?onload=__attozapRecaptchaReady&render=explicit&hl=pt-BR';
-    script.async = true;
-    script.defer = true;
-    script.dataset.attozapRecaptcha = 'true';
+    script.async = true; script.defer = true; script.dataset.attozapRecaptcha = 'true';
     script.onerror = () => reject(new Error('Falha ao carregar o reCAPTCHA'));
     document.head.appendChild(script);
   });
   return loadingPromise;
 }
 
-async function renderWidget() {
-  if (!siteKey) return;
+function resolveShell() {
+  const recoveryHost = document.querySelector('[data-recovery-recaptcha]');
+  if (recoveryHost) {
+    let shell = recoveryHost.querySelector('[data-recaptcha-shell]');
+    if (!shell) {
+      shell = document.createElement('div');
+      shell.className = 'recaptcha-shell';
+      shell.dataset.recaptchaShell = 'true';
+      shell.innerHTML = '<div class="recaptcha-loading">Carregando verificação de segurança…</div><div class="recaptcha-widget"></div>';
+      recoveryHost.appendChild(shell);
+    }
+    return shell;
+  }
   const form = document.querySelector('.auth-form');
-  if (!form) return;
-
+  if (!form) return null;
   let shell = form.querySelector('[data-recaptcha-shell]');
   if (!shell) {
     shell = document.createElement('div');
@@ -60,11 +63,15 @@ async function renderWidget() {
     shell.dataset.recaptchaShell = 'true';
     shell.innerHTML = '<div class="recaptcha-loading">Carregando verificação de segurança…</div><div class="recaptcha-widget"></div>';
     const submit = form.querySelector('button[type="submit"],button.portal-button');
-    if (submit) form.insertBefore(shell, submit);
-    else form.appendChild(shell);
+    if (submit) form.insertBefore(shell, submit); else form.appendChild(shell);
   }
+  return shell;
+}
 
-  if (widgetHost === shell && widgetId !== null) return;
+async function renderWidget() {
+  if (!siteKey) return;
+  const shell = resolveShell();
+  if (!shell || widgetHost === shell && widgetId !== null) return;
   try {
     await loadGoogleScript();
     if (!document.contains(shell)) return;
@@ -72,9 +79,7 @@ async function renderWidget() {
     const loading = shell.querySelector('.recaptcha-loading');
     if (!target || target.childNodes.length) return;
     widgetId = recaptchaApi().render(target, {
-      sitekey: siteKey,
-      theme: 'dark',
-      size: 'normal',
+      sitekey: siteKey, theme: 'dark', size: 'normal',
       callback: () => shell.classList.add('verified'),
       'expired-callback': () => shell.classList.remove('verified'),
       'error-callback': () => shell.classList.remove('verified'),
@@ -91,22 +96,16 @@ function patchAuthFetch() {
   if (!siteKey || window.__attozapRecaptchaFetchPatched) return;
   window.__attozapRecaptchaFetchPatched = true;
   const nativeFetch = window.fetch.bind(window);
-
   window.fetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : input?.url || '';
     const method = String(init?.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
-    if (!/\/api\/auth(?:\?|$)/.test(url) || method !== 'POST' || !init?.body) {
-      return nativeFetch(input, init);
-    }
-
+    if (!/\/api\/auth(?:\?|$)/.test(url) || method !== 'POST' || !init?.body) return nativeFetch(input, init);
     let payload;
     try { payload = JSON.parse(String(init.body)); } catch { return nativeFetch(input, init); }
     if (!['login','register'].includes(String(payload.action || ''))) return nativeFetch(input, init);
-
     const token = currentToken();
     if (!token) throw new Error('Marque a caixa “Não sou um robô” para continuar.');
     payload.recaptchaToken = token;
-
     const response = await nativeFetch(input, { ...init, body: JSON.stringify(payload) });
     if (!response.ok) resetWidget();
     return response;
@@ -115,6 +114,8 @@ function patchAuthFetch() {
 
 export function initRecaptcha() {
   if (!siteKey) return;
+  window.__attozapGetRecaptchaToken = currentToken;
+  window.__attozapResetRecaptcha = resetWidget;
   patchAuthFetch();
   const observer = new MutationObserver(() => { void renderWidget(); });
   observer.observe(document.documentElement, { childList: true, subtree: true });
